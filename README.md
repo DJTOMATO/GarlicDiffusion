@@ -24,6 +24,16 @@ Every image below was rendered and AI-upscaled **100% locally on a PS4 Pro (FW 1
 
 ---
 
+## Use It on Your PS4 TV — or From Any Browser
+
+Control everything with a DualShock 4 directly on your TV, or open **`http://<PS4_IP>:8081`** from any PC, phone, or tablet on your Wi-Fi:
+
+| PS4 TV Studio (DualShock 4 Dropdowns & Sliders) | Browser Web Studio (`http://<PS4_IP>:8081`) |
+| :---: | :---: |
+| ![GarlicDiffusion PS4 TV Studio UI](docs/samples/ps4_ui.jpg) | ![GarlicDiffusion Browser Web Studio UI](docs/samples/pc_ui.png) |
+
+---
+
 ## What It Does
 
 | Feature | Details |
