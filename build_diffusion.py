@@ -47,7 +47,7 @@ CFLAGS = [
 ENV = dict(os.environ, DOTNET_ROLL_FORWARD="Major", OO_PS4_TOOLCHAIN=str(OO),
            DOTNET_SYSTEM_GLOBALIZATION_INVARIANT="1")
 
-TITLE, VERSION, TITLE_ID = "GarlicDiffusion", "1.00", "PSAI00003"
+TITLE, VERSION, TITLE_ID = "GarlicDiffusion", "1.10", "PSAI00003"
 CONTENT_ID = f"IV0000-{TITLE_ID}_00-PS4LOCALAIDIFF03"
 REMOTE = "/data/pkg/Garlic-Diffusion.pkg"
 
@@ -87,26 +87,96 @@ def ps4_ftp(timeout=30):
     return ftp
 
 
-def make_icons(sce_sys: Path):
-    ic = Image.new("RGB", (512, 512), (16, 24, 48))
-    d = ImageDraw.Draw(ic)
-    for y in range(512):
-        r = int(16 + 48 * y / 512)
-        g = int(28 + 30 * y / 512)
-        bl = int(68 + 110 * y / 512)
-        d.line([(0, y), (511, y)], fill=(r, g, bl))
-    d.ellipse([96, 96, 416, 416], outline=(100, 195, 255), width=14)
-    d.ellipse([156, 156, 356, 356], fill=(95, 178, 255), outline=(235, 245, 255), width=8)
-    ic.save(sce_sys / "icon0.png", optimize=True)
+def _bpath(start, *segments):
+    pts = [start]
+    for c1, c2, end in segments:
+        p0 = pts[-1]
+        for i in range(1, 25):
+            t = i / 24
+            a, b, c, e = (1 - t) ** 3, 3 * (1 - t) ** 2 * t, 3 * (1 - t) * t * t, t ** 3
+            pts.append((a * p0[0] + b * c1[0] + c * c2[0] + e * end[0], a * p0[1] + b * c1[1] + c * c2[1] + e * end[1]))
+    return pts
 
-    bg = Image.new("RGB", (1920, 1080), (10, 16, 29))
-    db = ImageDraw.Draw(bg)
-    for y in range(1080):
-        r = int(10 + 24 * y / 1080)
-        g = int(16 + 18 * y / 1080)
-        bl = int(32 + 52 * y / 1080)
-        db.line([(0, y), (1919, y)], fill=(r, g, bl))
-    bg.save(sce_sys / "pic1.png", optimize=True)
+
+BULB = _bpath((50, 15), ((51, 23), (56, 29), (66, 35)), ((80, 43), (88, 55), (88, 67)), ((88, 81), (74, 90), (50, 90)),
+              ((26, 90), (12, 81), (12, 67)), ((12, 55), (20, 43), (34, 35)), ((44, 29), (49, 23), (50, 15)))
+CLOVE = _bpath((50, 21), ((40, 38), (35, 70), (43, 89.6)), ((47.67, 90.13), (52.33, 90.13), (57, 89.6)),
+               ((65, 70), (60, 38), (50, 21)))
+SEAMS = [_bpath((44, 31), ((27, 44), (22, 68), (31, 87))), _bpath((56, 31), ((73, 44), (78, 68), (69, 87)))]
+
+
+def _garlic_mark(size):
+    from PIL import ImageFilter
+    S = size * 4
+    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    k = S / 100
+    d.polygon([(x * k, y * k) for x, y in BULB], fill=(230, 218, 196, 255))
+    d.polygon([(x * k, y * k) for x, y in CLOVE], fill=(246, 240, 228, 255))
+    for seam in SEAMS:
+        d.line([(x * k, y * k) for x, y in seam], fill=(201, 184, 156, 255), width=max(1, int(0.014 * S)), joint="curve")
+    mask = Image.new("L", img.size, 0)
+    ImageDraw.Draw(mask).ellipse([0.43 * S, 0.40 * S, 0.49 * S, 0.66 * S], fill=150)
+    mask = mask.filter(ImageFilter.GaussianBlur(0.025 * S))
+    white = Image.new("RGBA", img.size, (255, 255, 255, 255))
+    white.putalpha(Image.composite(mask, Image.new("L", img.size, 0), img.getchannel("A")))
+    img.alpha_composite(white)
+    shade = Image.new("L", img.size, 0)
+    ImageDraw.Draw(shade).ellipse([0.14 * S, 0.72 * S, 0.86 * S, 0.96 * S], fill=70)
+    shade = shade.filter(ImageFilter.GaussianBlur(0.05 * S))
+    dark = Image.new("RGBA", img.size, (120, 98, 70, 255))
+    dark.putalpha(Image.composite(shade, Image.new("L", img.size, 0), img.getchannel("A")))
+    img.alpha_composite(dark)
+    return img.resize((size, size), Image.LANCZOS)
+
+
+def _blue_bg(w, h, glow_at=(0.5, 0.42), glow_r=0.75):
+    import math
+    img = Image.new("RGB", (w, h))
+    px = img.load()
+    gx, gy = glow_at[0] * w, glow_at[1] * h
+    R = glow_r * max(w, h)
+    for y in range(h):
+        t = y / max(1, h - 1)
+        top, bot = (11, 30, 64), (4, 10, 26)
+        base = [top[i] + (bot[i] - top[i]) * t for i in range(3)]
+        for x in range(w):
+            dist = math.hypot(x - gx, y - gy) / R
+            g = max(0.0, 1 - dist) ** 2
+            px[x, y] = tuple(int(base[i] + g * (0, 75, 170)[i] * 0.58) for i in range(3))
+    return img
+
+
+def make_icons(sce_sys: Path):
+    from PIL import ImageFilter, ImageFont
+    W = 512
+    ic = _blue_bg(W, W, (0.5, 0.40), 0.75).convert("RGBA")
+    glow = Image.new("RGBA", (W, W), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).ellipse([116, 48, 396, 328], fill=(63, 169, 245, 95))
+    ic.alpha_composite(glow.filter(ImageFilter.GaussianBlur(38)))
+    g = _garlic_mark(280)
+    ic.alpha_composite(g, (116, 34))
+    font_path = PARENT / "pc" / "fonts_libres" / "Selawik" / "selawksb.ttf"
+    if not font_path.is_file():
+        for cand in [Path("C:/Windows/Fonts/seguisb.ttf"), Path("C:/Windows/Fonts/segoeuib.ttf"), Path("C:/Windows/Fonts/arialbd.ttf")]:
+            if cand.is_file():
+                font_path = cand
+                break
+    d = ImageDraw.Draw(ic)
+    if font_path.is_file():
+        f1 = ImageFont.truetype(str(font_path), 54)
+        f2 = ImageFont.truetype(str(font_path), 38)
+        t1, t2 = "Garlic", "DIFFUSION"
+        d.text(((W - d.textlength(t1, font=f1)) / 2, 332), t1, font=f1, fill=(255, 255, 255))
+        d.text(((W - d.textlength(t2, font=f2)) / 2, 398), t2, font=f2, fill=(63, 169, 245))
+    d.rectangle([W / 2 - 44, 464, W / 2 + 44, 468], fill=(61, 220, 151))
+    ic.convert("RGB").save(sce_sys / "icon0.png", optimize=True)
+
+    bg = _blue_bg(480, 270, (0.72, 0.55), 0.6).resize((1920, 1080), Image.BICUBIC).convert("RGBA")
+    gb = _garlic_mark(620)
+    gb.putalpha(gb.getchannel("A").point(lambda a: int(a * 0.16)))
+    bg.alpha_composite(gb, (1150, 260))
+    bg.convert("RGB").save(sce_sys / "pic1.png", optimize=True)
 
 
 def main():

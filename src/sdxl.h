@@ -136,7 +136,7 @@ typedef struct {
     float cfg_scale;
     uint64_t seed;
     int eco_mode;        // 0 = Turbo (36CU), 1 = Balanced (~25CU), 2 = Quiet (~20CU), 3 = Silent (~14CU)
-    int sampler;         // 0 = Euler a, 1 = Euler, 2 = LCM
+    int sampler;         // 0 = Euler a, 1 = Euler, 2 = LCM, 3 = DPM++ 2M Karras
 } SdxlParams;
 
 typedef struct {
@@ -144,7 +144,7 @@ typedef struct {
     uint32_t height;
     uint32_t steps;
     float cfg;
-    int sampler;         // 0 = Euler a, 1 = Euler, 2 = LCM
+    int sampler;         // 0 = Euler a, 1 = Euler, 2 = LCM, 3 = DPM++ 2M Karras
     int upscale;         // 0 = Off, 1 = 1080p Anime (RealESRGAN), 2 = 2x Anime HD
     char description[96];
     char prompt[512];

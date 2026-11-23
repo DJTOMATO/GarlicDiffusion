@@ -164,7 +164,7 @@ void clip_tok_free(ClipTok* t) {
 }
 
 static void encode_word(const ClipTok* t, const uint8_t* w, size_t wlen,
-                        uint32_t* dst, uint32_t* n_dst, uint32_t max_dst) {
+                        uint32_t* dst, float* dst_w, float cur_w, uint32_t* n_dst, uint32_t max_dst) {
     if (wlen == 0 || *n_dst >= max_dst) return;
     uint32_t syms[256];
     uint32_t ns = 0;
@@ -198,19 +198,130 @@ static void encode_word(const ClipTok* t, const uint8_t* w, size_t wlen,
         for (uint32_t i = best_pos + 1; i + 1 < ns; i++) syms[i] = syms[i + 1];
         ns--;
     }
-    for (uint32_t i = 0; i < ns && *n_dst < max_dst; i++) dst[(*n_dst)++] = syms[i];
+    for (uint32_t i = 0; i < ns && *n_dst < max_dst; i++) {
+        if (dst_w) dst_w[*n_dst] = cur_w;
+        dst[(*n_dst)++] = syms[i];
+    }
 }
 
-// CLIP pre-tokenization: lowercase + contractions + letters + digits + non-space punctuation runs
-uint32_t clip_tok_encode(const ClipTok* t, const char* text, uint32_t out_ids[CLIP_MAX_LEN], uint32_t pad_id) {
+// Check if '(' at `open_p` has a matching `)` or `:weight)` and whether it is an A1111 weight group
+// vs a Danbooru character qualifier like `rem (re:zero)`.
+static int probe_weight_paren(const uint8_t* open_p, int at_tag_start,
+                              const uint8_t** colon_out, const uint8_t** close_out, float* mult_out) {
+    int depth = 0;
+    const uint8_t* last_colon = NULL;
+    for (const uint8_t* q = open_p; *q; q++) {
+        if (*q == '\\' && q[1]) { q++; continue; }
+        if (*q == '(') {
+            depth++;
+        } else if (*q == ':' && depth == 1) {
+            last_colon = q;
+        } else if (*q == ')') {
+            depth--;
+            if (depth == 0) {
+                if (last_colon) {
+                    const char* num_s = (const char*)(last_colon + 1);
+                    while (*num_s == ' ') num_s++;
+                    char* endp = NULL;
+                    float v = strtof(num_s, &endp);
+                    while (endp && *endp == ' ') endp++;
+                    if (endp == (const char*)q && endp > num_s && v >= 0.0f && v <= 10.0f) {
+                        *colon_out = last_colon;
+                        *close_out = q;
+                        *mult_out = v;
+                        return 1;
+                    }
+                }
+                // Bare (tag) without :weight is treated as 1.1x emphasis if it starts at a tag boundary or is doubled ((tag))
+                if (at_tag_start || open_p[1] == '(') {
+                    *colon_out = NULL;
+                    *close_out = q;
+                    *mult_out = 1.1f;
+                    return 1;
+                }
+                return 0;
+            }
+        }
+    }
+    return 0;
+}
+
+uint32_t clip_tok_encode_weighted(const ClipTok* t, const char* text,
+                                  uint32_t out_ids[CLIP_MAX_LEN], float out_weights[CLIP_MAX_LEN], uint32_t pad_id) {
     uint32_t n = 0;
+    for (uint32_t i = 0; i < CLIP_MAX_LEN; i++) {
+        if (out_weights) out_weights[i] = 1.0f;
+    }
     out_ids[n++] = CLIP_BOS;
     const uint8_t* p = (const uint8_t*)(text ? text : "");
     uint8_t word[256];
 
+    // Weight stack for nested A1111 (tag:1.3), ((tag)), [tag]
+    struct {
+        const uint8_t* colon_pos;
+        const uint8_t* close_pos;
+        float mult;
+    } wstack[16];
+    int wtop = 0;
+    float cur_w = 1.0f;
+    int at_tag_start = 1;
+
     while (*p && n < CLIP_MAX_LEN - 1) {
         while (*p && isspace(*p)) p++;
         if (!*p) break;
+
+        // Pop weight group if we reached its `:weight)` or `)` or `]`
+        if (wtop > 0) {
+            if (wstack[wtop - 1].colon_pos && p == wstack[wtop - 1].colon_pos) {
+                p = wstack[wtop - 1].close_pos + 1;
+                wtop--;
+                cur_w = 1.0f;
+                for (int i = 0; i < wtop; i++) cur_w *= wstack[i].mult;
+                continue;
+            }
+            if (p == wstack[wtop - 1].close_pos) {
+                p++;
+                wtop--;
+                cur_w = 1.0f;
+                for (int i = 0; i < wtop; i++) cur_w *= wstack[i].mult;
+                continue;
+            }
+        }
+
+        // Check for escaped \( or \)
+        if (*p == '\\' && (p[1] == '(' || p[1] == ')' || p[1] == '[' || p[1] == ']')) {
+            p++;
+            word[0] = *p++;
+            encode_word(t, word, 1, out_ids, out_weights, cur_w, &n, CLIP_MAX_LEN - 1);
+            at_tag_start = 0;
+            continue;
+        }
+
+        // Check for opening A1111 weight group '(' or '['
+        if (*p == '(' && wtop < 15) {
+            const uint8_t *cpos = NULL, *rpos = NULL;
+            float mult = 1.1f;
+            if (probe_weight_paren(p, at_tag_start, &cpos, &rpos, &mult)) {
+                wstack[wtop].colon_pos = cpos;
+                wstack[wtop].close_pos = rpos;
+                wstack[wtop].mult = mult;
+                wtop++;
+                cur_w *= mult;
+                p++;
+                continue;
+            }
+        } else if (*p == '[' && at_tag_start && wtop < 15) {
+            const uint8_t* rpos = (const uint8_t*)strchr((const char*)p + 1, ']');
+            if (rpos) {
+                wstack[wtop].colon_pos = NULL;
+                wstack[wtop].close_pos = rpos;
+                wstack[wtop].mult = 1.0f / 1.1f;
+                wtop++;
+                cur_w *= (1.0f / 1.1f);
+                p++;
+                continue;
+            }
+        }
 
         size_t wl = 0;
         // Check English contractions: 's, 't, 're, 've, 'm, 'll, 'd
@@ -229,21 +340,31 @@ uint32_t clip_tok_encode(const ClipTok* t, const char* text, uint32_t out_ids[CL
                     word[wl++] = (*p < 0x80) ? (uint8_t)tolower(*p) : *p;
                     p++;
                 }
+                at_tag_start = 0;
             } else if (isdigit(*p)) {
                 // CLIP regex splits digits one-by-one (\p{N})
                 word[wl++] = *p++;
+                at_tag_start = 0;
             } else {
                 while (*p && !isspace(*p) && !isalnum(*p) && *p < 0x80 && wl < 250) {
                     if (*p == '\'' && wl > 0) break;
+                    if (wtop > 0 && (p == wstack[wtop - 1].colon_pos || p == wstack[wtop - 1].close_pos)) break;
+                    if (*p == '(' && wl > 0) break;
+                    if (*p == ',') at_tag_start = 1;
                     word[wl++] = *p++;
                 }
             }
         }
-        encode_word(t, word, wl, out_ids, &n, CLIP_MAX_LEN - 1);
+        encode_word(t, word, wl, out_ids, out_weights, cur_w, &n, CLIP_MAX_LEN - 1);
     }
 
     uint32_t eos_pos = n;
     out_ids[n++] = CLIP_EOS;
     while (n < CLIP_MAX_LEN) out_ids[n++] = pad_id;
     return eos_pos;
+}
+
+// CLIP pre-tokenization: lowercase + contractions + letters + digits + non-space punctuation runs
+uint32_t clip_tok_encode(const ClipTok* t, const char* text, uint32_t out_ids[CLIP_MAX_LEN], uint32_t pad_id) {
+    return clip_tok_encode_weighted(t, text, out_ids, NULL, pad_id);
 }

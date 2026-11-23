@@ -1060,13 +1060,41 @@ static int run_clip(SdxlEngine* e, const SdxlPack* p, const uint32_t tokens[CLIP
     return gpu_flush(e);
 }
 
+// Apply Automatic1111 mean-preserving token weight multipliers to CLIP hidden states [CLIP_MAX_LEN, C]
+static void apply_clip_token_weights(uint64_t buf_addr, uint32_t C, const float weights[CLIP_MAX_LEN]) {
+    int has_w = 0;
+    for (uint32_t s = 0; s < CLIP_MAX_LEN; s++) {
+        if (fabsf(weights[s] - 1.0f) > 1e-4f) { has_w = 1; break; }
+    }
+    if (!has_w) return;
+    float* z = (float*)(uintptr_t)buf_addr;
+    size_t total = (size_t)CLIP_MAX_LEN * C;
+    double sum0 = 0.0, sum1 = 0.0;
+    for (size_t i = 0; i < total; i++) sum0 += z[i];
+    for (uint32_t s = 0; s < CLIP_MAX_LEN; s++) {
+        float w = weights[s];
+        float* row = z + (size_t)s * C;
+        for (uint32_t c = 0; c < C; c++) {
+            row[c] *= w;
+            sum1 += row[c];
+        }
+    }
+    if (fabs(sum1) > 1e-6 && fabs(sum0) > 1e-6) {
+        float rescale = (float)(sum0 / sum1);
+        for (size_t i = 0; i < total; i++) z[i] *= rescale;
+    }
+}
+
 static int encode_prompt(SdxlEngine* e, const char* text, int force_zero_empty,
                          uint64_t ctx_out, uint64_t pooled_out) {
     if (e->is_sd15) {
         // SD 1.5: CLIP-L with Clip Skip 2 (layer 10 + final_layer_norm), empty prompt encoded as BOS/EOS!
         uint32_t ids_l[CLIP_MAX_LEN];
-        clip_tok_encode(&e->tok, text ? text : "", ids_l, CLIP_EOS);
-        return run_clip(e, &e->clip_l, ids_l, 0, 12, 768, 12, 1 /* quick_gelu */, ctx_out, 0, 1);
+        float w_l[CLIP_MAX_LEN];
+        clip_tok_encode_weighted(&e->tok, text ? text : "", ids_l, w_l, CLIP_EOS);
+        if (run_clip(e, &e->clip_l, ids_l, 0, 12, 768, 12, 1 /* quick_gelu */, ctx_out, 0, 1)) return -1;
+        apply_clip_token_weights(ctx_out, 768, w_l);
+        return 0;
     }
     if (force_zero_empty && (!text || !text[0])) {
         memset((void*)(uintptr_t)ctx_out, 0, CLIP_MAX_LEN * 2048u * 4u);
@@ -1074,11 +1102,14 @@ static int encode_prompt(SdxlEngine* e, const char* text, int force_zero_empty,
         return 0;
     }
     uint32_t ids_l[CLIP_MAX_LEN], ids_g[CLIP_MAX_LEN];
-    clip_tok_encode(&e->tok, text, ids_l, CLIP_EOS);
-    uint32_t eos_g = clip_tok_encode(&e->tok, text, ids_g, 0);
+    float w_l[CLIP_MAX_LEN], w_g[CLIP_MAX_LEN];
+    clip_tok_encode_weighted(&e->tok, text, ids_l, w_l, CLIP_EOS);
+    uint32_t eos_g = clip_tok_encode_weighted(&e->tok, text, ids_g, w_g, 0);
 
     if (run_clip(e, &e->clip_l, ids_l, 0, 12, 768, 12, 1 /* quick_gelu */, e->tmp_cl, 0, 0)) return -1;
     if (run_clip(e, &e->clip_g, ids_g, eos_g, 32, 1280, 20, 2 /* gelu_exact */, e->tmp_cg, pooled_out, 0)) return -1;
+    apply_clip_token_weights(e->tmp_cl, 768, w_l);
+    apply_clip_token_weights(e->tmp_cg, 1280, w_g);
     op_concat(e, e->tmp_cl, e->tmp_cg, ctx_out, CLIP_MAX_LEN, 768, 1280);
     return gpu_flush(e);
 }
@@ -1682,8 +1713,9 @@ static void rng_randn(Rng* r, float* dst, size_t n) {
     }
 }
 
-static void build_sigmas(uint32_t steps, float* timesteps_out, float* sigmas_out) {
+static void build_sigmas(uint32_t steps, int sampler, float* timesteps_out, float* sigmas_out) {
     static double sig_all[1000];
+    static double log_sig[1000];
     static int inited = 0;
     if (!inited) {
         double sb0 = sqrt(0.00085), sb1 = sqrt(0.012);
@@ -1693,26 +1725,53 @@ static void build_sigmas(uint32_t steps, float* timesteps_out, float* sigmas_out
             double beta = sb * sb;
             ac *= (1.0 - beta);
             sig_all[i] = sqrt((1.0 - ac) / ac);
+            log_sig[i] = log(sig_all[i]);
         }
         inited = 1;
     }
-    if (steps <= 10u) {
-        // Trailing spacing (optimal for 4-8 step SDXL-Lightning / Hyper-SDXL LoRAs: starts at t=999)
+
+    // Use Karras et al. (2022) sigma schedule (rho = 7.0) for DPM++ 2M Karras (sampler == 3)
+    // and for Euler a / Euler when steps >= 10, concentrating steps in the medium/low-sigma regime
+    // where anime eyes, pupils, eyelashes, mouths, and fingers crystallize!
+    if (sampler == 3 || (sampler != 2 && steps >= 10u)) {
+        const double rho = 7.0;
+        const double inv_rho = 1.0 / rho;
+        const double s_max = sig_all[999];
+        const double s_min = (steps <= 8u) ? sig_all[25] : sig_all[0]; // ~0.10 for 8-step, 0.0292 for >=9 steps
+        const double smax_r = pow(s_max, inv_rho);
+        const double smin_r = pow(s_min, inv_rho);
+        for (uint32_t i = 0; i < steps; i++) {
+            double u = (steps > 1u) ? ((double)i / (double)(steps - 1u)) : 0.0;
+            double sig = pow(smax_r + u * (smin_r - smax_r), rho);
+            double lsig = log(sig);
+            // Continuous log-SNR interpolation (k-diffusion sigma_to_t)
+            double t_cont = 0.0;
+            if (lsig <= log_sig[0]) {
+                t_cont = 0.0;
+            } else if (lsig >= log_sig[999]) {
+                t_cont = 999.0;
+            } else {
+                int lo = 0, hi = 998;
+                while (lo <= hi) {
+                    int mid = (lo + hi) >> 1;
+                    if (log_sig[mid + 1] < lsig) lo = mid + 1;
+                    else if (log_sig[mid] > lsig) hi = mid - 1;
+                    else { lo = mid; break; }
+                }
+                double denom = log_sig[lo + 1] - log_sig[lo];
+                double w = (denom > 1e-12) ? ((lsig - log_sig[lo]) / denom) : 0.0;
+                t_cont = (double)lo + w;
+            }
+            timesteps_out[i] = (float)t_cont;
+            sigmas_out[i] = (float)sig;
+        }
+    } else {
+        // Trailing spacing starting at t=999 (used for LCM/DMD2 at any step count, and 4-8 step Hyper-SD Euler)
         double step = 1000.0 / (double)steps;
         for (uint32_t i = 0; i < steps; i++) {
             int t = (int)lround(999.0 - (double)i * step);
             if (t < 0) t = 0;
             if (t > 999) t = 999;
-            timesteps_out[i] = (float)t;
-            sigmas_out[i] = (float)sig_all[t];
-        }
-    } else {
-        // Leading spacing + steps_offset = 1 (matches standard Illustrious scheduler_config.json)
-        uint32_t ratio = 1000u / steps;
-        for (uint32_t i = 0; i < steps; i++) {
-            uint32_t rev = steps - 1u - i;
-            uint32_t t = rev * ratio + 1u;
-            if (t > 999u) t = 999u;
             timesteps_out[i] = (float)t;
             sigmas_out[i] = (float)sig_all[t];
         }
@@ -2208,12 +2267,12 @@ void sdxl_load_preset(const char* model_dir, const char* model_name, int is_sd15
         out->width = 768; out->height = 1024;
         out->upscale = 0;
         snprintf(out->prompt, sizeof(out->prompt),
-                 "masterpiece, best quality, amazing quality, 1girl, silver hair, blue eyes, glowing sakura petals, night sky, anime style");
+                 "masterpiece, best quality, absurdres, 1girl, solo, upper body, silver hair, blue eyes, closed mouth, smile, sakura petals, night sky, anime");
         snprintf(out->negative, sizeof(out->negative),
-                 "lowres, bad anatomy, bad hands, text, error, blurry, worst quality, low quality");
+                 "lowres, bad anatomy, bad eyes, worst quality, low quality, nsfw");
         if (ci_has(model_name, "dmd")) {
-            out->steps = 6; out->cfg = 1.0f; out->sampler = 2; // LCM (1 pass/step!)
-            snprintf(out->description, sizeof(out->description), "SDXL DMD2 Ultra-Fast (CFG 1.0 · 6 steps · ~45s)");
+            out->steps = 6; out->cfg = 1.4f; out->sampler = 2; // LCM with light CFG so negative prompt works!
+            snprintf(out->description, sizeof(out->description), "SDXL DMD2 Fast (CFG 1.4 · 6 steps · Negative Active)");
         } else if (ci_has(model_name, "8step") || ci_has(model_name, "hyper")) {
             out->steps = 8; out->cfg = 3.5f; out->sampler = 1; // Euler
             snprintf(out->description, sizeof(out->description), "SDXL 8-step Hyper-SD (Euler · CFG 3.5)");
@@ -2221,14 +2280,14 @@ void sdxl_load_preset(const char* model_dir, const char* model_name, int is_sd15
             out->steps = 6; out->cfg = 2.0f; out->sampler = 1; // Euler
             snprintf(out->description, sizeof(out->description), "SDXL Native Fast (Euler · 6 steps)");
         } else if (ci_has(model_name, "animagine")) {
-            out->steps = 20; out->cfg = 5.0f; out->sampler = 0;
-            snprintf(out->description, sizeof(out->description), "SDXL Animagine XL 4.0 · Clean modern anime");
+            out->steps = 20; out->cfg = 5.0f; out->sampler = 3;
+            snprintf(out->description, sizeof(out->description), "SDXL Animagine XL 4.0 · DPM++ 2M Karras");
         } else if (ci_has(model_name, "noob")) {
-            out->steps = 20; out->cfg = 5.5f; out->sampler = 0;
-            snprintf(out->description, sizeof(out->description), "SDXL NoobAI-XL 1.1 · Crisp Danbooru anime");
+            out->steps = 20; out->cfg = 5.5f; out->sampler = 3;
+            snprintf(out->description, sizeof(out->description), "SDXL NoobAI-XL 1.1 · DPM++ 2M Karras");
         } else {
-            out->steps = 20; out->cfg = 7.0f; out->sampler = 0;
-            snprintf(out->description, sizeof(out->description), "SDXL Full Quality (Euler a · 20 steps)");
+            out->steps = 20; out->cfg = 6.5f; out->sampler = 3;
+            snprintf(out->description, sizeof(out->description), "SDXL Full Quality (DPM++ 2M Karras · 20 steps)");
         }
     }
 
@@ -2263,7 +2322,8 @@ void sdxl_load_preset(const char* model_dir, const char* model_name, int is_sd15
             else if (strcmp(k, "cfg") == 0) out->cfg = (float)atof(v);
             else if (strcmp(k, "upscale") == 0) out->upscale = atoi(v);
             else if (strcmp(k, "sampler") == 0) {
-                if (ci_has(v, "lcm")) out->sampler = 2;
+                if (ci_has(v, "dpm")) out->sampler = 3;
+                else if (ci_has(v, "lcm")) out->sampler = 2;
                 else if (strcmp(v, "Euler") == 0 || strcmp(v, "euler") == 0) out->sampler = 1;
                 else out->sampler = 0;
             } else if (strcmp(k, "description") == 0) snprintf(out->description, sizeof(out->description), "%s", v);
@@ -2282,9 +2342,21 @@ int sdxl_upscale_rgb(SdxlEngine* e, const uint8_t* src_rgb, uint32_t src_w, uint
                      SdxlProgressFn progress, SdxlCancelFn cancel, void* user) {
     if (!e->has_upscaler || upscale_mode <= 0) return -1;
 
-    // Compute exact target dimensions (mode 1 = 1080p Fit, mode 2 = 2x HD, capped at 1920 long edge)
+    // Compute exact target dimensions:
+    //   mode 1 = 1080p Fit (capped at 1920 long edge)
+    //   mode 2 = 2x HD (capped at 1920 long edge)
+    //   mode 3 = 4K UHD Fit (short edge 2160, capped at 3840 long edge, max 4x RealESRGAN)
     uint32_t dw = src_w, dh = src_h;
-    if (upscale_mode == 1) {
+    if (upscale_mode == 3) {
+        double s = 2160.0 / (double)(src_w < src_h ? src_w : src_h);
+        if (s < 1.0) s = 1.0;
+        if (s > 4.0) s = 4.0;
+        double lw = (double)src_w * s, lh = (double)src_h * s;
+        double mx = lw > lh ? lw : lh;
+        if (mx > 3840.0) { lw *= 3840.0 / mx; lh *= 3840.0 / mx; }
+        dw = ((uint32_t)(lw + 1.0)) & ~1u;
+        dh = ((uint32_t)(lh + 1.0)) & ~1u;
+    } else if (upscale_mode == 1) {
         double s = 1080.0 / (double)(src_w < src_h ? src_w : src_h);
         if (s < 1.0) s = 1.0;
         if (s > 4.0) s = 4.0;
@@ -2308,6 +2380,13 @@ int sdxl_upscale_rgb(SdxlEngine* e, const uint8_t* src_rgb, uint32_t src_w, uint
     float* wgt = (float*)calloc((size_t)dw * dh, sizeof(float));
     float* tile4 = (float*)malloc((size_t)(TILE * 4) * (TILE * 4) * 3 * sizeof(float));
     uint8_t* out_rgb = (uint8_t*)malloc((size_t)dw * dh * 3);
+    // Graceful fallback to 1080p if 4K CPU accumulator exceeds free flex RAM (e.g. Base PS4)
+    if ((!acc || !wgt || !tile4 || !out_rgb) && upscale_mode == 3) {
+        free(acc); free(wgt); free(tile4); free(out_rgb);
+        glog("upscale 4K (%ux%u) OOM on flex heap -> falling back to 1080p", dw, dh);
+        return sdxl_upscale_rgb(e, src_rgb, src_w, src_h, dst_rgb_out, dst_w_out, dst_h_out,
+                                1, eco_mode, progress, cancel, user);
+    }
     if (!acc || !wgt || !tile4 || !out_rgb) {
         free(acc); free(wgt); free(tile4); free(out_rgb);
         fail(e, "oom upscaler");
@@ -2559,13 +2638,19 @@ int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
     glog("clip: cond=%.1f ms, uncond=%.1f ms", e->stats.clip_l_ms, e->stats.clip_g_ms);
 
     float timesteps[64], sigmas[65];
-    build_sigmas(steps, timesteps, sigmas);
+    build_sigmas(steps, p->sampler, timesteps, sigmas);
 
     uint32_t LH = H / 8u, LW = W / 8u;
     size_t lat_n = (size_t)LH * LW * 4u;
     float* lat = (float*)malloc(lat_n * sizeof(float));
     float* noise = (float*)malloc(lat_n * sizeof(float));
-    if (!lat || !noise) { free(lat); free(noise); e->cancel_fn = NULL; fail(e, "oom latent"); return -1; }
+    float* old_denoised = (float*)malloc(lat_n * sizeof(float));
+    if (!lat || !noise || !old_denoised) {
+        free(lat); free(noise); free(old_denoised);
+        e->cancel_fn = NULL; fail(e, "oom latent"); return -1;
+    }
+    float old_h = 0.0f;
+    int has_old_d = 0;
 
     Rng rng;
     rng_seed(&rng, p->seed ? p->seed : 42ull);
@@ -2578,7 +2663,7 @@ int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
     double tu_start = now_sec(e);
 
     for (uint32_t s = 0; s < steps; s++) {
-        if (cancel && cancel(user)) { free(lat); free(noise); e->cancel_fn = NULL; return 1; }
+        if (cancel && cancel(user)) { free(lat); free(noise); free(old_denoised); e->cancel_fn = NULL; return 1; }
         int cur_t = sdxl_read_temp_c(NULL, NULL);
         if (cur_t > e->stats.temp_peak_c) e->stats.temp_peak_c = cur_t;
         char msg[128];
@@ -2594,9 +2679,9 @@ int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
 
         double ts0 = now_sec(e);
         int ur0 = unet_forward(e, e->lat_in, timesteps[s], e->ctx_cond, e->pool_cond, H, W, e->eps_c);
-        if (ur0 != 0) { free(lat); free(noise); e->cancel_fn = NULL; return ur0; }
+        if (ur0 != 0) { free(lat); free(noise); free(old_denoised); e->cancel_fn = NULL; return ur0; }
         double cond_ms = (now_sec(e) - ts0) * 1000.0;
-        if (cancel && cancel(user)) { free(lat); free(noise); e->cancel_fn = NULL; return 1; }
+        if (cancel && cancel(user)) { free(lat); free(noise); free(old_denoised); e->cancel_fn = NULL; return 1; }
 
         const float* ec = (const float*)(uintptr_t)e->eps_c;
         const float* eu = NULL;
@@ -2604,7 +2689,7 @@ int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
         if (cfg > 1.001f) {
             double ts1 = now_sec(e);
             int ur1 = unet_forward(e, e->lat_in, timesteps[s], e->ctx_uncond, e->pool_uncond, H, W, e->eps_u);
-            if (ur1 != 0) { free(lat); free(noise); e->cancel_fn = NULL; return ur1; }
+            if (ur1 != 0) { free(lat); free(noise); free(old_denoised); e->cancel_fn = NULL; return ur1; }
             uncond_ms = (now_sec(e) - ts1) * 1000.0;
             eu = (const float*)(uintptr_t)e->eps_u;
         }
@@ -2613,13 +2698,63 @@ int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
             glog("  step %2u/%u: cond=%.0f ms, uncond=%.0f ms", s + 1, steps, cond_ms, uncond_ms);
         }
 
-        // Sampler update: 0 = Euler a, 1 = Euler, 2 = LCM (Latent Consistency / DMD2)
-        if (p->sampler == 2) {
-            if (sigma_next > 0.0f) rng_randn(&rng, noise, lat_n);
+        // For LCM / DMD2 with CFG > 1.0 (negative prompt active), compute Lin et al. (2023) CFG variance rescale
+        // (phi = 0.7) so negative prompts cleanly fix eyes/hands without over-saturating distilled models!
+        float cfg_rescale = 1.0f;
+        if (p->sampler == 2 && eu != NULL) {
+            double sum_c = 0.0, sq_c = 0.0, sum_g = 0.0, sq_g = 0.0;
+            for (size_t i = 0; i < lat_n; i++) {
+                double vc = ec[i];
+                double vg = eu[i] + cfg * (ec[i] - eu[i]);
+                sum_c += vc; sq_c += vc * vc;
+                sum_g += vg; sq_g += vg * vg;
+            }
+            double n_d = (double)lat_n;
+            double var_c = (sq_c / n_d) - (sum_c / n_d) * (sum_c / n_d);
+            double var_g = (sq_g / n_d) - (sum_g / n_d) * (sum_g / n_d);
+            if (var_g > var_c && var_c > 1e-8) {
+                float ratio = (float)sqrt(var_c / var_g);
+                cfg_rescale = 0.7f * ratio + 0.3f;
+            }
+        }
+
+        // Sampler update:
+        //   0 = Euler a (Karras for >=10 steps)
+        //   1 = Euler (Karras for >=10 steps)
+        //   2 = LCM (Latent Consistency / DMD2 with variance-preserving late-step refinement)
+        //   3 = DPM++ 2M Karras (2nd-order multistep ODE solver in log-SNR space)
+        if (p->sampler == 3) {
+            float h = (sigma_next > 0.0f && sigma > 0.0f) ? (logf(sigma) - logf(sigma_next)) : 0.0f;
+            float alpha_ratio = (sigma > 0.0f) ? (sigma_next / sigma) : 0.0f;
+            float c_d = 1.0f - alpha_ratio;
+            float r = (has_old_d && h > 1e-6f) ? (old_h / h) : 0.0f;
+            float inv_2r = (r > 1e-6f) ? (0.5f / r) : 0.0f;
             for (size_t i = 0; i < lat_n; i++) {
                 float eps = eu ? (eu[i] + cfg * (ec[i] - eu[i])) : ec[i];
+                float d = lat[i] - sigma * eps;
+                if (sigma_next <= 0.0f) {
+                    lat[i] = d;
+                } else {
+                    float d_corr = has_old_d ? ((1.0f + inv_2r) * d - inv_2r * old_denoised[i]) : d;
+                    lat[i] = alpha_ratio * lat[i] + c_d * d_corr;
+                }
+                old_denoised[i] = d;
+            }
+            old_h = h;
+            has_old_d = 1;
+        } else if (p->sampler == 2) {
+            if (sigma_next > 0.0f) rng_randn(&rng, noise, lat_n);
+            // Taper stochasticity gamma on final detail-forming step(s) when steps >= 7 while keeping exact sigma_next^2 variance!
+            float gamma = 1.0f;
+            if (steps >= 7u && sigma_next > 0.0f && sigma_next < 1.15f) {
+                gamma = (s + 2u >= steps) ? 0.45f : 0.75f;
+            }
+            float c_eps = sigma_next * sqrtf(1.0f - gamma * gamma);
+            float c_z   = sigma_next * gamma;
+            for (size_t i = 0; i < lat_n; i++) {
+                float eps = eu ? ((eu[i] + cfg * (ec[i] - eu[i])) * cfg_rescale) : ec[i];
                 float x0 = lat[i] - sigma * eps;
-                lat[i] = (sigma_next > 0.0f) ? (x0 + sigma_next * noise[i]) : x0;
+                lat[i] = (sigma_next > 0.0f) ? (x0 + c_eps * eps + c_z * noise[i]) : x0;
             }
         } else {
             float sigma_up = 0.0f;
@@ -2654,6 +2789,7 @@ int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
     e->stats.vae_gpu_ms = e->gpu_acc_sec * 1000.0;
     free(lat);
     free(noise);
+    free(old_denoised);
     e->cancel_fn = NULL;
     e->cancel_user = NULL;
     if (vr != 0) return vr;
@@ -2663,10 +2799,10 @@ int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
     e->stats.temp_end_c = sdxl_read_temp_c(NULL, NULL);
     if (e->stats.temp_end_c > e->stats.temp_peak_c) e->stats.temp_peak_c = e->stats.temp_end_c;
 
-    static const char* SMP_LOG[3] = {"EulerA", "Euler", "LCM"};
+    static const char* SMP_LOG[4] = {"EulerA", "Euler", "LCM", "DPM2MKarras"};
     glog("stats %s %ux%u %usteps cfg=%.1f %s %s | total=%.2fs | unet=%.2fs (gpu=%.2fs, %.0fms/step, %.2f TFLOPS, %.0f GFLOPs) | vae=%.2fs (%d tiles) | cool=%.2fs",
          e->is_sd15 ? "SD1.5" : "SDXL", W, H, steps, (double)cfg,
-         SMP_LOG[(p->sampler >= 0 && p->sampler <= 2) ? p->sampler : 0], sdxl_eco_name_ex(eco, e->neo),
+         SMP_LOG[(p->sampler >= 0 && p->sampler <= 3) ? p->sampler : 0], sdxl_eco_name_ex(eco, e->neo),
          e->stats.total_sec,
          e->stats.unet_total_ms / 1000.0, e->stats.unet_gpu_ms / 1000.0,
          e->stats.unet_total_ms / (double)steps, e->stats.effective_tflops, e->stats.total_gflops,

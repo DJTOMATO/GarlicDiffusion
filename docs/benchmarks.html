@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hardware Benchmarks &amp; Bare-Metal GCN Architecture — GarlicDiffusion PS4</title>
+<meta name="description" content="Complete PS4 Pro Neo and Base PS4 hardware benchmarks, Quality Tier comparisons, CU thermal power scaling curves, Direct Memory layout, and OpenCL GCN kernel architecture.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+  <div class="wrap nav-in">
+    <a class="brand" href="index.html"><img src="logo.svg" alt="GarlicDiffusion logo"> <span>Garlic <span style="color:#3fa9f5">Diffusion</span></span> <span class="chip ok">v1.10 PS4</span></a>
+    <div class="nav-links">
+      <a href="index.html">Overview</a>
+      <a href="scenic.html">Scenic Gallery</a>
+      <a class="active" href="benchmarks.html">Benchmarks &amp; Tech</a>
+      <a href="index.html#credits">Credits &amp; QR</a>
+      <a href="https://ko-fi.com/djtomato" target="_blank" rel="noopener" style="color:#55e6b0">Ko-fi</a>
+      <a href="https://discord.gg/Gbyq3kpGjc" target="_blank" rel="noopener">Discord / Community</a>
+      <a href="https://github.com/DJTOMATO/GarlicDiffusion" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<main class="wrap">
+  <div class="hero compact">
+    <div class="pill">40+ Verified Hardware Runs · PS4 Pro Neo (FW 11.00) · Zero Fabricated Numbers</div>
+    <h1>Benchmarks &amp; GCN Deep-Dive</h1>
+    <p class="sub">Every millisecond below was logged directly by hardware GPU command-buffer timestamps and TSC timers on a PlayStation 4 Pro (`CUH-7xxx`, FW 11.00, GoldHEN) in <b>Quiet (20 CU)</b> and <b>Silent (14 CU)</b> modes.</p>
+  </div>
+
+  <!-- 1. QUALITY TIERS VISUAL & TIMING PROGRESSION -->
+  <section id="tiers">
+    <h2>1. Speed vs. Quality Tier Progression</h2>
+    <p class="lead">How much faster is a quick 4-step draft compared to a full 1080p or 1024×1024 render? Here is the exact progression measured on hardware:</p>
+
+    <h3>SDXL (`WAI_Illustrious_v17_dmd2` · Quiet 20 CU · LCM)</h3>
+    <div class="samples" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin-bottom:26px">
+      <div class="scard sq">
+        <img loading="lazy" src="samples/v17_tier_fast.jpg" alt="SDXL Fast Draft 512x512 4 steps 17.79s">
+        <div class="smeta">
+          <div><b>⚡ Fast Draft — 17.79s</b><div class="subline">512×512 · 4 steps · CFG 1.0 · Native (UNet 5.67s · VAE 8.62s)</div></div>
+          <div class="chips"><span class="chip ok">17.79s</span><span class="chip">1.12 TF</span></div>
+        </div>
+      </div>
+      <div class="scard sq">
+        <img loading="lazy" src="samples/v17_tier_mid.jpg" alt="SDXL Balanced Mid 768x768 6 steps 40.06s">
+        <div class="smeta">
+          <div><b>⚖️ Mid Balanced — 40.06s</b><div class="subline">768×768 · 6 steps · CFG 1.0 · Native (UNet 19.55s · VAE 15.33s)</div></div>
+          <div class="chips"><span class="chip ok">40.06s</span><span class="chip">1.12 TF</span></div>
+        </div>
+      </div>
+      <div class="scard sq">
+        <img loading="lazy" src="samples/v17_tier_high_1024.jpg" alt="SDXL High Native 1024x1024 6 steps CFG 1.4 109.27s">
+        <div class="smeta">
+          <div><b>🎯 High Native 1MP (CFG 1.4) — 109.27s</b><div class="subline">1024×1024 · 6 steps · CFG 1.4 · Native (UNet 75.10s · VAE 23.95s)</div></div>
+          <div class="chips"><span class="chip ok">109.27s</span><span class="chip">1.08 TF</span></div>
+        </div>
+      </div>
+      <div class="scard sq">
+        <img loading="lazy" src="samples/v17_tier_ultra_1024_up.jpg" alt="SDXL Ultra 1024x1024 8 steps CFG 1.4 + RealESRGAN 161.70s">
+        <div class="smeta">
+          <div><b>💎 Ultra 8-Step CFG 1.4 + AI Up — 161.70s</b><div class="subline">1024×1024 → 1080×1080 · 8 stp CFG 1.4 + RealESRGAN (24.16s up)</div></div>
+          <div class="chips"><span class="chip ok">161.70s</span><span class="chip">Max Detail</span></div>
+        </div>
+      </div>
+    </div>
+
+    <h3>SD 1.5 (`MeinaMix_V11_8step` · Quiet 20 CU · Euler)</h3>
+    <div class="samples" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">
+      <div class="scard sq">
+        <img loading="lazy" src="samples/meina_tier_fast.jpg" alt="SD 1.5 Fast Draft 512x512 4 steps 17.28s">
+        <div class="smeta">
+          <div><b>⚡ Fast Draft — 17.28s</b><div class="subline">512×512 · 4 steps · CFG 3.0 · Native (UNet 6.73s · VAE 8.26s)</div></div>
+          <div class="chips"><span class="chip ok">17.28s</span><span class="chip">0.95 TF</span></div>
+        </div>
+      </div>
+      <div class="scard sq">
+        <img loading="lazy" src="samples/meina_tier_mid.jpg" alt="SD 1.5 Mid 512x512 8 steps 26.46s">
+        <div class="smeta">
+          <div><b>⚖️ Mid Native — 26.46s</b><div class="subline">512×512 · 8 steps · CFG 3.5 · Native (UNet 13.47s · VAE 8.27s)</div></div>
+          <div class="chips"><span class="chip ok">26.46s</span><span class="chip">0.95 TF</span></div>
+        </div>
+      </div>
+      <div class="scard">
+        <img loading="lazy" src="samples/meina_tier_high.jpg" alt="SD 1.5 High 12 steps 1080p 61.06s">
+        <div class="smeta">
+          <div><b>✨ High 12-Step 1080p — 61.06s</b><div class="subline">512×768 → 1080×1620 · 12 steps · CFG 4.0 + RealESRGAN (8.78s)</div></div>
+          <div class="chips"><span class="chip ok">61.06s</span><span class="chip">1080p HD</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. WHY DMD2 & HYPER-SD DISTILLATION MATTER ON PS4 -->
+  <section id="distillation">
+    <h2>2. Why DMD2 (6-Step) Beats Standard 20-Step SDXL by 4.5×</h2>
+    <p class="lead">Standard non-distilled SDXL at `CFG 7.0` requires <b>two UNet forward passes per step</b> (positive + negative prompt for classifier-free guidance) across 20 steps = <b>40 UNet evaluations</b>. By fusing <b>DMD2</b> into `WAI-Illustrious`, `CFG 1.0` needs only <b>6 UNet evaluations</b> (50.8s native / 67.6s 1080p), while <b>CFG 1.4 Guided</b> activates negative prompts with <b>12 evaluations</b> (77.0s 16:9 1080p / 101.0s portrait 1080p) — still 2.3×–4.5× faster than standard SDXL:</p>
+
+    <div class="card" style="margin-bottom:18px">
+      <div class="bar-row">
+        <div><b>SDXL + DMD2 (6 stp)</b></div>
+        <div class="bar-track"><div class="bar-fill" style="width:22.3%"></div></div>
+        <div class="num"><b>50.78s</b></div>
+      </div>
+      <div class="bar-row">
+        <div><b>SDXL + DMD2 + 1080p</b></div>
+        <div class="bar-track"><div class="bar-fill" style="width:29.6%"></div></div>
+        <div class="num"><b>67.59s</b></div>
+      </div>
+      <div class="bar-row" style="margin-bottom:0">
+        <div><b>Standard SDXL (20 stp)</b></div>
+        <div class="bar-track"><div class="bar-fill turbo" style="width:100%"></div></div>
+        <div class="num"><b>227.98s</b></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. MASTER BENCHMARK TABLE -->
+  <section id="matrix">
+    <h2>3. Master PS4 Pro Hardware Benchmark Matrix</h2>
+    <p class="lead">Complete breakdown of UNet GPU compute time, effective TFLOPS, tiled VAE decode time, Real-ESRGAN 1080p GPU upscale time, inter-block thermal cooldown rest, and total wall time.</p>
+
+    <div class="tscroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Tier / Category</th>
+            <th>Model</th>
+            <th>Arch</th>
+            <th>Framing</th>
+            <th>Gen → Output</th>
+            <th>Steps / CFG / Sampler</th>
+            <th>Power</th>
+            <th class="num">UNet GPU</th>
+            <th class="num">TFLOPS</th>
+            <th class="num">VAE</th>
+            <th class="num">AI Upscale</th>
+            <th class="num">Rest</th>
+            <th class="num">Total</th>
+            <th class="num">VRAM</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><b>⚡ Fast Draft</b></td><td>MeinaMix V11 8-Step</td><td>SD 1.5</td><td>Square 1:1</td><td>512×512</td><td>4 · CFG 3.0 · Euler</td><td>Quiet 20CU</td><td class="num">6.73s</td><td class="num">0.95</td><td class="num">8.26s</td><td class="num">—</td><td class="num">2.28s</td><td class="num"><b>17.28s</b></td><td class="num">1,713 MiB</td></tr>
+          <tr><td><b>⚡ Fast Draft</b></td><td>WAI-Illustrious v17 DMD2</td><td>SDXL</td><td>Square 1:1</td><td>512×512</td><td>4 · CFG 1.0 · LCM</td><td>Quiet 20CU</td><td class="num">5.67s</td><td class="num">1.12</td><td class="num">8.62s</td><td class="num">—</td><td class="num">3.60s</td><td class="num"><b>17.79s</b></td><td class="num">4,208 MiB</td></tr>
+          <tr><td><b>⚖️ Mid Native</b></td><td>MeinaMix V11 8-Step</td><td>SD 1.5</td><td>Square 1:1</td><td>512×512</td><td>8 · CFG 3.5 · Euler</td><td>Quiet 20CU</td><td class="num">13.47s</td><td class="num">0.95</td><td class="num">8.27s</td><td class="num">—</td><td class="num">4.20s</td><td class="num"><b>26.46s</b></td><td class="num">1,713 MiB</td></tr>
+          <tr><td><b>⚖️ Mid Native</b></td><td>WAI-Illustrious v17 DMD2</td><td>SDXL</td><td>Square 1:1</td><td>768×768</td><td>6 · CFG 1.0 · LCM</td><td>Quiet 20CU</td><td class="num">19.55s</td><td class="num">1.12</td><td class="num">15.33s</td><td class="num">—</td><td class="num">5.60s</td><td class="num"><b>40.06s</b></td><td class="num">4,208 MiB</td></tr>
+          <tr><td><b>⚖️ Mid Native</b></td><td>DreamShaper 8</td><td>SD 1.5</td><td>Square 1:1</td><td>512×512</td><td>15 · CFG 7.0 · Euler a</td><td>Quiet 20CU</td><td class="num">25.25s</td><td class="num">0.95</td><td class="num">8.26s</td><td class="num">—</td><td class="num">7.56s</td><td class="num"><b>41.75s</b></td><td class="num">1,713 MiB</td></tr>
+          <tr><td><b>✨ 1080p Showcase</b></td><td>MeinaMix V11 8-Step</td><td>SD 1.5</td><td>Upper Body</td><td>512×768 → 1080×1620</td><td>8 · CFG 3.5 · Euler</td><td>Quiet 20CU</td><td class="num">22.74s</td><td class="num">0.91</td><td class="num">11.01s</td><td class="num"><b>8.19s</b></td><td class="num">5.72s</td><td class="num"><b>46.47s</b></td><td class="num">1,713 MiB</td></tr>
+          <tr><td><b>⚖️ Portrait Native</b></td><td>WAI-Illustrious v17 / v14 DMD2</td><td>SDXL</td><td>Upper Body</td><td>768×1024</td><td>6 · CFG 1.0 · LCM</td><td>Quiet 20CU</td><td class="num">26.60s</td><td class="num">1.11</td><td class="num">19.18s</td><td class="num">—</td><td class="num">5.92s</td><td class="num"><b>50.78s</b></td><td class="num">4,208 MiB</td></tr>
+          <tr><td><b>🖥️ 16:9 Full HD</b></td><td>WAI-Illustrious v17 / v14 DMD2</td><td>SDXL</td><td>Panoramic 16:9</td><td>1024×576 → 1920×1080</td><td>6 · CFG 1.0 · LCM</td><td>Quiet 20CU</td><td class="num">19.56s</td><td class="num">1.12</td><td class="num">14.37s</td><td class="num"><b>12.04s</b></td><td class="num">9.12s</td><td class="num"><b>50.94s</b></td><td class="num">4,208 MiB</td></tr>
+          <tr><td><b>🖥️ 16:9 Full HD</b></td><td>MeinaMix V11 8-Step</td><td>SD 1.5</td><td>Panoramic 16:9</td><td>896×512 → 1890×1080</td><td>8 · CFG 3.5 · Euler</td><td>Quiet 20CU</td><td class="num">28.34s</td><td class="num">0.88</td><td class="num">13.77s</td><td class="num"><b>10.03s</b></td><td class="num">6.04s</td><td class="num"><b>56.90s</b></td><td class="num">1,713 MiB</td></tr>
+          <tr><td><b>✨ High 12-Step</b></td><td>MeinaMix V11 8-Step</td><td>SD 1.5</td><td>Upper Body</td><td>512×768 → 1080×1620</td><td>12 · CFG 4.0 · Euler</td><td>Quiet 20CU</td><td class="num">34.11s</td><td class="num">0.91</td><td class="num">11.02s</td><td class="num"><b>8.78s</b></td><td class="num">7.64s</td><td class="num"><b>61.06s</b></td><td class="num">1,713 MiB</td></tr>
+          <tr><td><b>✨ 1080p Showcase</b></td><td>WAI-Illustrious v14 DMD2</td><td>SDXL</td><td>Upper Body</td><td>768×1024 → 1080×1440</td><td>6 · CFG 1.0 · LCM</td><td>Quiet 20CU</td><td class="num">26.60s</td><td class="num">1.11</td><td class="num">19.15s</td><td class="num"><b>14.70s</b></td><td class="num">10.96s</td><td class="num"><b>65.52s</b></td><td class="num">4,208 MiB</td></tr>
+          <tr><td><b>🌙 Silent 1080p</b></td><td>MeinaMix V11 8-Step</td><td>SD 1.5</td><td>Upper Body</td><td>512×768 → 1080×1620</td><td>8 · CFG 3.5 · Euler</td><td><b>Silent 14CU</b></td><td class="num">35.68s</td><td class="num">0.58</td><td class="num">16.69s</td><td class="num"><b>10.15s</b></td><td class="num">7.15s</td><td class="num"><b>68.25s</b></td><td class="num">1,713 MiB</td></tr>
+          <tr><td><b>🌙 Silent 16:9 HD</b></td><td>WAI-Illustrious v14 DMD2</td><td>SDXL</td><td>Panoramic 16:9</td><td>1024×576 → 1920×1080</td><td>6 · CFG 1.0 · LCM</td><td><b>Silent 14CU</b></td><td class="num">31.30s</td><td class="num">0.70</td><td class="num">21.64s</td><td class="num"><b>14.28s</b></td><td class="num">11.40s</td><td class="num"><b>73.38s</b></td><td class="num">4,208 MiB</td></tr>
+          <tr><td><b>🖥️ 16:9 Guided HD</b></td><td>WAI-Illustrious v17 DMD2</td><td>SDXL</td><td>Panoramic 16:9</td><td>1024×576 → 1920×1080</td><td>6 · CFG 1.4 · LCM</td><td>Quiet 20CU</td><td class="num">39.12s</td><td class="num">1.12</td><td class="num">14.37s</td><td class="num"><b>13.52s</b></td><td class="num">13.44s</td><td class="num"><b>77.03s</b></td><td class="num">4,208 MiB</td></tr>
+          <tr><td><b>✨ 1080p Showcase</b></td><td>DreamShaper 8 / Anything V5</td><td>SD 1.5</td><td>Upper Body</td><td>512×768 → 1080×1620</td><td>20 · CFG 7.0 · Euler a</td><td>Quiet 20CU</td><td class="num">56.84s</td><td class="num">0.91</td><td class="num">11.03s</td><td class="num"><b>8.78s</b></td><td class="num">11.48s</td><td class="num"><b>88.33s</b></td><td class="num">1,713 MiB</td></tr>
+          <tr><td><b>✨ Guided 8-Step</b></td><td>WAI-Illustrious v17 DMD2</td><td>SDXL</td><td>Upper Body</td><td>768×1024 → 1080×1440</td><td>8 · CFG 1.4 · LCM</td><td><b>Balanced 25CU</b></td><td class="num">62.66s</td><td class="num">1.26</td><td class="num">15.58s</td><td class="num"><b>14.72s</b></td><td class="num">5.67s</td><td class="num"><b>98.28s</b></td><td class="num">4,208 MiB</td></tr>
+          <tr><td><b>🌙 Silent 1080p</b></td><td>WAI-Illustrious v17 DMD2</td><td>SDXL</td><td>Upper Body</td><td>768×1024 → 1080×1440</td><td>6 · CFG 1.0 · LCM</td><td><b>Silent 14CU</b></td><td class="num">42.52s</td><td class="num">0.70</td><td class="num">28.84s</td><td class="num"><b>21.04s</b></td><td class="num">13.70s</td><td class="num"><b>98.81s</b></td><td class="num">4,208 MiB</td></tr>
+          <tr><td><b>✨ Guided 1080p</b></td><td>WAI-Illustrious v14 DMD2</td><td>SDXL</td><td>Upper Body</td><td>768×1024 → 1080×1440</td><td>6 · CFG 1.4 · LCM</td><td>Quiet 20CU</td><td class="num">53.19s</td><td class="num">1.11</td><td class="num">19.16s</td><td class="num"><b>18.59s</b></td><td class="num">15.28s</td><td class="num"><b>101.02s</b></td><td class="num">4,208 MiB</td></tr>
+          <tr><td><b>🎯 High 1MP Guided</b></td><td>WAI-Illustrious v17 DMD2</td><td>SDXL</td><td>Square 1:1</td><td>1024×1024 (Native)</td><td>6 · CFG 1.4 · LCM</td><td>Quiet 20CU</td><td class="num">75.10s</td><td class="num">1.08</td><td class="num">23.95s</td><td class="num">—</td><td class="num">10.64s</td><td class="num"><b>109.27s</b></td><td class="num">4,208 MiB</td></tr>
+          <tr><td><b>✨ Hyper-SDXL 8-Step</b></td><td>waiNSFWIllustrious_v140_8step</td><td>SDXL</td><td>Upper Body</td><td>768×1024 → 1080×1440</td><td>8 · CFG 3.5 · Euler</td><td>Quiet 20CU</td><td class="num">70.92s</td><td class="num">1.11</td><td class="num">19.17s</td><td class="num"><b>18.46s</b></td><td class="num">18.16s</td><td class="num"><b>121.68s</b></td><td class="num">4,208 MiB</td></tr>
+          <tr><td><b>💎 Ultra 1MP Guided</b></td><td>WAI-Illustrious v17 DMD2</td><td>SDXL</td><td>Square 1:1</td><td>1024×1024 → 1080×1080</td><td>8 · CFG 1.4 · LCM</td><td>Quiet 20CU</td><td class="num">100.14s</td><td class="num">1.08</td><td class="num">23.95s</td><td class="num"><b>24.16s</b></td><td class="num">20.00s</td><td class="num"><b>161.70s</b></td><td class="num">4,208 MiB</td></tr>
+          <tr><td><b>🐢 Standard SDXL</b></td><td>waiNSFWIllustrious_v140 (Non-DMD2)</td><td>SDXL</td><td>Upper Body</td><td>768×1024 (Native)</td><td>20 · CFG 7.0 · Euler a</td><td>Quiet 20CU</td><td class="num">177.30s</td><td class="num">1.11</td><td class="num">19.16s</td><td class="num">—</td><td class="num">30.40s</td><td class="num"><b>227.98s</b></td><td class="num">4,208 MiB</td></tr>
+          <tr><td><b>💎 4K UHD (v1.10)</b></td><td>Any SDXL / SD 1.5 Model</td><td>SDXL / 1.5</td><td>16:9 / Portrait</td><td>1024×576 → 3840×2160</td><td>6–8 steps + 4K Upscale</td><td>Quiet 20CU</td><td class="num">19.6–39.1s</td><td class="num">1.12</td><td class="num">14.4–19.2s</td><td class="num"><i>~18–24s</i></td><td class="num">9–14s</td><td class="num"><i>~56–82s (PS4 Pro)</i></td><td class="num">4,208 MiB</td></tr>
+          <tr><td><b>🎮 Base PS4 / Slim</b></td><td>SD 1.5 (1.54 GiB) / SDXL (4.04 GiB)</td><td>18 CU GCN</td><td>All</td><td>512×768 / 768×1024</td><td>8 / 6 steps</td><td>Balanced 14CU</td><td class="num"><i>TBD</i></td><td class="num"><i>TBD</i></td><td class="num"><i>TBD</i></td><td class="num"><i>TBD</i></td><td class="num"><i>TBD</i></td><td class="num"><i>Submit in Issues!</i></td><td class="num">1.54 / 4.04 GiB</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 4. HARDWARE CU SCALING -->
+  <section id="cu-scaling">
+    <h2>4. Hardware Compute-Unit (CU) Power &amp; Thermal Scaling</h2>
+    <p class="lead">At boot, GarlicDiffusion runs a micro-benchmark (`gemm_q8 2304×1280×1280` + `attn_d64`) across all 4 hardware CU masks programmed via `SH_STATIC_THREAD_MGMT_SE0..SE3`:</p>
+
+    <div class="card">
+      <div class="bar-row">
+        <div><b>Turbo (36 CU · 100%)</b></div>
+        <div class="bar-track"><div class="bar-fill turbo" style="width:100%"></div></div>
+        <div class="num"><b>2.757 TF</b></div>
+      </div>
+      <div class="bar-row">
+        <div><b>Balanced (~25 CU · 70%)</b></div>
+        <div class="bar-track"><div class="bar-fill" style="width:69.5%"></div></div>
+        <div class="num"><b>1.915 TF</b></div>
+      </div>
+      <div class="bar-row">
+        <div><b>Quiet (~20 CU · 58%)</b></div>
+        <div class="bar-track"><div class="bar-fill" style="width:58.5%"></div></div>
+        <div class="num"><b>1.613 TF</b></div>
+      </div>
+      <div class="bar-row" style="margin-bottom:0">
+        <div><b>Silent (~14 CU · 35%)</b></div>
+        <div class="bar-track"><div class="bar-fill silent" style="width:35.8%"></div></div>
+        <div class="num"><b>0.986 TF</b></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. BARE-METAL GCN ARCHITECTURE -->
+  <section id="architecture">
+    <h2>5. Bare-Metal PS4 GCN (`gfx701`) Architecture</h2>
+    <div class="grid-2">
+      <div class="card">
+        <h3>22 Zero-Scratch OpenCL GCN Kernels (`48.9 KB`)</h3>
+        <p>Compiled with Zig's LLVM AMDGPU backend (`-target amdgcn-amd-amdhsa -mcpu=bonaire`) with <b>zero private scratch spills (`scratch=0`)</b> and <b>6 SGPRs</b> per kernel. Includes 3 LDS-tiled `Q8_0 × FP16` GEMM kernels (`128×128`, `128×64`, `64×64` using `16.9–17.4 KB` LDS), 5 fused FlashAttention kernels (`attn_d40`, `d64`, `d80`, `d160`, `d512`), `groupnorm_silu`, `geglu`, `im2col_3x3`, `prelu_inplace`, and `upsample2x`.</p>
+      </div>
+      <div class="card">
+        <h3>Direct ("Garlic") Memory Budget: Pro vs. Base PS4</h3>
+        <p>On PS4 Pro (`5120 MiB` direct memory, `4672 MiB` GPU pool), GarlicDiffusion allocates a `493 MiB` NHWC activation arena (supporting up to `1024×1024` SDXL and `32×32` latent VAE tiles). On Base/Slim PS4 (`4096 MiB` direct memory), it automatically switches to a compact `325 MiB` scratch arena (`24×24` VAE tiles), fitting full SDXL in <b>4,137 MiB</b> and SD 1.5 in <b>1,577 MiB</b>.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot-meta">
+    Open-source under <a href="https://github.com/DJTOMATO/GarlicDiffusion/blob/main/LICENSE">GNU GPLv3</a> ·
+    Inspired by <a href="https://garlicllm.dev">Garlic LLM</a> ·
+    <a href="https://github.com/DJTOMATO/GarlicDiffusion/issues/new?template=benchmark_report.md">Submit Your Console's Benchmarks</a><br>
+    Provided "AS IS" without warranty. Use at your own risk. Not affiliated with Sony Interactive Entertainment.
+  </div>
+</footer>
+<script src="lightbox.js"></script>
+</body>
+</html>

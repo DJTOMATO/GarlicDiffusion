@@ -5,15 +5,24 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Garlic Diffusion · PS4 Pro Studio</title>
 <style>
-:root{--bg:#0b0f18;--panel:#131a29;--card:#182135;--border:#25334e;--accent:#3b9eff;--accent2:#35d49a;--danger:#e04f5f;--text:#e8effa;--muted:#899fc0}
+:root{--bg:#060e1f;--panel:#08152c;--card:#0e1d3a;--border:#1c3358;--border-hi:#2a4672;--accent:#0070d1;--accent-hi:#3fa9f5;--accent2:#3ddc97;--danger:#ff6b76;--text:#e8effa;--muted:#a3b5d2}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh;display:flex;flex-direction:column}
-header{display:flex;align-items:center;justify-content:space-between;padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--border);gap:12px;flex-wrap:wrap}
-.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;color:#66b8ff}
-.badge{font-size:11px;padding:2px 7px;border-radius:99px;background:#1d2e4c;color:#8cc8ff;font-weight:600}
-.tabs{display:flex;gap:6px}
-.tab{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 14px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px}
-.tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+body{margin:0;background:radial-gradient(ellipse at 50% 0%,#122b57 0%,#0b1c3a 45%,#040a18 100%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh;display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;padding:11px 20px;background:rgba(6,15,34,.88);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);gap:12px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:19px;color:#fff;letter-spacing:-.2px}
+.brand span.hl{color:var(--accent-hi)}
+.g-pill{display:inline-flex;align-items:center;gap:7px;font-size:12px;padding:5px 12px;border-radius:99px;background:#0d1d3b;border:1px solid var(--border-hi);color:#dce6f5;font-weight:600}
+.g-dot{width:8px;height:8px;border-radius:50%;background:var(--accent2);display:inline-block;box-shadow:0 0 8px rgba(61,220,151,.65)}
+.g-dot.busy{background:var(--accent-hi);box-shadow:0 0 8px rgba(63,169,245,.8)}
+.g-vbar{width:54px;height:5px;border-radius:3px;background:#1b3156;overflow:hidden;display:inline-block}
+.g-vfill{height:100%;background:var(--accent-hi);width:85%}
+.badge{font-size:11px;padding:3px 9px;border-radius:99px;background:#0d1d3b;border:1px solid var(--border-hi);color:#8cc8ff;font-weight:600}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.tab{background:#0d1d3b;border:1px solid var(--border-hi);color:var(--muted);padding:7px 14px;border-radius:99px;cursor:pointer;font-weight:600;font-size:12.5px;text-decoration:none;display:inline-flex;align-items:center;gap:5px}
+.tab:hover{border-color:var(--accent-hi);color:#fff}
+.tab.active{background:var(--accent);border-color:var(--accent-hi);color:#fff}
+.tab.kofi{border-color:#236b52;color:#55e6b0;background:#0c2623}
+.tab.disc{border-color:#34548a;color:#9cc9ff}
 .page{display:none;flex:1}.page.active{display:flex}
 /* Studio */
 #pg-studio{flex-wrap:wrap}
@@ -58,9 +67,20 @@ textarea{min-height:68px;resize:vertical}
 .macts{display:flex;flex-wrap:wrap;gap:6px}
 .box{background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:8px;font-size:12px;color:#cfe0f7;word-break:break-word;white-space:pre-wrap}
 /* Presets & Models */
-#pg-presets,#pg-models{flex-direction:column;padding:18px;gap:16px;max-width:1180px;width:100%;margin:0 auto}
+#pg-presets,#pg-models,#pg-credits{flex-direction:column;padding:18px;gap:16px;max-width:1180px;width:100%;margin:0 auto}
+.qr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:14px}
+.qr-card{background:var(--card);border:1px solid var(--border-hi);border-radius:14px;padding:16px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px}
+.qr-card svg{width:148px;height:148px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.35)}
+.lic-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.lic-tbl th,.lic-tbl td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left}
+.lic-tbl th{color:var(--accent-hi);font-size:11px;text-transform:uppercase}
 .inline-box{background:#0d1424;border:1px solid var(--border);border-radius:8px;padding:9px;margin-top:6px;display:none}
 .style-preview{font-size:11px;color:#52e3ab;margin-top:4px;line-height:1.35}
+.char-preview{font-size:11px;color:#79c0ff;margin-top:4px;line-height:1.35}
+.tiers{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0 4px}
+.tier-btn{flex:1;min-width:62px;padding:5px 6px;font-size:11px;font-weight:600;border-radius:6px;border:1px solid var(--border);background:#101829;color:#b8d0f0;cursor:pointer;text-align:center}
+.tier-btn:hover{border-color:var(--accent);color:#fff;background:#1a2b4a}
+.app-foot{padding:8px 18px;background:var(--panel);border-top:1px solid var(--border);font-size:11px;color:var(--muted);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .pcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px}
 .pbox{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px}
 .pbox h2{margin:0 0 8px;font-size:15px;color:#66b8ff}
@@ -74,12 +94,30 @@ textarea{min-height:68px;resize:vertical}
 </head>
 <body>
 <header>
-  <div class="brand">Garlic Diffusion <span id="hcon" class="badge">PS4</span> <span id="harch" class="badge">SDXL</span> <span id="hmdl" style="font-size:12px;color:var(--muted);font-weight:400">Connecting...</span></div>
+  <div class="brand">
+    <svg viewBox="0 0 100 100" width="32" height="32" style="flex-shrink:0">
+      <defs>
+        <linearGradient id="gb1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f5ede0"/><stop offset="70%" stop-color="#e6dac4"/><stop offset="100%" stop-color="#c4b090"/></linearGradient>
+        <linearGradient id="gc1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fff"/><stop offset="65%" stop-color="#f6f0e4"/><stop offset="100%" stop-color="#d8c6a8"/></linearGradient>
+      </defs>
+      <path d="M50,15 C51,23 56,29 66,35 C80,43 88,55 88,67 C88,81 74,90 50,90 C26,90 12,81 12,67 C12,55 20,43 34,35 C44,29 49,23 50,15 Z" fill="url(#gb1)"/>
+      <path d="M50,21 C40,38 35,70 43,89.6 C47.67,90.13 52.33,90.13 57,89.6 C65,70 60,38 50,21 Z" fill="url(#gc1)"/>
+      <path d="M44,31 C27,44 22,68 31,87 M56,31 C73,44 78,68 69,87" fill="none" stroke="#c9b89c" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    <span>Garlic <span class="hl">Diffusion</span></span>
+    <span id="hcon" class="badge">PS4</span>
+    <span id="harch" class="badge">SDXL</span>
+    <span class="g-pill"><span id="hdot" class="g-dot"></span><span id="hmdl">Connecting...</span></span>
+    <span class="g-pill" id="hvram-pill" style="display:none"><span id="hvram">VRAM</span><span class="g-vbar"><span id="hvfill" class="g-vfill"></span></span></span>
+  </div>
   <div class="tabs">
     <button class="tab active" id="tb-studio" onclick="showTab('studio')">Studio</button>
     <button class="tab" id="tb-gallery" onclick="showTab('gallery')">Gallery (<span id="gcnt">0</span>)</button>
     <button class="tab" id="tb-presets" onclick="showTab('presets')">Presets</button>
     <button class="tab" id="tb-models" onclick="showTab('models')">Models</button>
+    <button class="tab" id="tb-credits" onclick="showTab('credits')">Credits &amp; QR</button>
+    <a class="tab kofi" href="https://ko-fi.com/djtomato" target="_blank" rel="noopener">Ko-fi</a>
+    <a class="tab disc" href="https://discord.gg/Gbyq3kpGjc" target="_blank" rel="noopener">Discord / Community</a>
   </div>
 </header>
 
@@ -103,13 +141,33 @@ textarea{min-height:68px;resize:vertical}
         <select id="stsel" name="stsel" autocomplete="off" onchange="onStyleChange()"><option value="">— No Style —</option></select>
       </div>
     </div>
+
+    <label>Character Preset <a href="#" onclick="toggleQuickChar();return false" style="color:#79c0ff;float:right;text-decoration:none;font-weight:600">+ Character</a></label>
+    <select id="chsel" name="chsel" autocomplete="off" onchange="onCharChange()"><option value="">— No Character Overlay —</option></select>
+    <div id="chprev" class="char-preview" style="display:none"></div>
+    <div id="qchar-box" class="inline-box">
+      <div style="font-size:11.5px;color:#79c0ff;font-weight:600;margin-bottom:5px">Save Reusable Character Preset (prepends on Generate)</div>
+      <div class="row">
+        <div><input id="qc-name" type="text" placeholder="Character name (e.g. Hatsune Miku)" autocomplete="off"></div>
+        <div><input id="qc-ser" type="text" placeholder="Series (e.g. Vocaloid)" autocomplete="off"></div>
+      </div>
+      <input id="qc-pr" type="text" placeholder="Character tags (e.g. 1girl, hatsune miku, cyan twin tails, headphones)" autocomplete="off" style="margin-top:5px">
+      <input id="qc-ng" type="text" placeholder="Negative tags (optional)" autocomplete="off" style="margin-top:5px">
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+        <button class="btn ok sm" onclick="saveQuickChar()">Save Character</button>
+        <button class="btn sec sm" onclick="bakeCharIntoPrompt()">Bake into Prompt</button>
+        <button class="btn stop sm" onclick="deleteSelectedChar()">Delete Selected</button>
+        <button class="btn sec sm" onclick="toggleQuickChar()">Close</button>
+      </div>
+    </div>
+
     <div id="stprev" class="style-preview" style="display:none"></div>
     <div id="qstyle-box" class="inline-box">
       <div style="font-size:11.5px;color:#52e3ab;font-weight:600;margin-bottom:5px">Save Reusable Art Style (appends on Generate)</div>
       <input id="qs-name" type="text" placeholder="Style name (e.g. Glossy Cel Anime)" autocomplete="off">
       <input id="qs-pr" type="text" placeholder="Style prompt tags (e.g. vibrant colors, sharp lineart)" autocomplete="off" style="margin-top:5px">
       <input id="qs-ng" type="text" placeholder="Style negative tags (optional)" autocomplete="off" style="margin-top:5px">
-      <div style="display:flex;gap:6px;margin-top:6px">
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
         <button class="btn ok sm" onclick="saveQuickStyle()">Save Style</button>
         <button class="btn sec sm" onclick="bakeStyleIntoPrompt()">Bake Active into Prompt</button>
         <button class="btn stop sm" onclick="deleteSelectedStyle()">Delete Selected</button>
@@ -135,17 +193,30 @@ textarea{min-height:68px;resize:vertical}
     <label>Negative Prompt</label>
     <textarea id="ng" name="negative_prompt" autocomplete="off">lowres, bad anatomy, bad hands, text, error, blurry, worst quality, low quality</textarea>
 
+    <label>Quick Speed / Quality Tier</label>
+    <div class="tiers">
+      <button type="button" class="tier-btn" onclick="applyQualityTier('draft')" title="Fastest rough preview (~15-20s)">⚡ Draft</button>
+      <button type="button" class="tier-btn" onclick="applyQualityTier('mid')" title="Native balanced resolution">⚖️ Mid</button>
+      <button type="button" class="tier-btn" onclick="applyQualityTier('hd')" title="Crisp portrait + 1080p RealESRGAN">✨ 1080p</button>
+      <button type="button" class="tier-btn" onclick="applyQualityTier('wide')" title="16:9 Widescreen 1920x1080 wallpaper">🖥️ 16:9</button>
+      <button type="button" class="tier-btn" onclick="applyQualityTier('4k')" title="4K UHD RealESRGAN (PS4 Pro)">💎 4K</button>
+    </div>
+
     <div class="row">
       <div><label>Resolution</label>
         <select id="sz" name="sz" autocomplete="off">
-          <option value="512x512">512x512 (SD1.5 fast)</option>
+          <option value="512x512">512x512 (Fast square)</option>
           <option value="512x768">512x768 (SD1.5 portrait)</option>
           <option value="768x512">768x512 (SD1.5 wide)</option>
-          <option value="768x768" selected>768x768 (SDXL)</option>
+          <option value="768x768" selected>768x768 (SDXL square)</option>
           <option value="768x1024">768x1024 (SDXL portrait)</option>
-          <option value="896x512">896x512 (16:9 → 1080p)</option>
-          <option value="832x1216">832x1216 (tall)</option>
-          <option value="1024x1024">1024x1024 (HD)</option>
+          <option value="896x512">896x512 (SD1.5 16:9 → 1080p)</option>
+          <option value="1024x576">1024x576 (Fast 16:9 → 1080p/4K)</option>
+          <option value="1152x640">1152x640 (HD 16:9 → 1080p/4K)</option>
+          <option value="1280x704">1280x704 (Native 1MP 16:9 → 1080p/4K)</option>
+          <option value="832x1216">832x1216 (Native 1MP portrait)</option>
+          <option value="1216x832">1216x832 (Native 1MP landscape)</option>
+          <option value="1024x1024">1024x1024 (Native 1MP square)</option>
         </select>
       </div>
       <div><label>Steps</label><input id="st" name="steps" autocomplete="off" type="number" value="20" min="4" max="40"></div>
@@ -155,7 +226,8 @@ textarea{min-height:68px;resize:vertical}
       <div><label>CFG Scale</label><input id="cfg" name="cfg" autocomplete="off" type="number" value="7.0" step="0.5" min="1" max="15"></div>
       <div><label>Sampler</label>
         <select id="smp" name="smp" autocomplete="off">
-          <option value="Euler a" selected>Euler a</option>
+          <option value="DPM++ 2M Karras">DPM++ 2M Karras</option>
+          <option value="Euler a" selected>Euler a (Karras)</option>
           <option value="Euler">Euler</option>
           <option value="LCM">LCM (DMD2)</option>
         </select>
@@ -176,6 +248,7 @@ textarea{min-height:68px;resize:vertical}
           <option value="0">Off (Native)</option>
           <option value="1">1080p Anime HD</option>
           <option value="2">2x Anime HD</option>
+          <option value="3">4K UHD (up to 3840×2160)</option>
         </select>
       </div>
     </div>
@@ -198,6 +271,7 @@ textarea{min-height:68px;resize:vertical}
     <div id="qbar" class="quick-bar" style="display:none">
       <button class="btn sec sm" onclick="recreateLatest()">Recreate (New Seed)</button>
       <button class="btn ok sm" onclick="upscaleLatest(1)">Upscale 1080p</button>
+      <button class="btn sec sm" onclick="upscaleLatest(3)">Upscale 4K</button>
       <button class="btn sec sm" onclick="openLatestInGallery()">Inspect Full Size</button>
       <a id="dl" class="btn sec sm" style="text-decoration:none" download="garlic_diffusion.png">Download PNG</a>
     </div>
@@ -240,8 +314,8 @@ textarea{min-height:68px;resize:vertical}
         <div><label>CFG</label><input id="pe-cfg" type="number" step="0.5" value="3.5"></div>
       </div>
       <div class="row">
-        <div><label>Sampler</label><select id="pe-smp"><option>Euler a</option><option>Euler</option><option>LCM</option></select></div>
-        <div><label>Upscale</label><select id="pe-ups"><option value="0">Off</option><option value="1">1080p</option><option value="2">2x</option></select></div>
+        <div><label>Sampler</label><select id="pe-smp"><option>DPM++ 2M Karras</option><option>Euler a</option><option>Euler</option><option>LCM</option></select></div>
+        <div><label>Upscale</label><select id="pe-ups"><option value="0">Off</option><option value="1">1080p</option><option value="2">2x</option><option value="3">4K UHD</option></select></div>
         <div><label>Power</label><select id="pe-eco"><option value="3">Silent</option><option value="2" selected>Quiet</option><option value="1">Balanced</option><option value="0">Turbo</option></select></div>
       </div>
       <button class="btn full" onclick="saveEditorPreset()">Save User Preset to PS4</button>
@@ -255,8 +329,8 @@ textarea{min-height:68px;resize:vertical}
         <div><label>CFG</label><input id="mp-cfg" type="number" step="0.5" value="3.5"></div>
       </div>
       <div class="row">
-        <div><label>Sampler</label><select id="mp-smp"><option>Euler a</option><option>Euler</option><option>LCM</option></select></div>
-        <div><label>Auto-Upscale</label><select id="mp-ups"><option value="0">Off</option><option value="1">1080p</option><option value="2">2x</option></select></div>
+        <div><label>Sampler</label><select id="mp-smp"><option>DPM++ 2M Karras</option><option>Euler a</option><option>Euler</option><option>LCM</option></select></div>
+        <div><label>Auto-Upscale</label><select id="mp-ups"><option value="0">Off</option><option value="1">1080p</option><option value="2">2x</option><option value="3">4K UHD</option></select></div>
       </div>
       <label>Description</label><input id="mp-desc" type="text">
       <button class="btn ok full" onclick="saveModelPreset()">Save Model preset.cfg on PS4</button>
@@ -314,6 +388,16 @@ textarea{min-height:68px;resize:vertical}
     <div id="minst" class="plist"></div>
   </div>
 
+  <div class="pbox" style="background:linear-gradient(135deg,#10254a,#0d1d3a);border-color:var(--accent)">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <div>
+        <b style="color:#fff;font-size:13.5px">💬 Have Model Ideas or Checkpoint Requests?</b>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">Join our Support Discord to request new SD 1.5 / SDXL conversions for PS4, share prompts, or connect your Discord bot!</div>
+      </div>
+      <a class="btn sm" style="width:auto;text-decoration:none" href="https://discord.gg/Gbyq3kpGjc" target="_blank" rel="noopener">Join Discord (discord.gg/Gbyq3kpGjc)</a>
+    </div>
+  </div>
+
   <div class="pbox">
     <h2>Downloadable Models Catalog</h2>
     <div id="mcat" class="plist"></div>
@@ -327,6 +411,76 @@ textarea{min-height:68px;resize:vertical}
       <div><label>Files (comma-separated)</label><input id="cdl-files" type="text" value="unet.psd1,clip_l.psd1,clip_g.psd1,vae.psd1,preset.cfg" autocomplete="off"></div>
     </div>
     <button class="btn ok full" onclick="startCustomDl()">Download Model to PS4</button>
+  </div>
+</div>
+
+<!-- TAB 5: CREDITS, SUPPORT & QR CODES -->
+<div class="page" id="pg-credits">
+  <div class="pbox" style="background:linear-gradient(135deg,#0e1d3a,#0c2238);border-color:var(--border-hi)">
+    <h2 style="font-size:18px;color:#fff;margin-bottom:6px">GarlicDiffusion v1.10 · Credits, Lineage &amp; Support</h2>
+    <div style="font-size:13px;color:var(--muted);line-height:1.55">
+      <b>GarlicDiffusion</b> is free, open-source software licensed under the <b>GNU General Public License v3.0 (GPLv3)</b>.
+      It is respectfully inspired by and builds upon <b>Leonardo Alegría's <a href="https://garlicllm.dev" target="_blank" rel="noopener" style="color:var(--accent-hi)">Garlic LLM</a></b> (<a href="https://github.com/leonardo-alegria/garlic-llm" target="_blank" rel="noopener" style="color:var(--accent-hi)">github.com/leonardo-alegria/garlic-llm</a>), adapting its bare-metal PS4 GCN PM4 compute dispatch, direct-memory ("Garlic") allocator, and visual theme to run native Stable Diffusion 1.5, SDXL, and Real-ESRGAN on PlayStation 4 &amp; PS4 Pro.
+    </div>
+  </div>
+
+  <div class="qr-grid">
+    <div class="qr-card">
+      <b style="color:var(--accent2);font-size:14px">Support on Ko-fi</b>
+      <div style="font-size:11.5px;color:var(--muted)">ko-fi.com/djtomato</div>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" shape-rendering="crispEdges"><rect width="29" height="29" rx="2" fill="#ffffff"/><g fill="#0b1c3a"><rect x="2" y="2" width="7" height="1"/><rect x="10" y="2" width="4" height="1"/><rect x="16" y="2" width="1" height="1"/><rect x="18" y="2" width="1" height="1"/><rect x="20" y="2" width="7" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="8" y="3" width="1" height="1"/><rect x="10" y="3" width="1" height="1"/><rect x="13" y="3" width="4" height="1"/><rect x="18" y="3" width="1" height="1"/><rect x="20" y="3" width="1" height="1"/><rect x="26" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/><rect x="4" y="4" width="3" height="1"/><rect x="8" y="4" width="1" height="1"/><rect x="11" y="4" width="3" height="1"/><rect x="16" y="4" width="3" height="1"/><rect x="20" y="4" width="1" height="1"/><rect x="22" y="4" width="3" height="1"/><rect x="26" y="4" width="1" height="1"/><rect x="2" y="5" width="1" height="1"/><rect x="4" y="5" width="3" height="1"/><rect x="8" y="5" width="1" height="1"/><rect x="12" y="5" width="2" height="1"/><rect x="15" y="5" width="1" height="1"/><rect x="17" y="5" width="2" height="1"/><rect x="20" y="5" width="1" height="1"/><rect x="22" y="5" width="3" height="1"/><rect x="26" y="5" width="1" height="1"/><rect x="2" y="6" width="1" height="1"/><rect x="4" y="6" width="3" height="1"/><rect x="8" y="6" width="1" height="1"/><rect x="12" y="6" width="1" height="1"/><rect x="14" y="6" width="1" height="1"/><rect x="18" y="6" width="1" height="1"/><rect x="20" y="6" width="1" height="1"/><rect x="22" y="6" width="3" height="1"/><rect x="26" y="6" width="1" height="1"/><rect x="2" y="7" width="1" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="10" y="7" width="3" height="1"/><rect x="16" y="7" width="1" height="1"/><rect x="18" y="7" width="1" height="1"/><rect x="20" y="7" width="1" height="1"/><rect x="26" y="7" width="1" height="1"/><rect x="2" y="8" width="7" height="1"/><rect x="10" y="8" width="1" height="1"/><rect x="12" y="8" width="1" height="1"/><rect x="14" y="8" width="1" height="1"/><rect x="16" y="8" width="1" height="1"/><rect x="18" y="8" width="1" height="1"/><rect x="20" y="8" width="7" height="1"/><rect x="10" y="9" width="2" height="1"/><rect x="14" y="9" width="1" height="1"/><rect x="17" y="9" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="8" y="10" width="1" height="1"/><rect x="11" y="10" width="2" height="1"/><rect x="14" y="10" width="3" height="1"/><rect x="20" y="10" width="2" height="1"/><rect x="25" y="10" width="2" height="1"/><rect x="2" y="11" width="4" height="1"/><rect x="7" y="11" width="1" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="1" height="1"/><rect x="15" y="11" width="3" height="1"/><rect x="21" y="11" width="5" height="1"/><rect x="2" y="12" width="1" height="1"/><rect x="4" y="12" width="5" height="1"/><rect x="11" y="12" width="1" height="1"/><rect x="13" y="12" width="3" height="1"/><rect x="17" y="12" width="3" height="1"/><rect x="21" y="12" width="3" height="1"/><rect x="25" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="1" height="1"/><rect x="7" y="13" width="1" height="1"/><rect x="10" y="13" width="1" height="1"/><rect x="12" y="13" width="2" height="1"/><rect x="17" y="13" width="1" height="1"/><rect x="19" y="13" width="1" height="1"/><rect x="22" y="13" width="2" height="1"/><rect x="26" y="13" width="1" height="1"/><rect x="3" y="14" width="2" height="1"/><rect x="8" y="14" width="2" height="1"/><rect x="11" y="14" width="2" height="1"/><rect x="14" y="14" width="1" height="1"/><rect x="17" y="14" width="5" height="1"/><rect x="26" y="14" width="1" height="1"/><rect x="2" y="15" width="5" height="1"/><rect x="10" y="15" width="3" height="1"/><rect x="14" y="15" width="1" height="1"/><rect x="16" y="15" width="3" height="1"/><rect x="21" y="15" width="1" height="1"/><rect x="25" y="15" width="1" height="1"/><rect x="2" y="16" width="1" height="1"/><rect x="4" y="16" width="1" height="1"/><rect x="6" y="16" width="4" height="1"/><rect x="16" y="16" width="2" height="1"/><rect x="19" y="16" width="1" height="1"/><rect x="21" y="16" width="3" height="1"/><rect x="25" y="16" width="2" height="1"/><rect x="2" y="17" width="1" height="1"/><rect x="4" y="17" width="3" height="1"/><rect x="9" y="17" width="2" height="1"/><rect x="12" y="17" width="2" height="1"/><rect x="16" y="17" width="2" height="1"/><rect x="19" y="17" width="3" height="1"/><rect x="23" y="17" width="2" height="1"/><rect x="26" y="17" width="1" height="1"/><rect x="2" y="18" width="1" height="1"/><rect x="5" y="18" width="1" height="1"/><rect x="8" y="18" width="3" height="1"/><rect x="13" y="18" width="4" height="1"/><rect x="18" y="18" width="5" height="1"/><rect x="24" y="18" width="1" height="1"/><rect x="10" y="19" width="2" height="1"/><rect x="13" y="19" width="1" height="1"/><rect x="15" y="19" width="1" height="1"/><rect x="18" y="19" width="1" height="1"/><rect x="22" y="19" width="1" height="1"/><rect x="2" y="20" width="7" height="1"/><rect x="12" y="20" width="3" height="1"/><rect x="18" y="20" width="1" height="1"/><rect x="20" y="20" width="1" height="1"/><rect x="22" y="20" width="1" height="1"/><rect x="26" y="20" width="1" height="1"/><rect x="2" y="21" width="1" height="1"/><rect x="8" y="21" width="1" height="1"/><rect x="11" y="21" width="2" height="1"/><rect x="16" y="21" width="1" height="1"/><rect x="18" y="21" width="1" height="1"/><rect x="22" y="21" width="1" height="1"/><rect x="2" y="22" width="1" height="1"/><rect x="4" y="22" width="3" height="1"/><rect x="8" y="22" width="1" height="1"/><rect x="10" y="22" width="1" height="1"/><rect x="12" y="22" width="1" height="1"/><rect x="15" y="22" width="8" height="1"/><rect x="24" y="22" width="1" height="1"/><rect x="2" y="23" width="1" height="1"/><rect x="4" y="23" width="3" height="1"/><rect x="8" y="23" width="1" height="1"/><rect x="10" y="23" width="2" height="1"/><rect x="13" y="23" width="1" height="1"/><rect x="15" y="23" width="6" height="1"/><rect x="25" y="23" width="2" height="1"/><rect x="2" y="24" width="1" height="1"/><rect x="4" y="24" width="3" height="1"/><rect x="8" y="24" width="1" height="1"/><rect x="16" y="24" width="3" height="1"/><rect x="23" y="24" width="2" height="1"/><rect x="26" y="24" width="1" height="1"/><rect x="2" y="25" width="1" height="1"/><rect x="8" y="25" width="1" height="1"/><rect x="14" y="25" width="1" height="1"/><rect x="16" y="25" width="1" height="1"/><rect x="18" y="25" width="5" height="1"/><rect x="26" y="25" width="1" height="1"/><rect x="2" y="26" width="7" height="1"/><rect x="11" y="26" width="4" height="1"/><rect x="18" y="26" width="2" height="1"/><rect x="23" y="26" width="1" height="1"/><rect x="26" y="26" width="1" height="1"/></g></svg>
+      <a class="btn ok sm" style="text-decoration:none;width:100%" href="https://ko-fi.com/djtomato" target="_blank" rel="noopener">Open Ko-fi</a>
+    </div>
+
+    <div class="qr-card">
+      <b style="color:var(--accent-hi);font-size:14px">Discord &amp; Community</b>
+      <div style="font-size:11.5px;color:var(--muted)">discord.gg/Gbyq3kpGjc · Model Ideas &amp; Bot</div>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" shape-rendering="crispEdges"><rect width="29" height="29" rx="2" fill="#ffffff"/><g fill="#0b1c3a"><rect x="2" y="2" width="7" height="1"/><rect x="10" y="2" width="1" height="1"/><rect x="12" y="2" width="5" height="1"/><rect x="20" y="2" width="7" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="8" y="3" width="1" height="1"/><rect x="10" y="3" width="3" height="1"/><rect x="14" y="3" width="3" height="1"/><rect x="18" y="3" width="1" height="1"/><rect x="20" y="3" width="1" height="1"/><rect x="26" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/><rect x="4" y="4" width="3" height="1"/><rect x="8" y="4" width="1" height="1"/><rect x="10" y="4" width="1" height="1"/><rect x="12" y="4" width="1" height="1"/><rect x="14" y="4" width="2" height="1"/><rect x="20" y="4" width="1" height="1"/><rect x="22" y="4" width="3" height="1"/><rect x="26" y="4" width="1" height="1"/><rect x="2" y="5" width="1" height="1"/><rect x="4" y="5" width="3" height="1"/><rect x="8" y="5" width="1" height="1"/><rect x="12" y="5" width="1" height="1"/><rect x="15" y="5" width="1" height="1"/><rect x="20" y="5" width="1" height="1"/><rect x="22" y="5" width="3" height="1"/><rect x="26" y="5" width="1" height="1"/><rect x="2" y="6" width="1" height="1"/><rect x="4" y="6" width="3" height="1"/><rect x="8" y="6" width="1" height="1"/><rect x="11" y="6" width="2" height="1"/><rect x="16" y="6" width="1" height="1"/><rect x="20" y="6" width="1" height="1"/><rect x="22" y="6" width="3" height="1"/><rect x="26" y="6" width="1" height="1"/><rect x="2" y="7" width="1" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="10" y="7" width="1" height="1"/><rect x="15" y="7" width="2" height="1"/><rect x="20" y="7" width="1" height="1"/><rect x="26" y="7" width="1" height="1"/><rect x="2" y="8" width="7" height="1"/><rect x="10" y="8" width="1" height="1"/><rect x="12" y="8" width="1" height="1"/><rect x="14" y="8" width="1" height="1"/><rect x="16" y="8" width="1" height="1"/><rect x="18" y="8" width="1" height="1"/><rect x="20" y="8" width="7" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="16" y="9" width="3" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="6" y="10" width="7" height="1"/><rect x="14" y="10" width="2" height="1"/><rect x="18" y="10" width="2" height="1"/><rect x="21" y="10" width="1" height="1"/><rect x="24" y="10" width="3" height="1"/><rect x="3" y="11" width="2" height="1"/><rect x="7" y="11" width="1" height="1"/><rect x="9" y="11" width="6" height="1"/><rect x="17" y="11" width="1" height="1"/><rect x="20" y="11" width="2" height="1"/><rect x="23" y="11" width="1" height="1"/><rect x="25" y="11" width="2" height="1"/><rect x="6" y="12" width="4" height="1"/><rect x="13" y="12" width="1" height="1"/><rect x="17" y="12" width="3" height="1"/><rect x="21" y="12" width="4" height="1"/><rect x="26" y="12" width="1" height="1"/><rect x="3" y="13" width="3" height="1"/><rect x="10" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="16" y="13" width="1" height="1"/><rect x="18" y="13" width="2" height="1"/><rect x="21" y="13" width="1" height="1"/><rect x="23" y="13" width="1" height="1"/><rect x="4" y="14" width="1" height="1"/><rect x="7" y="14" width="5" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="17" y="14" width="2" height="1"/><rect x="20" y="14" width="2" height="1"/><rect x="26" y="14" width="1" height="1"/><rect x="3" y="15" width="3" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="14" y="15" width="1" height="1"/><rect x="17" y="15" width="5" height="1"/><rect x="25" y="15" width="2" height="1"/><rect x="2" y="16" width="2" height="1"/><rect x="6" y="16" width="3" height="1"/><rect x="12" y="16" width="3" height="1"/><rect x="16" y="16" width="5" height="1"/><rect x="23" y="16" width="2" height="1"/><rect x="26" y="16" width="1" height="1"/><rect x="5" y="17" width="2" height="1"/><rect x="11" y="17" width="2" height="1"/><rect x="17" y="17" width="1" height="1"/><rect x="19" y="17" width="5" height="1"/><rect x="2" y="18" width="3" height="1"/><rect x="6" y="18" width="1" height="1"/><rect x="8" y="18" width="3" height="1"/><rect x="13" y="18" width="1" height="1"/><rect x="17" y="18" width="6" height="1"/><rect x="25" y="18" width="1" height="1"/><rect x="10" y="19" width="2" height="1"/><rect x="13" y="19" width="6" height="1"/><rect x="22" y="19" width="1" height="1"/><rect x="26" y="19" width="1" height="1"/><rect x="2" y="20" width="7" height="1"/><rect x="10" y="20" width="1" height="1"/><rect x="13" y="20" width="1" height="1"/><rect x="15" y="20" width="2" height="1"/><rect x="18" y="20" width="1" height="1"/><rect x="20" y="20" width="1" height="1"/><rect x="22" y="20" width="1" height="1"/><rect x="26" y="20" width="1" height="1"/><rect x="2" y="21" width="1" height="1"/><rect x="8" y="21" width="1" height="1"/><rect x="10" y="21" width="1" height="1"/><rect x="13" y="21" width="1" height="1"/><rect x="16" y="21" width="3" height="1"/><rect x="22" y="21" width="1" height="1"/><rect x="25" y="21" width="1" height="1"/><rect x="2" y="22" width="1" height="1"/><rect x="4" y="22" width="3" height="1"/><rect x="8" y="22" width="1" height="1"/><rect x="10" y="22" width="1" height="1"/><rect x="12" y="22" width="1" height="1"/><rect x="14" y="22" width="1" height="1"/><rect x="17" y="22" width="6" height="1"/><rect x="2" y="23" width="1" height="1"/><rect x="4" y="23" width="3" height="1"/><rect x="8" y="23" width="1" height="1"/><rect x="11" y="23" width="1" height="1"/><rect x="13" y="23" width="2" height="1"/><rect x="16" y="23" width="4" height="1"/><rect x="22" y="23" width="1" height="1"/><rect x="24" y="23" width="2" height="1"/><rect x="2" y="24" width="1" height="1"/><rect x="4" y="24" width="3" height="1"/><rect x="8" y="24" width="1" height="1"/><rect x="12" y="24" width="2" height="1"/><rect x="15" y="24" width="2" height="1"/><rect x="19" y="24" width="1" height="1"/><rect x="21" y="24" width="3" height="1"/><rect x="25" y="24" width="2" height="1"/><rect x="2" y="25" width="1" height="1"/><rect x="8" y="25" width="1" height="1"/><rect x="10" y="25" width="4" height="1"/><rect x="16" y="25" width="1" height="1"/><rect x="18" y="25" width="1" height="1"/><rect x="21" y="25" width="2" height="1"/><rect x="2" y="26" width="7" height="1"/><rect x="10" y="26" width="1" height="1"/><rect x="13" y="26" width="1" height="1"/><rect x="16" y="26" width="1" height="1"/><rect x="18" y="26" width="1" height="1"/><rect x="23" y="26" width="1" height="1"/><rect x="26" y="26" width="1" height="1"/></g></svg>
+      <a class="btn sm" style="text-decoration:none;width:100%" href="https://discord.gg/Gbyq3kpGjc" target="_blank" rel="noopener">Community &amp; Discord</a>
+    </div>
+
+    <div class="qr-card">
+      <b style="color:#fff;font-size:14px">GitHub Repository</b>
+      <div style="font-size:11.5px;color:var(--muted)">DJTOMATO/GarlicDiffusion</div>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 33 33" shape-rendering="crispEdges"><rect width="33" height="33" rx="2" fill="#ffffff"/><g fill="#0b1c3a"><rect x="2" y="2" width="7" height="1"/><rect x="10" y="2" width="4" height="1"/><rect x="15" y="2" width="2" height="1"/><rect x="20" y="2" width="2" height="1"/><rect x="24" y="2" width="7" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="8" y="3" width="1" height="1"/><rect x="10" y="3" width="1" height="1"/><rect x="13" y="3" width="4" height="1"/><rect x="18" y="3" width="2" height="1"/><rect x="24" y="3" width="1" height="1"/><rect x="30" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/><rect x="4" y="4" width="3" height="1"/><rect x="8" y="4" width="1" height="1"/><rect x="11" y="4" width="3" height="1"/><rect x="17" y="4" width="1" height="1"/><rect x="22" y="4" width="1" height="1"/><rect x="24" y="4" width="1" height="1"/><rect x="26" y="4" width="3" height="1"/><rect x="30" y="4" width="1" height="1"/><rect x="2" y="5" width="1" height="1"/><rect x="4" y="5" width="3" height="1"/><rect x="8" y="5" width="1" height="1"/><rect x="12" y="5" width="2" height="1"/><rect x="15" y="5" width="1" height="1"/><rect x="17" y="5" width="2" height="1"/><rect x="24" y="5" width="1" height="1"/><rect x="26" y="5" width="3" height="1"/><rect x="30" y="5" width="1" height="1"/><rect x="2" y="6" width="1" height="1"/><rect x="4" y="6" width="3" height="1"/><rect x="8" y="6" width="1" height="1"/><rect x="12" y="6" width="1" height="1"/><rect x="14" y="6" width="1" height="1"/><rect x="18" y="6" width="3" height="1"/><rect x="22" y="6" width="1" height="1"/><rect x="24" y="6" width="1" height="1"/><rect x="26" y="6" width="3" height="1"/><rect x="30" y="6" width="1" height="1"/><rect x="2" y="7" width="1" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="10" y="7" width="3" height="1"/><rect x="15" y="7" width="2" height="1"/><rect x="24" y="7" width="1" height="1"/><rect x="30" y="7" width="1" height="1"/><rect x="2" y="8" width="7" height="1"/><rect x="10" y="8" width="1" height="1"/><rect x="12" y="8" width="1" height="1"/><rect x="14" y="8" width="1" height="1"/><rect x="16" y="8" width="1" height="1"/><rect x="18" y="8" width="1" height="1"/><rect x="20" y="8" width="1" height="1"/><rect x="22" y="8" width="1" height="1"/><rect x="24" y="8" width="7" height="1"/><rect x="10" y="9" width="2" height="1"/><rect x="14" y="9" width="1" height="1"/><rect x="18" y="9" width="1" height="1"/><rect x="21" y="9" width="1" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="8" y="10" width="1" height="1"/><rect x="11" y="10" width="2" height="1"/><rect x="14" y="10" width="4" height="1"/><rect x="21" y="10" width="1" height="1"/><rect x="24" y="10" width="2" height="1"/><rect x="29" y="10" width="2" height="1"/><rect x="2" y="11" width="2" height="1"/><rect x="9" y="11" width="1" height="1"/><rect x="12" y="11" width="1" height="1"/><rect x="20" y="11" width="1" height="1"/><rect x="23" y="11" width="1" height="1"/><rect x="25" y="11" width="2" height="1"/><rect x="28" y="11" width="2" height="1"/><rect x="2" y="12" width="1" height="1"/><rect x="7" y="12" width="2" height="1"/><rect x="10" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="3" height="1"/><rect x="20" y="12" width="1" height="1"/><rect x="26" y="12" width="1" height="1"/><rect x="2" y="13" width="5" height="1"/><rect x="12" y="13" width="2" height="1"/><rect x="16" y="13" width="2" height="1"/><rect x="22" y="13" width="2" height="1"/><rect x="27" y="13" width="1" height="1"/><rect x="2" y="14" width="2" height="1"/><rect x="7" y="14" width="2" height="1"/><rect x="11" y="14" width="2" height="1"/><rect x="17" y="14" width="3" height="1"/><rect x="21" y="14" width="2" height="1"/><rect x="24" y="14" width="2" height="1"/><rect x="30" y="14" width="1" height="1"/><rect x="5" y="15" width="1" height="1"/><rect x="10" y="15" width="3" height="1"/><rect x="14" y="15" width="1" height="1"/><rect x="16" y="15" width="3" height="1"/><rect x="22" y="15" width="1" height="1"/><rect x="24" y="15" width="3" height="1"/><rect x="29" y="15" width="2" height="1"/><rect x="2" y="16" width="1" height="1"/><rect x="5" y="16" width="1" height="1"/><rect x="8" y="16" width="1" height="1"/><rect x="15" y="16" width="1" height="1"/><rect x="17" y="16" width="2" height="1"/><rect x="22" y="16" width="2" height="1"/><rect x="26" y="16" width="3" height="1"/><rect x="2" y="17" width="2" height="1"/><rect x="5" y="17" width="2" height="1"/><rect x="9" y="17" width="1" height="1"/><rect x="11" y="17" width="2" height="1"/><rect x="14" y="17" width="1" height="1"/><rect x="18" y="17" width="1" height="1"/><rect x="20" y="17" width="2" height="1"/><rect x="25" y="17" width="2" height="1"/><rect x="28" y="17" width="1" height="1"/><rect x="30" y="17" width="1" height="1"/><rect x="3" y="18" width="4" height="1"/><rect x="8" y="18" width="1" height="1"/><rect x="11" y="18" width="2" height="1"/><rect x="14" y="18" width="3" height="1"/><rect x="21" y="18" width="1" height="1"/><rect x="23" y="18" width="1" height="1"/><rect x="25" y="18" width="1" height="1"/><rect x="27" y="18" width="2" height="1"/><rect x="2" y="19" width="2" height="1"/><rect x="6" y="19" width="1" height="1"/><rect x="9" y="19" width="2" height="1"/><rect x="12" y="19" width="1" height="1"/><rect x="15" y="19" width="1" height="1"/><rect x="17" y="19" width="5" height="1"/><rect x="24" y="19" width="3" height="1"/><rect x="28" y="19" width="3" height="1"/><rect x="2" y="20" width="8" height="1"/><rect x="11" y="20" width="1" height="1"/><rect x="14" y="20" width="5" height="1"/><rect x="21" y="20" width="1" height="1"/><rect x="26" y="20" width="2" height="1"/><rect x="30" y="20" width="1" height="1"/><rect x="2" y="21" width="1" height="1"/><rect x="4" y="21" width="2" height="1"/><rect x="11" y="21" width="1" height="1"/><rect x="13" y="21" width="1" height="1"/><rect x="16" y="21" width="1" height="1"/><rect x="18" y="21" width="1" height="1"/><rect x="22" y="21" width="1" height="1"/><rect x="24" y="21" width="1" height="1"/><rect x="2" y="22" width="1" height="1"/><rect x="4" y="22" width="1" height="1"/><rect x="7" y="22" width="2" height="1"/><rect x="10" y="22" width="2" height="1"/><rect x="13" y="22" width="1" height="1"/><rect x="15" y="22" width="2" height="1"/><rect x="19" y="22" width="8" height="1"/><rect x="28" y="22" width="3" height="1"/><rect x="10" y="23" width="3" height="1"/><rect x="14" y="23" width="4" height="1"/><rect x="19" y="23" width="2" height="1"/><rect x="22" y="23" width="1" height="1"/><rect x="26" y="23" width="2" height="1"/><rect x="2" y="24" width="7" height="1"/><rect x="15" y="24" width="3" height="1"/><rect x="19" y="24" width="1" height="1"/><rect x="21" y="24" width="2" height="1"/><rect x="24" y="24" width="1" height="1"/><rect x="26" y="24" width="3" height="1"/><rect x="2" y="25" width="1" height="1"/><rect x="8" y="25" width="1" height="1"/><rect x="14" y="25" width="1" height="1"/><rect x="16" y="25" width="2" height="1"/><rect x="21" y="25" width="2" height="1"/><rect x="26" y="25" width="1" height="1"/><rect x="29" y="25" width="2" height="1"/><rect x="2" y="26" width="1" height="1"/><rect x="4" y="26" width="3" height="1"/><rect x="8" y="26" width="1" height="1"/><rect x="10" y="26" width="5" height="1"/><rect x="17" y="26" width="1" height="1"/><rect x="19" y="26" width="1" height="1"/><rect x="21" y="26" width="7" height="1"/><rect x="29" y="26" width="1" height="1"/><rect x="2" y="27" width="1" height="1"/><rect x="4" y="27" width="3" height="1"/><rect x="8" y="27" width="1" height="1"/><rect x="10" y="27" width="1" height="1"/><rect x="15" y="27" width="1" height="1"/><rect x="17" y="27" width="2" height="1"/><rect x="20" y="27" width="4" height="1"/><rect x="27" y="27" width="2" height="1"/><rect x="30" y="27" width="1" height="1"/><rect x="2" y="28" width="1" height="1"/><rect x="4" y="28" width="3" height="1"/><rect x="8" y="28" width="1" height="1"/><rect x="11" y="28" width="1" height="1"/><rect x="13" y="28" width="7" height="1"/><rect x="21" y="28" width="9" height="1"/><rect x="2" y="29" width="1" height="1"/><rect x="8" y="29" width="1" height="1"/><rect x="13" y="29" width="1" height="1"/><rect x="16" y="29" width="1" height="1"/><rect x="18" y="29" width="1" height="1"/><rect x="24" y="29" width="2" height="1"/><rect x="27" y="29" width="2" height="1"/><rect x="30" y="29" width="1" height="1"/><rect x="2" y="30" width="7" height="1"/><rect x="11" y="30" width="4" height="1"/><rect x="17" y="30" width="1" height="1"/><rect x="19" y="30" width="1" height="1"/><rect x="21" y="30" width="1" height="1"/><rect x="24" y="30" width="3" height="1"/><rect x="28" y="30" width="1" height="1"/></g></svg>
+      <a class="btn sec sm" style="text-decoration:none;width:100%" href="https://github.com/DJTOMATO/GarlicDiffusion" target="_blank" rel="noopener">Open GitHub</a>
+    </div>
+
+    <div class="qr-card">
+      <b style="color:#f59adb;font-size:14px">Hugging Face Models</b>
+      <div style="font-size:11.5px;color:var(--muted)">DJTomato/ps4-diffusion-models</div>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 33 33" shape-rendering="crispEdges"><rect width="33" height="33" rx="2" fill="#ffffff"/><g fill="#0b1c3a"><rect x="2" y="2" width="7" height="1"/><rect x="10" y="2" width="1" height="1"/><rect x="12" y="2" width="1" height="1"/><rect x="15" y="2" width="2" height="1"/><rect x="20" y="2" width="1" height="1"/><rect x="22" y="2" width="1" height="1"/><rect x="24" y="2" width="7" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="8" y="3" width="1" height="1"/><rect x="10" y="3" width="1" height="1"/><rect x="12" y="3" width="1" height="1"/><rect x="16" y="3" width="1" height="1"/><rect x="18" y="3" width="2" height="1"/><rect x="22" y="3" width="1" height="1"/><rect x="24" y="3" width="1" height="1"/><rect x="30" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/><rect x="4" y="4" width="3" height="1"/><rect x="8" y="4" width="1" height="1"/><rect x="11" y="4" width="1" height="1"/><rect x="17" y="4" width="2" height="1"/><rect x="21" y="4" width="2" height="1"/><rect x="24" y="4" width="1" height="1"/><rect x="26" y="4" width="3" height="1"/><rect x="30" y="4" width="1" height="1"/><rect x="2" y="5" width="1" height="1"/><rect x="4" y="5" width="3" height="1"/><rect x="8" y="5" width="1" height="1"/><rect x="11" y="5" width="1" height="1"/><rect x="14" y="5" width="2" height="1"/><rect x="17" y="5" width="2" height="1"/><rect x="21" y="5" width="2" height="1"/><rect x="24" y="5" width="1" height="1"/><rect x="26" y="5" width="3" height="1"/><rect x="30" y="5" width="1" height="1"/><rect x="2" y="6" width="1" height="1"/><rect x="4" y="6" width="3" height="1"/><rect x="8" y="6" width="1" height="1"/><rect x="11" y="6" width="3" height="1"/><rect x="15" y="6" width="1" height="1"/><rect x="20" y="6" width="3" height="1"/><rect x="24" y="6" width="1" height="1"/><rect x="26" y="6" width="3" height="1"/><rect x="30" y="6" width="1" height="1"/><rect x="2" y="7" width="1" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="10" y="7" width="2" height="1"/><rect x="14" y="7" width="1" height="1"/><rect x="22" y="7" width="1" height="1"/><rect x="24" y="7" width="1" height="1"/><rect x="30" y="7" width="1" height="1"/><rect x="2" y="8" width="7" height="1"/><rect x="10" y="8" width="1" height="1"/><rect x="12" y="8" width="1" height="1"/><rect x="14" y="8" width="1" height="1"/><rect x="16" y="8" width="1" height="1"/><rect x="18" y="8" width="1" height="1"/><rect x="20" y="8" width="1" height="1"/><rect x="22" y="8" width="1" height="1"/><rect x="24" y="8" width="7" height="1"/><rect x="10" y="9" width="1" height="1"/><rect x="12" y="9" width="1" height="1"/><rect x="16" y="9" width="1" height="1"/><rect x="18" y="9" width="1" height="1"/><rect x="20" y="9" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="8" y="10" width="1" height="1"/><rect x="11" y="10" width="1" height="1"/><rect x="14" y="10" width="5" height="1"/><rect x="24" y="10" width="2" height="1"/><rect x="29" y="10" width="2" height="1"/><rect x="4" y="11" width="3" height="1"/><rect x="10" y="11" width="4" height="1"/><rect x="16" y="11" width="6" height="1"/><rect x="25" y="11" width="2" height="1"/><rect x="28" y="11" width="2" height="1"/><rect x="4" y="12" width="1" height="1"/><rect x="7" y="12" width="3" height="1"/><rect x="12" y="12" width="1" height="1"/><rect x="15" y="12" width="6" height="1"/><rect x="23" y="12" width="3" height="1"/><rect x="2" y="13" width="2" height="1"/><rect x="6" y="13" width="2" height="1"/><rect x="9" y="13" width="3" height="1"/><rect x="13" y="13" width="1" height="1"/><rect x="17" y="13" width="1" height="1"/><rect x="20" y="13" width="4" height="1"/><rect x="25" y="13" width="3" height="1"/><rect x="5" y="14" width="2" height="1"/><rect x="8" y="14" width="4" height="1"/><rect x="14" y="14" width="1" height="1"/><rect x="17" y="14" width="1" height="1"/><rect x="19" y="14" width="1" height="1"/><rect x="22" y="14" width="1" height="1"/><rect x="24" y="14" width="2" height="1"/><rect x="30" y="14" width="1" height="1"/><rect x="2" y="15" width="3" height="1"/><rect x="9" y="15" width="3" height="1"/><rect x="13" y="15" width="1" height="1"/><rect x="17" y="15" width="2" height="1"/><rect x="21" y="15" width="1" height="1"/><rect x="24" y="15" width="3" height="1"/><rect x="29" y="15" width="2" height="1"/><rect x="3" y="16" width="3" height="1"/><rect x="8" y="16" width="1" height="1"/><rect x="15" y="16" width="3" height="1"/><rect x="22" y="16" width="1" height="1"/><rect x="24" y="16" width="2" height="1"/><rect x="27" y="16" width="2" height="1"/><rect x="3" y="17" width="2" height="1"/><rect x="9" y="17" width="4" height="1"/><rect x="16" y="17" width="1" height="1"/><rect x="18" y="17" width="1" height="1"/><rect x="20" y="17" width="1" height="1"/><rect x="25" y="17" width="2" height="1"/><rect x="28" y="17" width="1" height="1"/><rect x="30" y="17" width="1" height="1"/><rect x="2" y="18" width="1" height="1"/><rect x="4" y="18" width="1" height="1"/><rect x="6" y="18" width="1" height="1"/><rect x="8" y="18" width="2" height="1"/><rect x="12" y="18" width="8" height="1"/><rect x="27" y="18" width="2" height="1"/><rect x="2" y="19" width="3" height="1"/><rect x="7" y="19" width="1" height="1"/><rect x="9" y="19" width="1" height="1"/><rect x="11" y="19" width="3" height="1"/><rect x="16" y="19" width="7" height="1"/><rect x="24" y="19" width="3" height="1"/><rect x="28" y="19" width="3" height="1"/><rect x="2" y="20" width="2" height="1"/><rect x="5" y="20" width="2" height="1"/><rect x="8" y="20" width="2" height="1"/><rect x="13" y="20" width="1" height="1"/><rect x="15" y="20" width="1" height="1"/><rect x="17" y="20" width="1" height="1"/><rect x="21" y="20" width="1" height="1"/><rect x="24" y="20" width="1" height="1"/><rect x="26" y="20" width="2" height="1"/><rect x="30" y="20" width="1" height="1"/><rect x="2" y="21" width="1" height="1"/><rect x="5" y="21" width="2" height="1"/><rect x="9" y="21" width="3" height="1"/><rect x="16" y="21" width="3" height="1"/><rect x="21" y="21" width="1" height="1"/><rect x="23" y="21" width="4" height="1"/><rect x="2" y="22" width="1" height="1"/><rect x="6" y="22" width="4" height="1"/><rect x="12" y="22" width="5" height="1"/><rect x="19" y="22" width="1" height="1"/><rect x="22" y="22" width="5" height="1"/><rect x="28" y="22" width="3" height="1"/><rect x="10" y="23" width="2" height="1"/><rect x="13" y="23" width="2" height="1"/><rect x="17" y="23" width="4" height="1"/><rect x="22" y="23" width="1" height="1"/><rect x="26" y="23" width="2" height="1"/><rect x="2" y="24" width="7" height="1"/><rect x="14" y="24" width="2" height="1"/><rect x="17" y="24" width="2" height="1"/><rect x="21" y="24" width="2" height="1"/><rect x="24" y="24" width="1" height="1"/><rect x="26" y="24" width="3" height="1"/><rect x="2" y="25" width="1" height="1"/><rect x="8" y="25" width="1" height="1"/><rect x="11" y="25" width="1" height="1"/><rect x="13" y="25" width="1" height="1"/><rect x="16" y="25" width="3" height="1"/><rect x="21" y="25" width="2" height="1"/><rect x="26" y="25" width="1" height="1"/><rect x="2" y="26" width="1" height="1"/><rect x="4" y="26" width="3" height="1"/><rect x="8" y="26" width="1" height="1"/><rect x="10" y="26" width="3" height="1"/><rect x="14" y="26" width="1" height="1"/><rect x="18" y="26" width="1" height="1"/><rect x="21" y="26" width="7" height="1"/><rect x="30" y="26" width="1" height="1"/><rect x="2" y="27" width="1" height="1"/><rect x="4" y="27" width="3" height="1"/><rect x="8" y="27" width="1" height="1"/><rect x="10" y="27" width="2" height="1"/><rect x="13" y="27" width="1" height="1"/><rect x="15" y="27" width="1" height="1"/><rect x="17" y="27" width="2" height="1"/><rect x="20" y="27" width="2" height="1"/><rect x="23" y="27" width="1" height="1"/><rect x="25" y="27" width="1" height="1"/><rect x="27" y="27" width="4" height="1"/><rect x="2" y="28" width="1" height="1"/><rect x="4" y="28" width="3" height="1"/><rect x="8" y="28" width="1" height="1"/><rect x="12" y="28" width="1" height="1"/><rect x="17" y="28" width="1" height="1"/><rect x="20" y="28" width="1" height="1"/><rect x="23" y="28" width="7" height="1"/><rect x="2" y="29" width="1" height="1"/><rect x="8" y="29" width="1" height="1"/><rect x="12" y="29" width="2" height="1"/><rect x="23" y="29" width="2" height="1"/><rect x="26" y="29" width="3" height="1"/><rect x="30" y="29" width="1" height="1"/><rect x="2" y="30" width="7" height="1"/><rect x="12" y="30" width="8" height="1"/><rect x="21" y="30" width="1" height="1"/><rect x="23" y="30" width="2" height="1"/><rect x="28" y="30" width="1" height="1"/></g></svg>
+      <a class="btn sec sm" style="text-decoration:none;width:100%" href="https://huggingface.co/DJTomato/ps4-diffusion-models" target="_blank" rel="noopener">Browse Models</a>
+    </div>
+  </div>
+
+  <div class="pcols">
+    <div class="pbox">
+      <h2>Component Licenses (GPLv3 &amp; Third-Party)</h2>
+      <table class="lic-tbl">
+        <thead><tr><th>Component</th><th>Author</th><th>License</th></tr></thead>
+        <tbody>
+          <tr><td><b>GarlicDiffusion App &amp; Kernels</b></td><td>DJTomato &amp; Contributors</td><td>GNU GPLv3</td></tr>
+          <tr><td><b><a href="https://garlicllm.dev" target="_blank" rel="noopener" style="color:var(--accent-hi)">Garlic LLM</a></b> (Foundation &amp; UI)</td><td>Leonardo Alegría (<a href="https://ko-fi.com/leonardoalegria" target="_blank" rel="noopener" style="color:var(--accent2)">Ko-fi</a>)</td><td>GNU GPLv3</td></tr>
+          <tr><td><b>Stable Diffusion XL / SD 1.5</b></td><td>Stability AI / RunwayML</td><td>CreativeML Open RAIL</td></tr>
+          <tr><td><b>WAI-Illustrious SDXL (v14/v17)</b></td><td>WAI / OnomaAI</td><td>Fair AI Public License 1.0-SD</td></tr>
+          <tr><td><b>DMD2 &amp; Hyper-SD LoRAs</b></td><td>Tianwei Yin et al. / ByteDance</td><td>MIT / Open RAIL++-M</td></tr>
+          <tr><td><b>MeinaMix / DreamShaper / Anything</b></td><td>Meina / Lykon / Community</td><td>CreativeML Open RAIL-M</td></tr>
+          <tr><td><b>Real-ESRGAN AnimeVideo v3</b></td><td>Xintao Wang et al.</td><td>BSD-3-Clause</td></tr>
+          <tr><td><b>OpenOrbis PS4 Toolchain</b></td><td>OpenOrbis Team</td><td>GNU GPLv3</td></tr>
+          <tr><td><b>Selawik UI Font</b></td><td>Microsoft Corporation</td><td>SIL Open Font License 1.1</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pbox" style="border-color:rgba(245,158,11,.45)">
+      <h2 style="color:#fbbf24">Hardware, Thermal &amp; Liability Disclaimer</h2>
+      <div style="font-size:12.5px;color:var(--muted);line-height:1.6">
+        <p style="margin:0 0 8px"><b>NO WARRANTY (GPLv3 §§ 15–16):</b> GarlicDiffusion is provided <b>"AS IS"</b> without warranty of any kind. In no event shall the authors, contributors, or upstream copyright holders be liable for any console overheating, hardware wear, fan/APU degradation, data loss, or damages arising from running this software.</p>
+        <p style="margin:0 0 8px"><b>THERMAL SAFETY ON AGING PS4 HARDWARE:</b> Diffusion inference places sustained load on the PS4 APU. Always ensure clear airflow around all vents, clean dust/thermal paste on aging consoles, and use <b>Quiet (20 CU)</b> or <b>Silent (14 CU)</b> mode for long or unattended sessions. Avoid Turbo (36 CU) unless your console is well-cooled.</p>
+        <p style="margin:0"><b>UNOFFICIAL HOMEBREW:</b> Requires GoldHEN (used at your own risk). Not affiliated with or endorsed by Sony Interactive Entertainment. Hatsune Miku is a trademark of Crypton Future Media, Inc.</p>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -356,6 +510,7 @@ textarea{min-height:68px;resize:vertical}
         <button class="btn ok sm" onclick="recreateModal()">Recreate (New Seed)</button>
         <button class="btn sm" onclick="upscaleModal(1)">AI Upscale 1080p</button>
         <button class="btn sec sm" onclick="upscaleModal(2)">AI Upscale 2x</button>
+        <button class="btn sec sm" onclick="upscaleModal(3)">AI Upscale 4K</button>
         <a id="mdl-dl" class="btn sec sm" style="text-decoration:none" download>Download</a>
         <button class="btn stop sm" onclick="deleteModal()">Delete</button>
       </div>
@@ -363,26 +518,30 @@ textarea{min-height:68px;resize:vertical}
       <div style="border-top:1px solid var(--border);padding-top:8px">
         <label style="margin-top:0">Resize Image (saves copy to Gallery)</label>
         <div class="row">
-          <div><input id="rz-w" type="number" min="64" max="1920" placeholder="W"></div>
-          <div><input id="rz-h" type="number" min="64" max="1920" placeholder="H"></div>
+          <div><input id="rz-w" type="number" min="64" max="3840" placeholder="W"></div>
+          <div><input id="rz-h" type="number" min="64" max="3840" placeholder="H"></div>
           <div><button class="btn sec sm" style="width:100%;height:100%" onclick="resizeModal()">Resize</button></div>
         </div>
         <div class="chips" style="margin-top:6px">
+          <button class="chip" style="cursor:pointer" onclick="setRz(3840,2160)">3840x2160</button>
           <button class="chip" style="cursor:pointer" onclick="setRz(1920,1080)">1920x1080</button>
           <button class="chip" style="cursor:pointer" onclick="setRz(1080,1920)">1080x1920</button>
           <button class="chip" style="cursor:pointer" onclick="setRz(1080,1080)">1080x1080</button>
           <button class="chip" style="cursor:pointer" onclick="setRz(768,1024)">768x1024</button>
-          <button class="chip" style="cursor:pointer" onclick="setRz(512,768)">512x768</button>
         </div>
       </div>
     </div>
   </div>
 </div>
 
+<div class="app-foot">
+  <span><b>GarlicDiffusion v1.10</b> · GPLv3 (No Warranty) · Built upon <a href="https://github.com/leonardo-alegria/garlic-llm" target="_blank" style="color:#66b8ff;text-decoration:none">Garlic LLM</a></span>
+  <span>Use Quiet/Silent mode for long sessions · Ensure clear PS4 ventilation · Use at your own risk</span>
+</div>
 <div id="toast"></div>
 
 <script>
-let lastId=0,lastModels='',curModel='',lastPreset=null,galItems=[],presetItems=[],styleItems=[],modalIdx=-1,lastStatus=null,switchingModel=false,lastNeo=null,dlLastFin=0,mdlMgrData=null;
+let lastId=0,lastModels='',curModel='',lastPreset=null,galItems=[],presetItems=[],styleItems=[],charItems=[],modalIdx=-1,lastStatus=null,switchingModel=false,lastNeo=null,dlLastFin=0,mdlMgrData=null;
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(t._tm);t._tm=setTimeout(()=>t.style.display='none',2800);}
 function copyText(txt){
   if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(()=>toast('Copied prompt!')).catch(()=>fallbackCopy(txt));}
@@ -393,7 +552,7 @@ function fallbackCopy(txt){
   document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);toast('Copied prompt!');
 }
 function showTab(name){
-  ['studio','gallery','presets','models'].forEach(t=>{
+  ['studio','gallery','presets','models','credits'].forEach(t=>{
     document.getElementById('pg-'+t).classList.toggle('active',t===name);
     document.getElementById('tb-'+t).classList.toggle('active',t===name);
   });
@@ -490,10 +649,86 @@ async function deleteSelectedStyle(){
   await fetch('/styles/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:s.id})});
   stsel.value='';toast('Deleted style: '+s.name);loadStyles();
 }
+function getSelectedChar(){
+  const idx=chsel.value;
+  return (idx!==''&&charItems[+idx])?charItems[+idx]:null;
+}
+function onCharChange(){
+  const c=getSelectedChar(),pv=document.getElementById('chprev');
+  if(!c){pv.style.display='none';pv.textContent='';return;}
+  pv.style.display='block';
+  pv.textContent='Character active ('+c.series+'): '+c.prompt;
+}
+function toggleQuickChar(){
+  const b=document.getElementById('qchar-box');
+  b.style.display=b.style.display==='block'?'none':'block';
+}
+async function loadChars(){
+  try{
+    const prev=chsel.value;
+    charItems=await(await fetch('/characters')).json();
+    const groups={};
+    charItems.forEach((c,i)=>{const s=c.series||'Other';(groups[s]=groups[s]||[]).push({c,i});});
+    let html='<option value="">— No Character Overlay —</option>';
+    Object.keys(groups).sort().forEach(ser=>{
+      html+=`<optgroup label="${ser.replace(/"/g,'&quot;')}">`;
+      groups[ser].forEach(({c,i})=>{html+=`<option value="${i}">${c.name.replace(/</g,'&lt;')}</option>`;});
+      html+='</optgroup>';
+    });
+    chsel.innerHTML=html;
+    if(prev!==''&&charItems[+prev])chsel.value=prev;
+    onCharChange();
+  }catch(e){}
+}
+async function saveQuickChar(){
+  const nm=document.getElementById('qc-name').value.trim();
+  const sr=document.getElementById('qc-ser').value.trim()||'Custom';
+  const cpr=document.getElementById('qc-pr').value.trim();
+  const cng=document.getElementById('qc-ng').value.trim();
+  if(!nm||!cpr)return toast('Enter a character name and prompt tags');
+  const r=await fetch('/characters/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nm,series:sr,prompt:cpr,negative:cng})});
+  if(r.ok){document.getElementById('qc-name').value='';document.getElementById('qc-ser').value='';document.getElementById('qc-pr').value='';document.getElementById('qc-ng').value='';toggleQuickChar();toast('Saved character: '+nm);loadChars();}
+}
+function bakeCharIntoPrompt(){
+  const c=getSelectedChar();if(!c)return toast('Pick a character first');
+  if(c.prompt&&!pr.value.includes(c.prompt))pr.value=c.prompt+(pr.value.trim()?', '+pr.value.trim():'');
+  if(c.negative&&!ng.value.includes(c.negative))ng.value=(ng.value.trim()?ng.value.trim()+', ':'')+c.negative;
+  chsel.value='';onCharChange();toast('Baked character tags into prompt');
+}
+async function deleteSelectedChar(){
+  const c=getSelectedChar();if(!c)return toast('Select a character to delete');
+  if(!confirm('Delete character "'+c.name+'"?'))return;
+  await fetch('/characters/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:c.id})});
+  chsel.value='';toast('Deleted character: '+c.name);loadChars();
+}
+function applyQualityTier(tier){
+  const isSd15=(lastStatus&&lastStatus.arch==='sd15');
+  const m=(curModel||'').toLowerCase();
+  const isFast=m.includes('dmd')||m.includes('8step')||m.includes('hyper');
+  if(tier==='draft'){
+    sz.value='512x512';st.value=isFast?4:12;ups.value='0';
+    toast('Applied Fast Draft tier (512x512 native)');
+  }else if(tier==='mid'){
+    sz.value=isSd15?'512x768':'768x1024';st.value=isFast?(isSd15?8:6):16;ups.value='0';
+    toast('Applied Balanced Mid tier (native)');
+  }else if(tier==='hd'){
+    sz.value=isSd15?'512x768':'768x1024';st.value=isFast?(isSd15?8:6):20;ups.value='1';
+    toast('Applied Crisp 1080p AI Upscale tier');
+  }else if(tier==='wide'){
+    sz.value=isSd15?'896x512':'1024x576';st.value=isFast?(isSd15?8:6):20;ups.value='1';
+    toast('Applied 16:9 Full HD 1080p Wallpaper tier');
+  }else if(tier==='4k'){
+    sz.value=isSd15?'896x512':'1024x576';st.value=isFast?(isSd15?8:6):20;ups.value='3';
+    toast('Applied 4K UHD tier (RealESRGAN up to 3840x2160)');
+  }
+}
 async function gen(override){
   const [w,h]=sz.value.split('x').map(Number);
+  const chObj=getSelectedChar();
   const stObj=getSelectedStyle();
   let fp=pr.value,fn=ng.value;
+  if(chObj&&chObj.prompt)fp=chObj.prompt+(fp.trim()?', '+fp.trim():'');
+  if(chObj&&chObj.negative)fn=(fn.trim()?fn.trim()+', ':'')+chObj.negative;
   if(stObj&&stObj.prompt)fp=(fp.trim()?fp.trim()+', ':'')+stObj.prompt;
   if(stObj&&stObj.negative)fn=(fn.trim()?fn.trim()+', ':'')+stObj.negative;
   const body=Object.assign({prompt:fp,negative:fn,width:w,height:h,steps:+st.value,cfg:+cfg.value,seed:+sd.value,eco:+eco.value,sampler_name:smp.value,upscale:+ups.value},override||{});
@@ -602,7 +837,7 @@ function setRz(w,h){document.getElementById('rz-w').value=w;document.getElementB
 async function resizeModal(){
   if(modalIdx<0)return;const it=galItems[modalIdx];
   const w=+document.getElementById('rz-w').value,h=+document.getElementById('rz-h').value;
-  if(w<64||h<64||w>1920||h>1920)return toast('Size must be 64..1920');
+  if(w<64||h<64||w>3840||h>3840)return toast('Size must be 64..3840');
   const r=await fetch('/gallery/resize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:it.id,width:w,height:h})});
   if(!r.ok)return toast('PS4 is busy');
   closeModal();toast(`Resizing to ${w}x${h}...`);setTimeout(loadGallery,1200);
@@ -910,6 +1145,12 @@ async function poll(){
     msel.disabled=!canSwitch;
     document.getElementById('harch').textContent=(d.arch||'sdxl').toUpperCase();
     document.getElementById('hmdl').textContent=(d.model||(d.gpu_ready?'No model loaded':'Initializing GPU...'))+(d.last_sec?` · ${d.width}x${d.height} in ${d.last_sec.toFixed(1)}s`:'');
+    const hdot=document.getElementById('hdot');if(hdot)hdot.classList.toggle('busy',!!d.busy);
+    if(d.gpu_total_mb){
+      const vp=document.getElementById('hvram-pill');if(vp)vp.style.display='inline-flex';
+      document.getElementById('hvram').textContent=`VRAM ${d.gpu_used_mb} / ${d.gpu_total_mb} MiB`;
+      document.getElementById('hvfill').style.width=Math.min(100,Math.round(100*d.gpu_used_mb/d.gpu_total_mb))+'%';
+    }
     tstat.textContent=d.eff_tflops?`UNet ${d.unet_gpu_sec.toFixed(1)}s (${d.eff_tflops.toFixed(2)} TF) · VAE ${d.vae_sec.toFixed(1)}s`+(d.upscale_sec?` · Upscale ${d.upscale_sec.toFixed(1)}s`:'')+` · Rest ${d.cooldown_sec.toFixed(1)}s`:(d.bench_gemm_tflops?`GPU GEMM: Turbo ${d.bench_mode_tf[0].toFixed(2)} / Bal ${d.bench_mode_tf[1].toFixed(2)} / Quiet ${d.bench_mode_tf[2].toFixed(2)} / Silent ${d.bench_mode_tf[3].toFixed(2)} TF`:'');
     fill.style.width=Math.round((d.progress||0)*100)+'%';
     stage.style.color=d.error?'#ff7a85':'#b2c4e0';
@@ -924,7 +1165,7 @@ async function poll(){
     if(document.getElementById('pg-models').classList.contains('active')||(mdlMgrData&&mdlMgrData.download&&mdlMgrData.download.active))loadModelsMgr();
   }catch(e){}
 }
-setInterval(poll,900);poll();loadGallery();loadPresets();loadStyles();
+setInterval(poll,900);poll();loadGallery();loadPresets();loadStyles();loadChars();
 </script>
 </body>
 </html>

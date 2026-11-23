@@ -3,205 +3,377 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>GarlicDiffusion — Native Stable Diffusion & SDXL on PS4 / PS4 Pro</title>
-<meta name="description" content="Run Stable Diffusion 1.5, SDXL, and Real-ESRGAN 1080p AI Upscaling natively on a PlayStation 4 or PS4 Pro GPU. 100% offline with built-in Web Studio, Gallery, Hugging Face Downloader, and A1111/Discord API.">
-<style>
-:root{--bg:#070b14;--panel:#101727;--card:#151f34;--border:#233352;--accent:#4aa3ff;--accent2:#35d49a;--text:#eaf1fc;--muted:#8fa5c8}
-*{box-sizing:border-box}
-body{margin:0;background:radial-gradient(circle at 20% 0%,#142347 0%,var(--bg) 52%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}
-a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
-.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
-nav{position:sticky;top:0;z-index:20;background:rgba(7,11,20,.85);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
-.nav-in{display:flex;align-items:center;justify-content:space-between;padding:12px 0;gap:14px;flex-wrap:wrap}
-.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;color:#fff}
-.brand img{width:30px;height:30px}
-.nav-links{display:flex;gap:18px;font-size:14px;font-weight:600;flex-wrap:wrap}
-.nav-links a{color:var(--muted)}.nav-links a:hover{color:#fff;text-decoration:none}
-.hero{padding:64px 0 42px;text-align:center}
-.pill{display:inline-block;padding:4px 12px;border-radius:99px;background:#16294a;border:1px solid #2b4a80;color:#80c4ff;font-size:12px;font-weight:700;letter-spacing:.3px;margin-bottom:16px}
-h1{font-size:clamp(32px,5.2vw,54px);line-height:1.1;margin:0 0 16px;background:linear-gradient(90deg,#ffffff 0%,#7dc3ff 55%,#4be3ad 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.sub{max-width:740px;margin:0 auto 28px;font-size:18px;color:var(--muted)}
-.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
-.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:10px;font-weight:700;font-size:14px;border:1px solid transparent;transition:transform .12s,opacity .12s}
-.btn:hover{transform:translateY(-1px);text-decoration:none}
-.btn.primary{background:linear-gradient(135deg,#2f8cff,#1f6fe0);color:#fff;box-shadow:0 8px 26px rgba(47,140,255,.32)}
-.btn.mint{background:linear-gradient(135deg,#20a876,#16835b);color:#fff}
-.btn.ghost{background:var(--panel);border-color:var(--border);color:var(--text)}
-section{padding:46px 0;border-top:1px solid rgba(35,51,82,.55)}
-h2{font-size:28px;margin:0 0 10px;color:#fff}
-.lead{color:var(--muted);margin:0 0 24px;max-width:720px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px}
-.card h3{margin:0 0 6px;font-size:16px;color:#7cc2ff}
-.card p{margin:0;font-size:13.5px;color:var(--muted)}
-.samples{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px}
-.scard{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
-.scard img{width:100%;aspect-ratio:3/4;object-fit:cover;background:#05080f;display:block}
-.scard .ph{width:100%;aspect-ratio:3/4;display:flex;flex-direction:column;align-items:center;justify-content:center;background:repeating-linear-gradient(45deg,#0d1424,#0d1424 14px,#111a2e 14px,#111a2e 28px);color:var(--muted);text-align:center;padding:24px}
-.smeta{padding:14px;font-size:13px}
-.smeta b{color:#fff;display:block;margin-bottom:4px}
-.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-.chip{font-size:11px;padding:2px 8px;border-radius:99px;background:#0d1527;border:1px solid var(--border);color:#9ac4f8}
-.chip.ok{background:#113327;border-color:#20634b;color:#55e6b0}
-table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;font-size:13.5px}
-th,td{padding:11px 14px;text-align:left;border-bottom:1px solid rgba(35,51,82,.6)}
-th{background:#141e33;color:#8cc8ff;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
-tr:last-child td{border-bottom:0}
-.tscroll{overflow-x:auto;border-radius:12px}
-pre{background:#0b1120;border:1px solid var(--border);border-radius:10px;padding:14px;overflow-x:auto;font-size:13px;color:#cfe2ff}
-.support-box{background:linear-gradient(135deg,#13203b,#11292a);border:1px solid #2b4a6e;border-radius:16px;padding:28px;text-align:center}
-footer{padding:32px 0;text-align:center;color:var(--muted);font-size:12.5px;border-top:1px solid var(--border)}
-</style>
+<title>GarlicDiffusion — Native Stable Diffusion &amp; SDXL on PS4 / PS4 Pro</title>
+<meta name="description" content="Run Stable Diffusion 1.5, SDXL, and Real-ESRGAN 1080p/4K AI Upscaling natively on a PlayStation 4 or PS4 Pro GPU. 100% offline with TV Studio, Web UI, 80+ Presets/Styles/Characters, Hugging Face Downloader, and Discord/A1111 API.">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <nav>
   <div class="wrap nav-in">
-    <div class="brand"><img src="logo.svg" alt="Logo"> GarlicDiffusion <span class="chip ok">v1.0 PS4</span></div>
+    <a class="brand" href="index.html"><img src="logo.svg" alt="GarlicDiffusion logo"> <span>Garlic <span style="color:#3fa9f5">Diffusion</span></span> <span class="chip ok">v1.10 PS4</span></a>
     <div class="nav-links">
-      <a href="#samples">Samples</a>
-      <a href="#features">Features</a>
-      <a href="#benchmarks">Benchmarks</a>
-      <a href="#models">Models</a>
-      <a href="#install">Install & API</a>
+      <a class="active" href="index.html">Overview</a>
+      <a href="scenic.html">Scenic Gallery</a>
+      <a href="benchmarks.html">Benchmarks &amp; Tech</a>
+      <a href="#credits">Credits &amp; QR</a>
+      <a href="https://ko-fi.com/djtomato" target="_blank" rel="noopener" style="color:#55e6b0">Ko-fi</a>
+      <a href="https://discord.gg/Gbyq3kpGjc" target="_blank" rel="noopener">Discord / Community</a>
       <a href="https://github.com/DJTOMATO/GarlicDiffusion" target="_blank" rel="noopener">GitHub</a>
-      <a href="https://ko-fi.com/djtomato" target="_blank" rel="noopener">Ko-fi</a>
     </div>
   </div>
 </nav>
 
 <main class="wrap">
   <div class="hero">
-    <div class="pill">PS4 · PS4 Slim · PS4 Pro Neo · Bare-Metal GCN Compute</div>
-    <h1>Stable Diffusion & SDXL<br>Running Natively on PS4</h1>
-    <p class="sub">Generate anime and illustration artwork directly on your PlayStation 4 GPU with custom OpenCL GCN kernels, built-in Real-ESRGAN 1080p AI upscaling, Hardware CU Quiet Modes, Web Studio, and Automatic1111 / Discord API.</p>
+    <div class="pill">PS4 · PS4 Slim · PS4 Pro Neo · 100% Offline Bare-Metal GCN Compute</div>
+    <h1>AI Art on Your PlayStation 4.<br>Offline.</h1>
+    <p class="sub">GarlicDiffusion is a homebrew app for the PlayStation 4. It runs <b>Stable Diffusion 1.5</b>, <b>SDXL</b>, and <b>Real-ESRGAN 1080p / 4K AI Upscaling</b> directly on the console's own GPU — with no PC and no internet while it runs.</p>
     <div class="cta">
-      <a class="btn primary" href="https://github.com/DJTOMATO/GarlicDiffusion/releases/latest" target="_blank" rel="noopener">Download PS4 PKG (6.6 MiB)</a>
-      <a class="btn mint" href="https://huggingface.co/DJTomato/ps4-diffusion-models" target="_blank" rel="noopener">Browse Models on Hugging Face</a>
-      <a class="btn ghost" href="https://github.com/DJTOMATO/GarlicDiffusion" target="_blank" rel="noopener">GitHub Repository</a>
+      <a class="btn primary" href="https://github.com/DJTOMATO/GarlicDiffusion/releases/latest" target="_blank" rel="noopener">Download PS4 PKG (7.0 MiB)</a>
+      <a class="btn mint" href="https://huggingface.co/DJTomato/ps4-diffusion-models" target="_blank" rel="noopener">1-Click Models (Hugging Face)</a>
+      <a class="btn ghost" href="scenic.html">Scenic Showcase</a>
+      <a class="btn ghost" href="benchmarks.html">Geeky Benchmarks &amp; Specs</a>
       <a class="btn ghost" href="https://ko-fi.com/djtomato" target="_blank" rel="noopener">Support on Ko-fi</a>
+    </div>
+
+    <div class="stats-strip">
+      <div class="stat-card">
+        <div class="stat-val">17.3s</div>
+        <div class="stat-lbl">Fast Draft Preview</div>
+        <div class="stat-sub">512×512 · 4 steps · Quiet Mode (20 CU)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">46.5s</div>
+        <div class="stat-lbl">Crisp 1080p Anime HD</div>
+        <div class="stat-sub">MeinaMix 8-Step + Real-ESRGAN (1080×1620)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">50.9s</div>
+        <div class="stat-lbl">16:9 Full HD SDXL</div>
+        <div class="stat-sub">WAI v17 DMD2 (1920×1080 · 77.0s CFG 1.4)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">0 PC</div>
+        <div class="stat-lbl">100% Console-Native</div>
+        <div class="stat-sub">22 GCN Kernels · In-App HTTPS Model Manager</div>
+      </div>
     </div>
   </div>
 
-  <section id="samples">
-    <h2>Real PS4 Pro Generated Samples</h2>
-    <p class="lead">Every image below was rendered 100% locally on a PS4 Pro GPU in Quiet Mode (20 CUs) with zero PC involvement — complete with embedded A1111 PNG Info metadata.</p>
+  <!-- HATSUNE MIKU SHOWCASE -->
+  <section id="showcase">
+    <h2>Real PS4 Pro Outputs — Hatsune Miku Showcase</h2>
+    <p class="lead">Every image below was rendered and 1080p AI-upscaled <b>100% locally on a PS4 Pro GPU</b> in <b>Quiet (20 CU)</b> or <b>Silent (14 CU)</b> mode. Click any image to inspect full resolution. Looking for landscapes? Visit the <a href="scenic.html"><b>Dedicated Scenic Gallery →</b></a></p>
+
+    <div class="samples-wide" style="margin-bottom:18px">
+      <div class="scard wide">
+        <img loading="lazy" src="samples/v17_miku_16x9_1080p.jpg" alt="16:9 Full HD Hatsune Miku Neon Skyline on PS4 Pro">
+        <div class="smeta">
+          <div>
+            <b>WAI-Illustrious v17 DMD2 — 16:9 Full HD Neon Skyline</b>
+            <div class="subline">1024×576 → 1920×1080 · 6 steps · CFG 1.4 · LCM · Quiet (20 CU)</div>
+          </div>
+          <div class="chips"><span class="chip ok">77.03s Total (13.5s AI Upscale)</span><span class="chip">SDXL 16:9</span><span class="chip">Seed 880101</span></div>
+        </div>
+      </div>
+      <div class="scard wide">
+        <img loading="lazy" src="samples/meina_miku_16x9_1080p.jpg" alt="16:9 Full HD Hatsune Miku Sunset Coastal Overpass on PS4 Pro">
+        <div class="smeta">
+          <div>
+            <b>MeinaMix V11 8-Step — 16:9 Sunset Ocean Coastline</b>
+            <div class="subline">896×512 → 1890×1080 · 8 steps · CFG 3.5 · Euler · Quiet (20 CU)</div>
+          </div>
+          <div class="chips"><span class="chip ok">56.90s Total (10.0s AI Upscale)</span><span class="chip">SD 1.5 16:9</span><span class="chip">Seed 882502</span></div>
+        </div>
+      </div>
+    </div>
+
     <div class="samples">
       <div class="scard">
-        <img src="samples/sample_wai_v14_dmd2.jpg" alt="PS4 Pro WAI-Illustrious v1.4 DMD2 768x1024 output">
+        <img loading="lazy" src="samples/v17_miku_fb_meadow_8stp.jpg" alt="WAI-Illustrious v17 DMD2 Alpine Wildflower Meadow Hatsune Miku 1080p">
         <div class="smeta">
-          <b>WAI-Illustrious v1.4 DMD2 (SDXL)</b>
-          <div style="color:var(--muted)">768×1024 · 6 steps · CFG 1.0 · Quiet Mode (20 CU)</div>
-          <div class="chips"><span class="chip ok">51.5s Total</span><span class="chip">SDXL Q8_0</span><span class="chip">PS4 Pro</span></div>
+          <div>
+            <b>WAI-Illustrious v17 DMD2 (Alpine Wildflower Meadow)</b>
+            <div class="subline">768×1024 → 1080×1440 · 8 steps · CFG 1.4 · LCM · Balanced (25 CU)</div>
+          </div>
+          <div class="chips"><span class="chip ok">98.28s Total (14.7s Upscale)</span><span class="chip">CFG 1.4 Guided</span><span class="chip">1.26 TFLOPS</span></div>
         </div>
       </div>
+
       <div class="scard">
-        <div class="ph">
-          <strong style="color:#7cc2ff;font-size:16px;margin-bottom:8px">SD 1.5 + Real-ESRGAN 1080p Showcase</strong>
-          <span>Placeholder for fresh SFW 1080p upscaled PS4 capture (512×768 → 1080×1620 in 8.2s upscale).</span>
-        </div>
+        <img loading="lazy" src="samples/v17_miku_fb_winter_8stp.jpg" alt="WAI-Illustrious v14 8-Step Snowy Winter Coat Hatsune Miku 1080p">
         <div class="smeta">
-          <b>SD 1.5 + Real-ESRGAN Anime v3 (1080p)</b>
-          <div style="color:var(--muted)">512×768 → 1080×1620 · Quiet Mode (20 CU)</div>
-          <div class="chips"><span class="chip ok">8.2s AI Upscale</span><span class="chip">SD 1.5</span><span class="chip">1080p HD</span></div>
+          <div>
+            <b>WAI-Illustrious v14 8-Step (Winter Promenade Scarf)</b>
+            <div class="subline">768×1024 → 1080×1440 · 8 steps · CFG 3.5 · Euler · Quiet (20 CU)</div>
+          </div>
+          <div class="chips"><span class="chip ok">121.68s Total (18.5s Upscale)</span><span class="chip">Hyper-SDXL CFG 3.5</span><span class="chip">Seed 770303</span></div>
         </div>
       </div>
+
       <div class="scard">
-        <div class="ph">
-          <strong style="color:#7cc2ff;font-size:16px;margin-bottom:8px">WAI-Illustrious v17 & Base PS4 Showcase</strong>
-          <span>Placeholder for WAI-Illustrious v17 DMD2 & Silent 14CU / Base PS4 verification captures.</span>
-        </div>
+        <img loading="lazy" src="samples/miku_wai_v14_dmd2_1080p.jpg" alt="WAI-Illustrious v14 DMD2 Starry Winter Scarf Hatsune Miku 1080p">
         <div class="smeta">
-          <b>WAI-Illustrious v17 DMD2 (SDXL)</b>
-          <div style="color:var(--muted)">768×1024 · 6 steps · CFG 1.0 · LCM · Quiet/Silent Mode</div>
-          <div class="chips"><span class="chip">Coming Next</span><span class="chip">SDXL Q8_0</span></div>
+          <div>
+            <b>WAI-Illustrious v14 DMD2 (Starry Winter Scarf)</b>
+            <div class="subline">768×1024 → 1080×1440 · 6 steps · CFG 1.0 · LCM · Quiet (20 CU)</div>
+          </div>
+          <div class="chips"><span class="chip ok">65.52s Total (14.7s Upscale)</span><span class="chip">SDXL 1080p</span><span class="chip">Seed 393902</span></div>
+        </div>
+      </div>
+
+      <div class="scard">
+        <img loading="lazy" src="samples/meina_miku_remake_a.jpg" alt="MeinaMix V11 8-Step Cyber Jacket Hatsune Miku 1080p">
+        <div class="smeta">
+          <div>
+            <b>MeinaMix V11 8-Step (Cyber Jacket Portrait)</b>
+            <div class="subline">512×768 → 1080×1620 · 8 steps · CFG 3.5 · Euler · Quiet (20 CU)</div>
+          </div>
+          <div class="chips"><span class="chip ok">46.47s Total (8.2s Upscale)</span><span class="chip">SD 1.5 1080p</span><span class="chip">Seed 43001</span></div>
+        </div>
+      </div>
+
+      <div class="scard">
+        <img loading="lazy" src="samples/miku_dreamshaper8_2d_1080p.jpg" alt="DreamShaper 8 2D Anime Library Hatsune Miku 1080p">
+        <div class="smeta">
+          <div>
+            <b>DreamShaper 8 (2D Cel-Shaded Library)</b>
+            <div class="subline">512×768 → 1080×1620 · 20 steps · CFG 7.0 · Euler a · Quiet (20 CU)</div>
+          </div>
+          <div class="chips"><span class="chip ok">88.33s Total (8.8s Upscale)</span><span class="chip">SD 1.5 1080p</span><span class="chip">Seed 880905</span></div>
+        </div>
+      </div>
+
+      <div class="scard">
+        <img loading="lazy" src="samples/anything_miku_fullbody.jpg" alt="Anything V5 Cherry Blossom Hatsune Miku 1080p">
+        <div class="smeta">
+          <div>
+            <b>Anything V5 (Cherry Blossom Sakura Portrait)</b>
+            <div class="subline">512×768 → 1080×1620 · 20 steps · CFG 7.0 · Euler a · Quiet (20 CU)</div>
+          </div>
+          <div class="chips"><span class="chip ok">88.37s Total (8.8s Upscale)</span><span class="chip">Cel-Shaded 1080p</span><span class="chip">Seed 883009</span></div>
+        </div>
+      </div>
+
+      <div class="scard">
+        <img loading="lazy" src="samples/miku_wai_v17_silent_1080p.jpg" alt="WAI-Illustrious v17 DMD2 Silent 14CU Night Festival Hatsune Miku 1080p">
+        <div class="smeta">
+          <div>
+            <b>WAI-Illustrious v17 DMD2 (Night Lantern Festival)</b>
+            <div class="subline">768×1024 → 1080×1440 · 6 steps · CFG 1.0 · LCM · Silent (14 CU)</div>
+          </div>
+          <div class="chips"><span class="chip ok">98.81s Whisper Silent (14 CU)</span><span class="chip">35% GPU Power</span><span class="chip">Seed 880305</span></div>
+        </div>
+      </div>
+
+      <div class="scard">
+        <img loading="lazy" src="samples/miku_meinamix_silent_1080p.jpg" alt="MeinaMix V11 8-Step Silent 14CU Sakura Park Hatsune Miku 1080p">
+        <div class="smeta">
+          <div>
+            <b>MeinaMix V11 8-Step (Spring Sakura Cardigan)</b>
+            <div class="subline">512×768 → 1080×1620 · 8 steps · CFG 3.5 · Euler · Silent (14 CU)</div>
+          </div>
+          <div class="chips"><span class="chip ok">68.25s Whisper Silent (14 CU)</span><span class="chip">35% GPU Power</span><span class="chip">Seed 880602</span></div>
+        </div>
+      </div>
+
+      <div class="scard">
+        <img loading="lazy" src="samples/v14_miku_fullbody.jpg" alt="WAI-Illustrious v14 DMD2 Botanical Greenhouse Hatsune Miku 1080p">
+        <div class="smeta">
+          <div>
+            <b>WAI-Illustrious v14 DMD2 (Botanical Greenhouse)</b>
+            <div class="subline">768×1024 → 1080×1440 · 6 steps · CFG 1.4 · LCM · Quiet (20 CU)</div>
+          </div>
+          <div class="chips"><span class="chip ok">101.02s Total (18.6s Upscale)</span><span class="chip">CFG 1.4 Guided</span><span class="chip">Seed 880404</span></div>
         </div>
       </div>
     </div>
   </section>
 
+  <!-- PUNCHY SPEED TIERS -->
+  <section id="speed">
+    <h2>How Long Does an Image Take?</h2>
+    <p class="lead">Choose between an instant 17-second rough draft, a balanced portrait, or a razor-sharp 1080p / 16:9 / 4K showcase using the one-click tier pills in Studio. All times below are measured on PS4 Pro in <b>Quiet Mode (20 CUs — calm fan)</b>.</p>
+    <div class="tier-grid">
+      <div class="tier-card">
+        <div class="tier-time">~17s</div>
+        <div class="tier-title">⚡ Fast Draft Preview</div>
+        <div class="tier-desc"><b>512×512 · 4 steps · Native</b><br>Test prompt ideas &amp; compositions in 17.3s (SD 1.5) or 17.7s (SDXL DMD2) before committing to 1080p.</div>
+      </div>
+      <div class="tier-card">
+        <div class="tier-time">26s – 51s</div>
+        <div class="tier-title">⚖️ Balanced Native</div>
+        <div class="tier-desc"><b>512×512 (26.2s) / 768×1024 (50.8s)</b><br>Full 6–8 step native generation with crisp anatomy and lighting, without running the 4× AI upscaler.</div>
+      </div>
+      <div class="tier-card highlight">
+        <div class="tier-time">46s – 68s</div>
+        <div class="tier-title">✨ Crisp 1080p Anime HD</div>
+        <div class="tier-desc"><b>1080×1620 (46.5s) / 1080×1440 (67.6s)</b><br>Full portrait generation + bundled <b>Real-ESRGAN Anime v3</b> GPU upscaling (adds just 8.2s on SD 1.5 / 14.7s on SDXL).</div>
+      </div>
+      <div class="tier-card">
+        <div class="tier-time">50.9s</div>
+        <div class="tier-title">🖥️ 16:9 Full HD Wallpaper</div>
+        <div class="tier-desc"><b>1024×576 → 1920×1080 (SDXL)</b><br>Exact 16:9 widescreen desktop &amp; TV wallpapers in under a minute on Quiet 20CU (73.4s in whisper Silent 14CU).</div>
+      </div>
+    </div>
+    <div style="margin-top:18px;text-align:center">
+      <a class="btn ghost" href="benchmarks.html">Explore Full 40-Run Hardware Benchmark Matrix &amp; GCN Deep-Dive →</a>
+    </div>
+  </section>
+
+  <!-- WHAT IT DOES -->
   <section id="features">
-    <h2>Built From Scratch for PS4 GCN</h2>
-    <p class="lead">Because PS4 homebrew has no CUDA, PyTorch, or Vulkan compute runtime, the entire inference engine compiles 22 zero-scratch GCN OpenCL kernels dispatched directly via hand-written PM4 command packets.</p>
-    <div class="grid">
-      <div class="card"><h3>Hardware CU Thermal Control</h3><p>Symmetric checkerboard <code>SH_STATIC_THREAD_MGMT</code> CU masks (14 / 20 / 25 / 36 CUs on Pro; 7 / 11 / 14 / 18 CUs on Base PS4) + inter-block breathers prevent jet-engine fan spikes.</p></div>
-      <div class="card"><h3>Built-In 1080p AI Upscaler</h3><p>Bundled Real-ESRGAN Anime v3 (2.4 MiB) runs natively on PS4 GPU, turning 512×768 into crisp 1080×1620 in 8.2 seconds.</p></div>
-      <div class="card"><h3>In-App Hugging Face Downloader</h3><p>Stream pre-converted <code>PSD1</code> models straight onto your PS4 HDD over HTTPS with resume support, live MB/s progress, and zero FTP required.</p></div>
-      <div class="card"><h3>Web Studio, Gallery & Styles</h3><p>Full LAN Web UI on port 8081 with Save Prompt, Reusable Art Styles, 1:1 Lightbox Gallery, Resize/Upscale, and JSON Preset Export/Import.</p></div>
-      <div class="card"><h3>A1111 PNG Info & Discord API</h3><p>Embeds standard Automatic1111 <code>tEXt</code> parameters into every PNG and serves <code>/sdapi/v1/txt2img</code> (works with <code>bz-cogs/aimage</code>) + OpenAI <code>/v1/images/generations</code>.</p></div>
-      <div class="card"><h3>Base PS4, Slim & PS4 Pro</h3><p>Auto-switches to compact 325 MiB scratch buffers on Base/Slim PS4 so both SD 1.5 (1.5 GiB) and full SDXL (4.0 GiB) fit in direct memory.</p></div>
-    </div>
-  </section>
-
-  <section id="benchmarks">
-    <h2>Measured PS4 Benchmarks</h2>
-    <p class="lead">Real timings logged on PS4 Pro Neo (FW 11.00, GoldHEN). Unmeasured configurations are marked <em>TBD</em> until verified on hardware.</p>
-    <div class="tscroll">
-      <table>
-        <thead>
-          <tr><th>Model</th><th>Arch</th><th>Output Size</th><th>Settings</th><th>Power Mode</th><th>Total Time</th></tr>
-        </thead>
-        <tbody>
-          <tr><td><b>WAI-Illustrious v14 DMD2</b></td><td>SDXL</td><td>768×1024</td><td>6 steps · CFG 1.0 · LCM</td><td>Quiet (20 CU)</td><td><b>50.8s</b> (31.3s UNet + 19.2s VAE)</td></tr>
-          <tr><td><b>WAI-Illustrious v17 DMD2</b></td><td>SDXL</td><td>768×1024</td><td>6 steps · CFG 1.0 · LCM</td><td>Quiet (20 CU)</td><td><i>TBD (~50s expected)</i></td></tr>
-          <tr><td><b>WAI-Illustrious v14 8-Step</b></td><td>SDXL</td><td>768×1024</td><td>8 steps · CFG 3.5 · Euler</td><td>Quiet (20 CU)</td><td><b>98.0s</b> (79.0s UNet + 18.5s VAE)</td></tr>
-          <tr><td><b>Anything V5 + 1080p Upscale</b></td><td>SD 1.5</td><td>1080×1620</td><td>20 steps · CFG 7.0 · Euler a</td><td>Quiet (20 CU)</td><td><b>87.5s</b> (68.2s UNet + 11s VAE + 8.2s AI Upscale)</td></tr>
-          <tr><td><b>MeinaMix V11 8-Step + 1080p</b></td><td>SD 1.5</td><td>1080×1620</td><td>8 steps · CFG 3.5 · Euler</td><td>Quiet (20 CU)</td><td><i>TBD (~46s expected)</i></td></tr>
-          <tr><td><b>PS4 Pro Silent Thermal Check</b></td><td>SDXL</td><td>768×1024</td><td>6 steps · CFG 1.0 · LCM</td><td>Silent (14 CU)</td><td><i>TBD (0.99 TF measured)</i></td></tr>
-          <tr><td><b>Base PS4 / PS4 Slim (18 CU)</b></td><td>SD 1.5 / SDXL</td><td>512×768 / 768×1024</td><td>8 / 6 steps</td><td>Balanced (14 CU)</td><td><i>TBD (Community tests welcome)</i></td></tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <section id="models">
-    <h2>Pre-Converted PS4 Model Catalog</h2>
-    <p class="lead">Hosted publicly on <a href="https://huggingface.co/DJTomato/ps4-diffusion-models" target="_blank" rel="noopener">huggingface.co/DJTomato/ps4-diffusion-models</a> and downloadable in 1 click directly inside the PS4 app.</p>
-    <div class="grid">
-      <div class="card"><h3>WAI-Illustrious v17 DMD2</h3><p>Latest WAI v17 SDXL anime checkpoint fused with DMD2. 6 steps, CFG 1.0, ~3.7 GiB standalone.</p></div>
-      <div class="card"><h3>WAI-Illustrious v14 DMD2</h3><p>Proven razor-sharp anime SDXL checkpoint. 6 steps, CFG 1.0, ~51s in Quiet mode.</p></div>
-      <div class="card"><h3>MeinaMix V11 8-Step</h3><p>Ultra-fast glossy anime SD 1.5 (~1.2 GiB) with automatic 1080p Real-ESRGAN upscale. Ideal for Base PS4!</p></div>
-      <div class="card"><h3>DreamShaper 8 & Anything V5</h3><p>Classic 2.5D fantasy and cel-shaded SD 1.5 checkpoints (~1.2 GiB each) with automatic 1080p upscaling.</p></div>
-    </div>
-  </section>
-
-  <section id="install">
-    <h2>Quick Install & API</h2>
+    <h2>What It Does</h2>
+    <p class="lead">Everything runs locally on your PlayStation 4. Nothing is sent to the cloud.</p>
     <div class="grid">
       <div class="card">
-        <h3>1. Install the 6.6 MiB PKG</h3>
-        <p>Install <code>Garlic-Diffusion.pkg</code> on any GoldHEN PS4 / PS4 Pro via Package Installer, then launch it from the home screen.</p>
+        <h3>Dual SD 1.5 &amp; SDXL GCN Engine</h3>
+        <p>22 custom bare-metal OpenCL GCN kernels dispatched via raw PM4 command packets. Supports <b>LCM</b>, <b>Euler</b>, <b>Euler a</b>, and <b>DPM++ 2M Karras</b> samplers plus A1111 <code>(tag:weight)</code> prompt weighting in <b>1.5–1.7 GiB</b> (SD 1.5) or <b>4.0–4.2 GiB</b> (SDXL).</p>
+      </div>
+      <div class="card">
+        <h3>Built-In 1080p &amp; 4K AI Upscaler</h3>
+        <p>Ships with <b>Real-ESRGAN AnimeVideo v3</b> (2.4 MiB) inside the PKG. Upscales images to crisp <b>1080p Full HD</b> in 8.2–16.8s, or up to <b>4K UHD (3840×2160)</b> on PS4 Pro.</p>
+      </div>
+      <div class="card">
+        <h3>80+ Built-In Presets, Styles &amp; Characters</h3>
+        <p>Comes seeded with <b>20 Prompt Presets</b>, <b>22 reusable Art Styles</b> (Shinkai, Ghibli, 2D DreamShaper Fix, Manga, Ukiyo-e), and <b>38 Character Presets</b> (Miku, Frieren, Rem, Saber, Hololive, Genshin, FFVII) on both TV and Web UI.</p>
+      </div>
+      <div class="card">
+        <h3>Hardware CU Thermal Scaling</h3>
+        <p>4 live GPU power modes (<b>Silent 14CU</b>, <b>Quiet 20CU</b>, <b>Balanced 25CU</b>, <b>Turbo 36CU</b>) using symmetric checkerboard <code>SH_STATIC_THREAD_MGMT</code> masks + thermal cooldown breathers to keep your PS4 cool and quiet.</p>
+      </div>
+      <div class="card">
+        <h3>1-Click Hugging Face Downloader</h3>
+        <p>Stream pre-converted <code>PSD1</code> models directly onto your PS4 HDD over HTTPS (<code>libSceHttp</code> + <code>libSceSsl</code>) from <a href="https://huggingface.co/DJTomato/ps4-diffusion-models" target="_blank" rel="noopener">DJTomato/ps4-diffusion-models</a> — zero FTP required. Want another model converted? <a href="https://discord.gg/Gbyq3kpGjc" target="_blank" rel="noopener">Request it in our Support Discord!</a></p>
+      </div>
+      <div class="card">
+        <h3>A1111 PNG Info, Web Studio &amp; Discord API</h3>
+        <p>Full LAN Web Studio on port <code>8081</code>, standard Automatic1111 <code>tEXt</code> metadata embedded in every PNG, plus drop-in <code>/sdapi/v1/txt2img</code> for <a href="https://github.com/zhaobenny/bz-cogs/tree/main/aimage" target="_blank" rel="noopener">bz-cogs/aimage</a> Discord bots and OpenAI clients.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3-STEP INSTALL -->
+  <section id="install">
+    <h2>Install in Three Steps</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>1. Install the 7.0 MiB PKG</h3>
+        <p>Download <code>Garlic-Diffusion.pkg</code> from <a href="https://github.com/DJTOMATO/GarlicDiffusion/releases/latest" target="_blank" rel="noopener">GitHub Releases</a> and install it on any GoldHEN PS4, PS4 Slim, or PS4 Pro via <i>GoldHEN → Package Installer</i>.</p>
       </div>
       <div class="card">
         <h3>2. Download a Model In-App</h3>
-        <p>Open <code>http://&lt;PS4_IP&gt;:8081</code> → <b>Models</b> tab (or press <b>[Up]</b> on your controller) and click <b>Download to PS4</b>.</p>
+        <p>Launch <b>GarlicDiffusion</b>. Press <b>[OPTIONS]</b> on your controller (or select <b>Model → Download / Manage</b> with <b>[X]</b>, or open <code>http://&lt;PS4_IP&gt;:8081</code> → <b>Models</b>) and download <code>MeinaMix_V11_8step</code> or <code>WAI_Illustrious_v17_dmd2</code>.</p>
       </div>
       <div class="card">
-        <h3>3. Connect Discord or A1111</h3>
-        <p>Point Automatic1111 clients or <code>bz-cogs/aimage</code> at <code>http://&lt;PS4_IP&gt;:8081</code> — no extra setup needed.</p>
+        <h3>3. Generate on TV, Phone, or Discord</h3>
+        <p>Navigate settings with <b>D-Pad / Stick</b>, open dropdowns &amp; sliders with <b>[X]</b> / cancel with <b>[O]</b>, and press <b>[Triangle]</b> to generate — or use the LAN Web Studio and Discord API on port <code>8081</code>.</p>
       </div>
     </div>
-    <pre style="margin-top:16px">curl http://192.168.1.29:8081/sdapi/v1/txt2img \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"masterpiece, best quality, 1girl, silver hair, glowing sakura","steps":6,"cfg_scale":1.0,"width":768,"height":1024,"sampler_name":"LCM"}'</pre>
   </section>
 
-  <section id="support">
-    <div class="support-box">
-      <h2 style="margin-bottom:8px">Support Open-Source PS4 AI Homebrew</h2>
-      <p style="color:var(--muted);max-width:620px;margin:0 auto 20px">Free & open-source under GPLv3. Donations help fund Base PS4 / Slim hardware testing, new fast GCN kernels, and model conversions.</p>
-      <div class="cta">
-        <a class="btn primary" href="https://ko-fi.com/djtomato" target="_blank" rel="noopener">Support on Ko-fi</a>
-        <a class="btn ghost" href="https://github.com/DJTOMATO/GarlicDiffusion" target="_blank" rel="noopener">Star on GitHub</a>
-        <a class="btn mint" href="https://huggingface.co/DJTomato/ps4-diffusion-models" target="_blank" rel="noopener">Hugging Face Models</a>
+  <!-- FAQ (Inspired by garlicllm.dev) -->
+  <section id="faq">
+    <h2>Questions</h2>
+    <details class="faq" open>
+      <summary>Does it need internet or a PC while generating?</summary>
+      <p>No. Once you download a model onto the console's drive, CLIP text encoding, UNet denoising, VAE decoding, and Real-ESRGAN 1080p/4K upscaling all run 100% offline on the PS4's own GPU.</p>
+    </details>
+    <details class="faq">
+      <summary>Does it work on a Base PS4 / PS4 Slim, or only PS4 Pro?</summary>
+      <p>It works on all three! On a Base PS4 or PS4 Slim (18 CUs, 4.0 GiB direct memory), GarlicDiffusion automatically enables a compact 325 MiB activation scratch layout and 24×24 tiled VAE decoding so both SD 1.5 (<b>1.54 GiB</b>, recommended for speed!) and full SDXL (<b>4.04 GiB</b>) fit cleanly.</p>
+    </details>
+    <details class="faq">
+      <summary>Why is it called "GarlicDiffusion"?</summary>
+      <p>On the PlayStation 4's unified GDDR5 memory architecture, Sony's internal codename for the high-bandwidth memory bus that the GPU reads directly is <b>"Garlic"</b> (paired with the CPU-coherent bus, "Onion"). The name also honors Leonardo Alegría's <a href="https://garlicllm.dev" target="_blank" rel="noopener"><b>Garlic LLM</b></a>, which pioneered bare-metal PM4 GPU AI on the PS4.</p>
+    </details>
+    <details class="faq">
+      <summary>Can it overheat or harm my console?</summary>
+      <p>GarlicDiffusion is an ordinary userland homebrew app and contains no exploit. However, diffusion inference drives sustained GPU load on 7–13 year old hardware. That is why GarlicDiffusion defaults to <b>Quiet Mode (20 of 36 CUs on Pro · ~58% GPU power)</b> with automatic inter-block thermal cooldown pauses. Always keep your console's vents unobstructed and use <b>Quiet</b> or <b>Silent (14 CU)</b> mode for long sessions.</p>
+    </details>
+    <details class="faq">
+      <summary>Why did DreamShaper 8 look semi-realistic / 2.5D on anime characters?</summary>
+      <p>Unlike pure 2D anime checkpoints (<code>MeinaMix</code>, <code>Anything V5</code>, <code>WAI-Illustrious</code>), <code>DreamShaper 8</code> is trained on painterly 2.5D portraits. Selecting the built-in <b>"2D Anime Fix (For DreamShaper)"</b> Art Style in Studio adds cel-shading tags and suppresses 3D/photorealistic skin shading — while DreamShaper 8 shines naturally on <a href="scenic.html">fantasy landscapes</a>.</p>
+    </details>
+  </section>
+
+  <!-- CREDITS, SUPPORT & QR CODES -->
+  <section id="credits">
+    <h2>Support, Community &amp; Credits</h2>
+    <p class="lead">Scan any QR code below (also built right into the PS4 TV UI via <b>[Circle]</b> and the Web Studio's <b>Credits &amp; QR</b> tab) or click to open:</p>
+
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-bottom:24px">
+      <div class="card" style="text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px">
+        <h3 style="color:#55e6b0;margin:0">Support on Ko-fi</h3>
+        <div style="font-size:12px;color:var(--muted)">ko-fi.com/djtomato</div>
+        <div style="width:148px;height:148px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" shape-rendering="crispEdges"><rect width="29" height="29" rx="2" fill="#ffffff"/><g fill="#0b1c3a"><rect x="2" y="2" width="7" height="1"/><rect x="10" y="2" width="4" height="1"/><rect x="16" y="2" width="1" height="1"/><rect x="18" y="2" width="1" height="1"/><rect x="20" y="2" width="7" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="8" y="3" width="1" height="1"/><rect x="10" y="3" width="1" height="1"/><rect x="13" y="3" width="4" height="1"/><rect x="18" y="3" width="1" height="1"/><rect x="20" y="3" width="1" height="1"/><rect x="26" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/><rect x="4" y="4" width="3" height="1"/><rect x="8" y="4" width="1" height="1"/><rect x="11" y="4" width="3" height="1"/><rect x="16" y="4" width="3" height="1"/><rect x="20" y="4" width="1" height="1"/><rect x="22" y="4" width="3" height="1"/><rect x="26" y="4" width="1" height="1"/><rect x="2" y="5" width="1" height="1"/><rect x="4" y="5" width="3" height="1"/><rect x="8" y="5" width="1" height="1"/><rect x="12" y="5" width="2" height="1"/><rect x="15" y="5" width="1" height="1"/><rect x="17" y="5" width="2" height="1"/><rect x="20" y="5" width="1" height="1"/><rect x="22" y="5" width="3" height="1"/><rect x="26" y="5" width="1" height="1"/><rect x="2" y="6" width="1" height="1"/><rect x="4" y="6" width="3" height="1"/><rect x="8" y="6" width="1" height="1"/><rect x="12" y="6" width="1" height="1"/><rect x="14" y="6" width="1" height="1"/><rect x="18" y="6" width="1" height="1"/><rect x="20" y="6" width="1" height="1"/><rect x="22" y="6" width="3" height="1"/><rect x="26" y="6" width="1" height="1"/><rect x="2" y="7" width="1" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="10" y="7" width="3" height="1"/><rect x="16" y="7" width="1" height="1"/><rect x="18" y="7" width="1" height="1"/><rect x="20" y="7" width="1" height="1"/><rect x="26" y="7" width="1" height="1"/><rect x="2" y="8" width="7" height="1"/><rect x="10" y="8" width="1" height="1"/><rect x="12" y="8" width="1" height="1"/><rect x="14" y="8" width="1" height="1"/><rect x="16" y="8" width="1" height="1"/><rect x="18" y="8" width="1" height="1"/><rect x="20" y="8" width="7" height="1"/><rect x="10" y="9" width="2" height="1"/><rect x="14" y="9" width="1" height="1"/><rect x="17" y="9" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="8" y="10" width="1" height="1"/><rect x="11" y="10" width="2" height="1"/><rect x="14" y="10" width="3" height="1"/><rect x="20" y="10" width="2" height="1"/><rect x="25" y="10" width="2" height="1"/><rect x="2" y="11" width="4" height="1"/><rect x="7" y="11" width="1" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="1" height="1"/><rect x="15" y="11" width="3" height="1"/><rect x="21" y="11" width="5" height="1"/><rect x="2" y="12" width="1" height="1"/><rect x="4" y="12" width="5" height="1"/><rect x="11" y="12" width="1" height="1"/><rect x="13" y="12" width="3" height="1"/><rect x="17" y="12" width="3" height="1"/><rect x="21" y="12" width="3" height="1"/><rect x="25" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="1" height="1"/><rect x="7" y="13" width="1" height="1"/><rect x="10" y="13" width="1" height="1"/><rect x="12" y="13" width="2" height="1"/><rect x="17" y="13" width="1" height="1"/><rect x="19" y="13" width="1" height="1"/><rect x="22" y="13" width="2" height="1"/><rect x="26" y="13" width="1" height="1"/><rect x="3" y="14" width="2" height="1"/><rect x="8" y="14" width="2" height="1"/><rect x="11" y="14" width="2" height="1"/><rect x="14" y="14" width="1" height="1"/><rect x="17" y="14" width="5" height="1"/><rect x="26" y="14" width="1" height="1"/><rect x="2" y="15" width="5" height="1"/><rect x="10" y="15" width="3" height="1"/><rect x="14" y="15" width="1" height="1"/><rect x="16" y="15" width="3" height="1"/><rect x="21" y="15" width="1" height="1"/><rect x="25" y="15" width="1" height="1"/><rect x="2" y="16" width="1" height="1"/><rect x="4" y="16" width="1" height="1"/><rect x="6" y="16" width="4" height="1"/><rect x="16" y="16" width="2" height="1"/><rect x="19" y="16" width="1" height="1"/><rect x="21" y="16" width="3" height="1"/><rect x="25" y="16" width="2" height="1"/><rect x="2" y="17" width="1" height="1"/><rect x="4" y="17" width="3" height="1"/><rect x="9" y="17" width="2" height="1"/><rect x="12" y="17" width="2" height="1"/><rect x="16" y="17" width="2" height="1"/><rect x="19" y="17" width="3" height="1"/><rect x="23" y="17" width="2" height="1"/><rect x="26" y="17" width="1" height="1"/><rect x="2" y="18" width="1" height="1"/><rect x="5" y="18" width="1" height="1"/><rect x="8" y="18" width="3" height="1"/><rect x="13" y="18" width="4" height="1"/><rect x="18" y="18" width="5" height="1"/><rect x="24" y="18" width="1" height="1"/><rect x="10" y="19" width="2" height="1"/><rect x="13" y="19" width="1" height="1"/><rect x="15" y="19" width="1" height="1"/><rect x="18" y="19" width="1" height="1"/><rect x="22" y="19" width="1" height="1"/><rect x="2" y="20" width="7" height="1"/><rect x="12" y="20" width="3" height="1"/><rect x="18" y="20" width="1" height="1"/><rect x="20" y="20" width="1" height="1"/><rect x="22" y="20" width="1" height="1"/><rect x="26" y="20" width="1" height="1"/><rect x="2" y="21" width="1" height="1"/><rect x="8" y="21" width="1" height="1"/><rect x="11" y="21" width="2" height="1"/><rect x="16" y="21" width="1" height="1"/><rect x="18" y="21" width="1" height="1"/><rect x="22" y="21" width="1" height="1"/><rect x="2" y="22" width="1" height="1"/><rect x="4" y="22" width="3" height="1"/><rect x="8" y="22" width="1" height="1"/><rect x="10" y="22" width="1" height="1"/><rect x="12" y="22" width="1" height="1"/><rect x="15" y="22" width="8" height="1"/><rect x="24" y="22" width="1" height="1"/><rect x="2" y="23" width="1" height="1"/><rect x="4" y="23" width="3" height="1"/><rect x="8" y="23" width="1" height="1"/><rect x="10" y="23" width="2" height="1"/><rect x="13" y="23" width="1" height="1"/><rect x="15" y="23" width="6" height="1"/><rect x="25" y="23" width="2" height="1"/><rect x="2" y="24" width="1" height="1"/><rect x="4" y="24" width="3" height="1"/><rect x="8" y="24" width="1" height="1"/><rect x="16" y="24" width="3" height="1"/><rect x="23" y="24" width="2" height="1"/><rect x="26" y="24" width="1" height="1"/><rect x="2" y="25" width="1" height="1"/><rect x="8" y="25" width="1" height="1"/><rect x="14" y="25" width="1" height="1"/><rect x="16" y="25" width="1" height="1"/><rect x="18" y="25" width="5" height="1"/><rect x="26" y="25" width="1" height="1"/><rect x="2" y="26" width="7" height="1"/><rect x="11" y="26" width="4" height="1"/><rect x="18" y="26" width="2" height="1"/><rect x="23" y="26" width="1" height="1"/><rect x="26" y="26" width="1" height="1"/></g></svg></div>
+        <a class="btn mint" style="width:100%;justify-content:center" href="https://ko-fi.com/djtomato" target="_blank" rel="noopener">Donate on Ko-fi</a>
       </div>
+
+      <div class="card" style="text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px">
+        <h3 style="color:#82c6ff;margin:0">Discord &amp; Community</h3>
+        <div style="font-size:12px;color:var(--muted)">discord.gg/Gbyq3kpGjc · Model Requests &amp; Bot</div>
+        <div style="width:148px;height:148px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" shape-rendering="crispEdges"><rect width="29" height="29" rx="2" fill="#ffffff"/><g fill="#0b1c3a"><rect x="2" y="2" width="7" height="1"/><rect x="10" y="2" width="1" height="1"/><rect x="12" y="2" width="5" height="1"/><rect x="20" y="2" width="7" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="8" y="3" width="1" height="1"/><rect x="10" y="3" width="3" height="1"/><rect x="14" y="3" width="3" height="1"/><rect x="18" y="3" width="1" height="1"/><rect x="20" y="3" width="1" height="1"/><rect x="26" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/><rect x="4" y="4" width="3" height="1"/><rect x="8" y="4" width="1" height="1"/><rect x="10" y="4" width="1" height="1"/><rect x="12" y="4" width="1" height="1"/><rect x="14" y="4" width="2" height="1"/><rect x="20" y="4" width="1" height="1"/><rect x="22" y="4" width="3" height="1"/><rect x="26" y="4" width="1" height="1"/><rect x="2" y="5" width="1" height="1"/><rect x="4" y="5" width="3" height="1"/><rect x="8" y="5" width="1" height="1"/><rect x="12" y="5" width="1" height="1"/><rect x="15" y="5" width="1" height="1"/><rect x="20" y="5" width="1" height="1"/><rect x="22" y="5" width="3" height="1"/><rect x="26" y="5" width="1" height="1"/><rect x="2" y="6" width="1" height="1"/><rect x="4" y="6" width="3" height="1"/><rect x="8" y="6" width="1" height="1"/><rect x="11" y="6" width="2" height="1"/><rect x="16" y="6" width="1" height="1"/><rect x="20" y="6" width="1" height="1"/><rect x="22" y="6" width="3" height="1"/><rect x="26" y="6" width="1" height="1"/><rect x="2" y="7" width="1" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="10" y="7" width="1" height="1"/><rect x="15" y="7" width="2" height="1"/><rect x="20" y="7" width="1" height="1"/><rect x="26" y="7" width="1" height="1"/><rect x="2" y="8" width="7" height="1"/><rect x="10" y="8" width="1" height="1"/><rect x="12" y="8" width="1" height="1"/><rect x="14" y="8" width="1" height="1"/><rect x="16" y="8" width="1" height="1"/><rect x="18" y="8" width="1" height="1"/><rect x="20" y="8" width="7" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="16" y="9" width="3" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="6" y="10" width="7" height="1"/><rect x="14" y="10" width="2" height="1"/><rect x="18" y="10" width="2" height="1"/><rect x="21" y="10" width="1" height="1"/><rect x="24" y="10" width="3" height="1"/><rect x="3" y="11" width="2" height="1"/><rect x="7" y="11" width="1" height="1"/><rect x="9" y="11" width="6" height="1"/><rect x="17" y="11" width="1" height="1"/><rect x="20" y="11" width="2" height="1"/><rect x="23" y="11" width="1" height="1"/><rect x="25" y="11" width="2" height="1"/><rect x="6" y="12" width="4" height="1"/><rect x="13" y="12" width="1" height="1"/><rect x="17" y="12" width="3" height="1"/><rect x="21" y="12" width="4" height="1"/><rect x="26" y="12" width="1" height="1"/><rect x="3" y="13" width="3" height="1"/><rect x="10" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="16" y="13" width="1" height="1"/><rect x="18" y="13" width="2" height="1"/><rect x="21" y="13" width="1" height="1"/><rect x="23" y="13" width="1" height="1"/><rect x="4" y="14" width="1" height="1"/><rect x="7" y="14" width="5" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="17" y="14" width="2" height="1"/><rect x="20" y="14" width="2" height="1"/><rect x="26" y="14" width="1" height="1"/><rect x="3" y="15" width="3" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="14" y="15" width="1" height="1"/><rect x="17" y="15" width="5" height="1"/><rect x="25" y="15" width="2" height="1"/><rect x="2" y="16" width="2" height="1"/><rect x="6" y="16" width="3" height="1"/><rect x="12" y="16" width="3" height="1"/><rect x="16" y="16" width="5" height="1"/><rect x="23" y="16" width="2" height="1"/><rect x="26" y="16" width="1" height="1"/><rect x="5" y="17" width="2" height="1"/><rect x="11" y="17" width="2" height="1"/><rect x="17" y="17" width="1" height="1"/><rect x="19" y="17" width="5" height="1"/><rect x="2" y="18" width="3" height="1"/><rect x="6" y="18" width="1" height="1"/><rect x="8" y="18" width="3" height="1"/><rect x="13" y="18" width="1" height="1"/><rect x="17" y="18" width="6" height="1"/><rect x="25" y="18" width="1" height="1"/><rect x="10" y="19" width="2" height="1"/><rect x="13" y="19" width="6" height="1"/><rect x="22" y="19" width="1" height="1"/><rect x="26" y="19" width="1" height="1"/><rect x="2" y="20" width="7" height="1"/><rect x="10" y="20" width="1" height="1"/><rect x="13" y="20" width="1" height="1"/><rect x="15" y="20" width="2" height="1"/><rect x="18" y="20" width="1" height="1"/><rect x="20" y="20" width="1" height="1"/><rect x="22" y="20" width="1" height="1"/><rect x="26" y="20" width="1" height="1"/><rect x="2" y="21" width="1" height="1"/><rect x="8" y="21" width="1" height="1"/><rect x="10" y="21" width="1" height="1"/><rect x="13" y="21" width="1" height="1"/><rect x="16" y="21" width="3" height="1"/><rect x="22" y="21" width="1" height="1"/><rect x="25" y="21" width="1" height="1"/><rect x="2" y="22" width="1" height="1"/><rect x="4" y="22" width="3" height="1"/><rect x="8" y="22" width="1" height="1"/><rect x="10" y="22" width="1" height="1"/><rect x="12" y="22" width="1" height="1"/><rect x="14" y="22" width="1" height="1"/><rect x="17" y="22" width="6" height="1"/><rect x="2" y="23" width="1" height="1"/><rect x="4" y="23" width="3" height="1"/><rect x="8" y="23" width="1" height="1"/><rect x="11" y="23" width="1" height="1"/><rect x="13" y="23" width="2" height="1"/><rect x="16" y="23" width="4" height="1"/><rect x="22" y="23" width="1" height="1"/><rect x="24" y="23" width="2" height="1"/><rect x="2" y="24" width="1" height="1"/><rect x="4" y="24" width="3" height="1"/><rect x="8" y="24" width="1" height="1"/><rect x="12" y="24" width="2" height="1"/><rect x="15" y="24" width="2" height="1"/><rect x="19" y="24" width="1" height="1"/><rect x="21" y="24" width="3" height="1"/><rect x="25" y="24" width="2" height="1"/><rect x="2" y="25" width="1" height="1"/><rect x="8" y="25" width="1" height="1"/><rect x="10" y="25" width="4" height="1"/><rect x="16" y="25" width="1" height="1"/><rect x="18" y="25" width="1" height="1"/><rect x="21" y="25" width="2" height="1"/><rect x="2" y="26" width="7" height="1"/><rect x="10" y="26" width="1" height="1"/><rect x="13" y="26" width="1" height="1"/><rect x="16" y="26" width="1" height="1"/><rect x="18" y="26" width="1" height="1"/><rect x="23" y="26" width="1" height="1"/><rect x="26" y="26" width="1" height="1"/></g></svg></div>
+        <a class="btn primary" style="width:100%;justify-content:center" href="https://discord.gg/Gbyq3kpGjc" target="_blank" rel="noopener">Join Support Discord</a>
+      </div>
+
+      <div class="card" style="text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px">
+        <h3 style="color:#fff;margin:0">GitHub Repository</h3>
+        <div style="font-size:12px;color:var(--muted)">DJTOMATO/GarlicDiffusion</div>
+        <div style="width:148px;height:148px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 33 33" shape-rendering="crispEdges"><rect width="33" height="33" rx="2" fill="#ffffff"/><g fill="#0b1c3a"><rect x="2" y="2" width="7" height="1"/><rect x="10" y="2" width="4" height="1"/><rect x="15" y="2" width="2" height="1"/><rect x="20" y="2" width="2" height="1"/><rect x="24" y="2" width="7" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="8" y="3" width="1" height="1"/><rect x="10" y="3" width="1" height="1"/><rect x="13" y="3" width="4" height="1"/><rect x="18" y="3" width="2" height="1"/><rect x="24" y="3" width="1" height="1"/><rect x="30" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/><rect x="4" y="4" width="3" height="1"/><rect x="8" y="4" width="1" height="1"/><rect x="11" y="4" width="3" height="1"/><rect x="17" y="4" width="1" height="1"/><rect x="22" y="4" width="1" height="1"/><rect x="24" y="4" width="1" height="1"/><rect x="26" y="4" width="3" height="1"/><rect x="30" y="4" width="1" height="1"/><rect x="2" y="5" width="1" height="1"/><rect x="4" y="5" width="3" height="1"/><rect x="8" y="5" width="1" height="1"/><rect x="12" y="5" width="2" height="1"/><rect x="15" y="5" width="1" height="1"/><rect x="17" y="5" width="2" height="1"/><rect x="24" y="5" width="1" height="1"/><rect x="26" y="5" width="3" height="1"/><rect x="30" y="5" width="1" height="1"/><rect x="2" y="6" width="1" height="1"/><rect x="4" y="6" width="3" height="1"/><rect x="8" y="6" width="1" height="1"/><rect x="12" y="6" width="1" height="1"/><rect x="14" y="6" width="1" height="1"/><rect x="18" y="6" width="3" height="1"/><rect x="22" y="6" width="1" height="1"/><rect x="24" y="6" width="1" height="1"/><rect x="26" y="6" width="3" height="1"/><rect x="30" y="6" width="1" height="1"/><rect x="2" y="7" width="1" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="10" y="7" width="3" height="1"/><rect x="15" y="7" width="2" height="1"/><rect x="24" y="7" width="1" height="1"/><rect x="30" y="7" width="1" height="1"/><rect x="2" y="8" width="7" height="1"/><rect x="10" y="8" width="1" height="1"/><rect x="12" y="8" width="1" height="1"/><rect x="14" y="8" width="1" height="1"/><rect x="16" y="8" width="1" height="1"/><rect x="18" y="8" width="1" height="1"/><rect x="20" y="8" width="1" height="1"/><rect x="22" y="8" width="1" height="1"/><rect x="24" y="8" width="7" height="1"/><rect x="10" y="9" width="2" height="1"/><rect x="14" y="9" width="1" height="1"/><rect x="18" y="9" width="1" height="1"/><rect x="21" y="9" width="1" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="8" y="10" width="1" height="1"/><rect x="11" y="10" width="2" height="1"/><rect x="14" y="10" width="4" height="1"/><rect x="21" y="10" width="1" height="1"/><rect x="24" y="10" width="2" height="1"/><rect x="29" y="10" width="2" height="1"/><rect x="2" y="11" width="2" height="1"/><rect x="9" y="11" width="1" height="1"/><rect x="12" y="11" width="1" height="1"/><rect x="20" y="11" width="1" height="1"/><rect x="23" y="11" width="1" height="1"/><rect x="25" y="11" width="2" height="1"/><rect x="28" y="11" width="2" height="1"/><rect x="2" y="12" width="1" height="1"/><rect x="7" y="12" width="2" height="1"/><rect x="10" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="3" height="1"/><rect x="20" y="12" width="1" height="1"/><rect x="26" y="12" width="1" height="1"/><rect x="2" y="13" width="5" height="1"/><rect x="12" y="13" width="2" height="1"/><rect x="16" y="13" width="2" height="1"/><rect x="22" y="13" width="2" height="1"/><rect x="27" y="13" width="1" height="1"/><rect x="2" y="14" width="2" height="1"/><rect x="7" y="14" width="2" height="1"/><rect x="11" y="14" width="2" height="1"/><rect x="17" y="14" width="3" height="1"/><rect x="21" y="14" width="2" height="1"/><rect x="24" y="14" width="2" height="1"/><rect x="30" y="14" width="1" height="1"/><rect x="5" y="15" width="1" height="1"/><rect x="10" y="15" width="3" height="1"/><rect x="14" y="15" width="1" height="1"/><rect x="16" y="15" width="3" height="1"/><rect x="22" y="15" width="1" height="1"/><rect x="24" y="15" width="3" height="1"/><rect x="29" y="15" width="2" height="1"/><rect x="2" y="16" width="1" height="1"/><rect x="5" y="16" width="1" height="1"/><rect x="8" y="16" width="1" height="1"/><rect x="15" y="16" width="1" height="1"/><rect x="17" y="16" width="2" height="1"/><rect x="22" y="16" width="2" height="1"/><rect x="26" y="16" width="3" height="1"/><rect x="2" y="17" width="2" height="1"/><rect x="5" y="17" width="2" height="1"/><rect x="9" y="17" width="1" height="1"/><rect x="11" y="17" width="2" height="1"/><rect x="14" y="17" width="1" height="1"/><rect x="18" y="17" width="1" height="1"/><rect x="20" y="17" width="2" height="1"/><rect x="25" y="17" width="2" height="1"/><rect x="28" y="17" width="1" height="1"/><rect x="30" y="17" width="1" height="1"/><rect x="3" y="18" width="4" height="1"/><rect x="8" y="18" width="1" height="1"/><rect x="11" y="18" width="2" height="1"/><rect x="14" y="18" width="3" height="1"/><rect x="21" y="18" width="1" height="1"/><rect x="23" y="18" width="1" height="1"/><rect x="25" y="18" width="1" height="1"/><rect x="27" y="18" width="2" height="1"/><rect x="2" y="19" width="2" height="1"/><rect x="6" y="19" width="1" height="1"/><rect x="9" y="19" width="2" height="1"/><rect x="12" y="19" width="1" height="1"/><rect x="15" y="19" width="1" height="1"/><rect x="17" y="19" width="5" height="1"/><rect x="24" y="19" width="3" height="1"/><rect x="28" y="19" width="3" height="1"/><rect x="2" y="20" width="8" height="1"/><rect x="11" y="20" width="1" height="1"/><rect x="14" y="20" width="5" height="1"/><rect x="21" y="20" width="1" height="1"/><rect x="26" y="20" width="2" height="1"/><rect x="30" y="20" width="1" height="1"/><rect x="2" y="21" width="1" height="1"/><rect x="4" y="21" width="2" height="1"/><rect x="11" y="21" width="1" height="1"/><rect x="13" y="21" width="1" height="1"/><rect x="16" y="21" width="1" height="1"/><rect x="18" y="21" width="1" height="1"/><rect x="22" y="21" width="1" height="1"/><rect x="24" y="21" width="1" height="1"/><rect x="2" y="22" width="1" height="1"/><rect x="4" y="22" width="1" height="1"/><rect x="7" y="22" width="2" height="1"/><rect x="10" y="22" width="2" height="1"/><rect x="13" y="22" width="1" height="1"/><rect x="15" y="22" width="2" height="1"/><rect x="19" y="22" width="8" height="1"/><rect x="28" y="22" width="3" height="1"/><rect x="10" y="23" width="3" height="1"/><rect x="14" y="23" width="4" height="1"/><rect x="19" y="23" width="2" height="1"/><rect x="22" y="23" width="1" height="1"/><rect x="26" y="23" width="2" height="1"/><rect x="2" y="24" width="7" height="1"/><rect x="15" y="24" width="3" height="1"/><rect x="19" y="24" width="1" height="1"/><rect x="21" y="24" width="2" height="1"/><rect x="24" y="24" width="1" height="1"/><rect x="26" y="24" width="3" height="1"/><rect x="2" y="25" width="1" height="1"/><rect x="8" y="25" width="1" height="1"/><rect x="14" y="25" width="1" height="1"/><rect x="16" y="25" width="2" height="1"/><rect x="21" y="25" width="2" height="1"/><rect x="26" y="25" width="1" height="1"/><rect x="29" y="25" width="2" height="1"/><rect x="2" y="26" width="1" height="1"/><rect x="4" y="26" width="3" height="1"/><rect x="8" y="26" width="1" height="1"/><rect x="10" y="26" width="5" height="1"/><rect x="17" y="26" width="1" height="1"/><rect x="19" y="26" width="1" height="1"/><rect x="21" y="26" width="7" height="1"/><rect x="29" y="26" width="1" height="1"/><rect x="2" y="27" width="1" height="1"/><rect x="4" y="27" width="3" height="1"/><rect x="8" y="27" width="1" height="1"/><rect x="10" y="27" width="1" height="1"/><rect x="15" y="27" width="1" height="1"/><rect x="17" y="27" width="2" height="1"/><rect x="20" y="27" width="4" height="1"/><rect x="27" y="27" width="2" height="1"/><rect x="30" y="27" width="1" height="1"/><rect x="2" y="28" width="1" height="1"/><rect x="4" y="28" width="3" height="1"/><rect x="8" y="28" width="1" height="1"/><rect x="11" y="28" width="1" height="1"/><rect x="13" y="28" width="7" height="1"/><rect x="21" y="28" width="9" height="1"/><rect x="2" y="29" width="1" height="1"/><rect x="8" y="29" width="1" height="1"/><rect x="13" y="29" width="1" height="1"/><rect x="16" y="29" width="1" height="1"/><rect x="18" y="29" width="1" height="1"/><rect x="24" y="29" width="2" height="1"/><rect x="27" y="29" width="2" height="1"/><rect x="30" y="29" width="1" height="1"/><rect x="2" y="30" width="7" height="1"/><rect x="11" y="30" width="4" height="1"/><rect x="17" y="30" width="1" height="1"/><rect x="19" y="30" width="1" height="1"/><rect x="21" y="30" width="1" height="1"/><rect x="24" y="30" width="3" height="1"/><rect x="28" y="30" width="1" height="1"/></g></svg></div>
+        <a class="btn ghost" style="width:100%;justify-content:center" href="https://github.com/DJTOMATO/GarlicDiffusion" target="_blank" rel="noopener">View on GitHub</a>
+      </div>
+
+      <div class="card" style="text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px">
+        <h3 style="color:#f59adb;margin:0">Hugging Face Models</h3>
+        <div style="font-size:12px;color:var(--muted)">DJTomato/ps4-diffusion-models</div>
+        <div style="width:148px;height:148px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 33 33" shape-rendering="crispEdges"><rect width="33" height="33" rx="2" fill="#ffffff"/><g fill="#0b1c3a"><rect x="2" y="2" width="7" height="1"/><rect x="10" y="2" width="1" height="1"/><rect x="12" y="2" width="1" height="1"/><rect x="15" y="2" width="2" height="1"/><rect x="20" y="2" width="1" height="1"/><rect x="22" y="2" width="1" height="1"/><rect x="24" y="2" width="7" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="8" y="3" width="1" height="1"/><rect x="10" y="3" width="1" height="1"/><rect x="12" y="3" width="1" height="1"/><rect x="16" y="3" width="1" height="1"/><rect x="18" y="3" width="2" height="1"/><rect x="22" y="3" width="1" height="1"/><rect x="24" y="3" width="1" height="1"/><rect x="30" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/><rect x="4" y="4" width="3" height="1"/><rect x="8" y="4" width="1" height="1"/><rect x="11" y="4" width="1" height="1"/><rect x="17" y="4" width="2" height="1"/><rect x="21" y="4" width="2" height="1"/><rect x="24" y="4" width="1" height="1"/><rect x="26" y="4" width="3" height="1"/><rect x="30" y="4" width="1" height="1"/><rect x="2" y="5" width="1" height="1"/><rect x="4" y="5" width="3" height="1"/><rect x="8" y="5" width="1" height="1"/><rect x="11" y="5" width="1" height="1"/><rect x="14" y="5" width="2" height="1"/><rect x="17" y="5" width="2" height="1"/><rect x="21" y="5" width="2" height="1"/><rect x="24" y="5" width="1" height="1"/><rect x="26" y="5" width="3" height="1"/><rect x="30" y="5" width="1" height="1"/><rect x="2" y="6" width="1" height="1"/><rect x="4" y="6" width="3" height="1"/><rect x="8" y="6" width="1" height="1"/><rect x="11" y="6" width="3" height="1"/><rect x="15" y="6" width="1" height="1"/><rect x="20" y="6" width="3" height="1"/><rect x="24" y="6" width="1" height="1"/><rect x="26" y="6" width="3" height="1"/><rect x="30" y="6" width="1" height="1"/><rect x="2" y="7" width="1" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="10" y="7" width="2" height="1"/><rect x="14" y="7" width="1" height="1"/><rect x="22" y="7" width="1" height="1"/><rect x="24" y="7" width="1" height="1"/><rect x="30" y="7" width="1" height="1"/><rect x="2" y="8" width="7" height="1"/><rect x="10" y="8" width="1" height="1"/><rect x="12" y="8" width="1" height="1"/><rect x="14" y="8" width="1" height="1"/><rect x="16" y="8" width="1" height="1"/><rect x="18" y="8" width="1" height="1"/><rect x="20" y="8" width="1" height="1"/><rect x="22" y="8" width="1" height="1"/><rect x="24" y="8" width="7" height="1"/><rect x="10" y="9" width="1" height="1"/><rect x="12" y="9" width="1" height="1"/><rect x="16" y="9" width="1" height="1"/><rect x="18" y="9" width="1" height="1"/><rect x="20" y="9" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="8" y="10" width="1" height="1"/><rect x="11" y="10" width="1" height="1"/><rect x="14" y="10" width="5" height="1"/><rect x="24" y="10" width="2" height="1"/><rect x="29" y="10" width="2" height="1"/><rect x="4" y="11" width="3" height="1"/><rect x="10" y="11" width="4" height="1"/><rect x="16" y="11" width="6" height="1"/><rect x="25" y="11" width="2" height="1"/><rect x="28" y="11" width="2" height="1"/><rect x="4" y="12" width="1" height="1"/><rect x="7" y="12" width="3" height="1"/><rect x="12" y="12" width="1" height="1"/><rect x="15" y="12" width="6" height="1"/><rect x="23" y="12" width="3" height="1"/><rect x="2" y="13" width="2" height="1"/><rect x="6" y="13" width="2" height="1"/><rect x="9" y="13" width="3" height="1"/><rect x="13" y="13" width="1" height="1"/><rect x="17" y="13" width="1" height="1"/><rect x="20" y="13" width="4" height="1"/><rect x="25" y="13" width="3" height="1"/><rect x="5" y="14" width="2" height="1"/><rect x="8" y="14" width="4" height="1"/><rect x="14" y="14" width="1" height="1"/><rect x="17" y="14" width="1" height="1"/><rect x="19" y="14" width="1" height="1"/><rect x="22" y="14" width="1" height="1"/><rect x="24" y="14" width="2" height="1"/><rect x="30" y="14" width="1" height="1"/><rect x="2" y="15" width="3" height="1"/><rect x="9" y="15" width="3" height="1"/><rect x="13" y="15" width="1" height="1"/><rect x="17" y="15" width="2" height="1"/><rect x="21" y="15" width="1" height="1"/><rect x="24" y="15" width="3" height="1"/><rect x="29" y="15" width="2" height="1"/><rect x="3" y="16" width="3" height="1"/><rect x="8" y="16" width="1" height="1"/><rect x="15" y="16" width="3" height="1"/><rect x="22" y="16" width="1" height="1"/><rect x="24" y="16" width="2" height="1"/><rect x="27" y="16" width="2" height="1"/><rect x="3" y="17" width="2" height="1"/><rect x="9" y="17" width="4" height="1"/><rect x="16" y="17" width="1" height="1"/><rect x="18" y="17" width="1" height="1"/><rect x="20" y="17" width="1" height="1"/><rect x="25" y="17" width="2" height="1"/><rect x="28" y="17" width="1" height="1"/><rect x="30" y="17" width="1" height="1"/><rect x="2" y="18" width="1" height="1"/><rect x="4" y="18" width="1" height="1"/><rect x="6" y="18" width="1" height="1"/><rect x="8" y="18" width="2" height="1"/><rect x="12" y="18" width="8" height="1"/><rect x="27" y="18" width="2" height="1"/><rect x="2" y="19" width="3" height="1"/><rect x="7" y="19" width="1" height="1"/><rect x="9" y="19" width="1" height="1"/><rect x="11" y="19" width="3" height="1"/><rect x="16" y="19" width="7" height="1"/><rect x="24" y="19" width="3" height="1"/><rect x="28" y="19" width="3" height="1"/><rect x="2" y="20" width="2" height="1"/><rect x="5" y="20" width="2" height="1"/><rect x="8" y="20" width="2" height="1"/><rect x="13" y="20" width="1" height="1"/><rect x="15" y="20" width="1" height="1"/><rect x="17" y="20" width="1" height="1"/><rect x="21" y="20" width="1" height="1"/><rect x="24" y="20" width="1" height="1"/><rect x="26" y="20" width="2" height="1"/><rect x="30" y="20" width="1" height="1"/><rect x="2" y="21" width="1" height="1"/><rect x="5" y="21" width="2" height="1"/><rect x="9" y="21" width="3" height="1"/><rect x="16" y="21" width="3" height="1"/><rect x="21" y="21" width="1" height="1"/><rect x="23" y="21" width="4" height="1"/><rect x="2" y="22" width="1" height="1"/><rect x="6" y="22" width="4" height="1"/><rect x="12" y="22" width="5" height="1"/><rect x="19" y="22" width="1" height="1"/><rect x="22" y="22" width="5" height="1"/><rect x="28" y="22" width="3" height="1"/><rect x="10" y="23" width="2" height="1"/><rect x="13" y="23" width="2" height="1"/><rect x="17" y="23" width="4" height="1"/><rect x="22" y="23" width="1" height="1"/><rect x="26" y="23" width="2" height="1"/><rect x="2" y="24" width="7" height="1"/><rect x="14" y="24" width="2" height="1"/><rect x="17" y="24" width="2" height="1"/><rect x="21" y="24" width="2" height="1"/><rect x="24" y="24" width="1" height="1"/><rect x="26" y="24" width="3" height="1"/><rect x="2" y="25" width="1" height="1"/><rect x="8" y="25" width="1" height="1"/><rect x="11" y="25" width="1" height="1"/><rect x="13" y="25" width="1" height="1"/><rect x="16" y="25" width="3" height="1"/><rect x="21" y="25" width="2" height="1"/><rect x="26" y="25" width="1" height="1"/><rect x="2" y="26" width="1" height="1"/><rect x="4" y="26" width="3" height="1"/><rect x="8" y="26" width="1" height="1"/><rect x="10" y="26" width="3" height="1"/><rect x="14" y="26" width="1" height="1"/><rect x="18" y="26" width="1" height="1"/><rect x="21" y="26" width="7" height="1"/><rect x="30" y="26" width="1" height="1"/><rect x="2" y="27" width="1" height="1"/><rect x="4" y="27" width="3" height="1"/><rect x="8" y="27" width="1" height="1"/><rect x="10" y="27" width="2" height="1"/><rect x="13" y="27" width="1" height="1"/><rect x="15" y="27" width="1" height="1"/><rect x="17" y="27" width="2" height="1"/><rect x="20" y="27" width="2" height="1"/><rect x="23" y="27" width="1" height="1"/><rect x="25" y="27" width="1" height="1"/><rect x="27" y="27" width="4" height="1"/><rect x="2" y="28" width="1" height="1"/><rect x="4" y="28" width="3" height="1"/><rect x="8" y="28" width="1" height="1"/><rect x="12" y="28" width="1" height="1"/><rect x="17" y="28" width="1" height="1"/><rect x="20" y="28" width="1" height="1"/><rect x="23" y="28" width="7" height="1"/><rect x="2" y="29" width="1" height="1"/><rect x="8" y="29" width="1" height="1"/><rect x="12" y="29" width="2" height="1"/><rect x="23" y="29" width="2" height="1"/><rect x="26" y="29" width="3" height="1"/><rect x="30" y="29" width="1" height="1"/><rect x="2" y="30" width="7" height="1"/><rect x="12" y="30" width="8" height="1"/><rect x="21" y="30" width="1" height="1"/><rect x="23" y="30" width="2" height="1"/><rect x="28" y="30" width="1" height="1"/></g></svg></div>
+        <a class="btn ghost" style="width:100%;justify-content:center" href="https://huggingface.co/DJTomato/ps4-diffusion-models" target="_blank" rel="noopener">Open Catalog</a>
+      </div>
+    </div>
+
+    <div class="credit-banner" style="margin-bottom:20px">
+      <h3 style="color:#fff;margin-bottom:6px">Lineage &amp; Tribute to Garlic LLM</h3>
+      <p style="margin:0;color:var(--muted);font-size:14px">
+        GarlicDiffusion is respectfully inspired by and built upon the bare-metal PS4 GCN PM4 compute foundation, direct-memory allocator, and visual theme of <b><a href="https://garlicllm.dev" target="_blank" rel="noopener">Garlic LLM</a></b> (<a href="https://github.com/leonardo-alegria/garlic-llm" target="_blank" rel="noopener">github.com/leonardo-alegria/garlic-llm</a>) created by <b>Leonardo Alegría</b>. If you enjoy running local AI on your PS4, please check out <a href="https://garlicllm.dev" target="_blank" rel="noopener">garlicllm.dev</a> and consider supporting Leonardo's work on <a href="https://ko-fi.com/leonardoalegria" target="_blank" rel="noopener">Ko-fi</a>.
+      </p>
+    </div>
+
+    <div class="notice">
+      <b>⚠️ Hardware, Thermal &amp; Liability Disclaimer (Use at Your Own Risk)</b>
+      <p>GarlicDiffusion is distributed under the <b>GNU General Public License v3.0 (GPLv3)</b> on an <b>"AS IS"</b> basis, <b>WITHOUT WARRANTY OF ANY KIND</b>. The authors, contributors, and upstream copyright holders assume zero liability for any console overheating, fan/APU wear, thermal shutdown, data loss, or hardware damage. PlayStation 4 consoles are aging hardware: always ensure unobstructed ventilation, clean dust/thermal paste on older units, and use <b>Quiet (20 CU)</b> or <b>Silent (14 CU)</b> mode for extended sessions.</p>
     </div>
   </section>
 </main>
 
 <footer>
   <div class="wrap">
-    Open-source GPLv3 · Inspired by <a href="https://github.com/leonardo-alegria/garlic-llm">Garlic LLM</a> · Built with OpenOrbis & Zig · Not affiliated with Sony Interactive Entertainment.
+    <h3 style="color:#fff;margin-bottom:10px">Licenses by Component</h3>
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>Component</th><th>Author / Source</th><th>License</th></tr></thead>
+        <tbody>
+          <tr><td><b>GarlicDiffusion App &amp; GCN Kernels</b></td><td>DJTomato &amp; Contributors (<a href="https://github.com/DJTOMATO/GarlicDiffusion">GitHub</a>)</td><td>GNU GPLv3</td></tr>
+          <tr><td><b>Garlic LLM Foundation &amp; UI Renderer</b></td><td>Leonardo Alegría (<a href="https://garlicllm.dev">garlicllm.dev</a>)</td><td>GNU GPLv3</td></tr>
+          <tr><td><b>Stable Diffusion XL 1.0 &amp; SD 1.5</b></td><td>Stability AI / RunwayML</td><td>CreativeML Open RAIL++-M / RAIL-M</td></tr>
+          <tr><td><b>WAI-Illustrious-SDXL (v14 / v17)</b></td><td>WAI / OnomaAI Illustrious</td><td>Fair AI Public License 1.0-SD</td></tr>
+          <tr><td><b>DMD2 &amp; Hyper-SD Distillation LoRAs</b></td><td>Tianwei Yin et al. (MIT) / ByteDance</td><td>MIT / CreativeML Open RAIL++-M</td></tr>
+          <tr><td><b>MeinaMix V11 / DreamShaper 8 / Anything V5</b></td><td>Meina / Lykon / Community</td><td>CreativeML Open RAIL-M</td></tr>
+          <tr><td><b>Real-ESRGAN AnimeVideo v3 (`SRVGGNetCompact`)</b></td><td>Xintao Wang et al.</td><td>BSD-3-Clause</td></tr>
+          <tr><td><b>OpenOrbis PS4 Toolchain</b></td><td>OpenOrbis Team</td><td>GNU GPLv3</td></tr>
+          <tr><td><b>Selawik UI Font</b></td><td>Microsoft Corporation</td><td>SIL Open Font License 1.1</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="foot-meta">
+      Open-source under <a href="https://github.com/DJTOMATO/GarlicDiffusion/blob/main/LICENSE">GNU GPLv3</a> ·
+      <a href="https://github.com/DJTOMATO/GarlicDiffusion/blob/main/DISCLAIMER.md">Disclaimer</a> ·
+      <a href="https://github.com/DJTOMATO/GarlicDiffusion/blob/main/CONTRIBUTING.md">Contribute</a> ·
+      <a href="https://github.com/DJTOMATO/GarlicDiffusion/blob/main/CREDITS.md">Credits</a><br>
+      Not affiliated with or endorsed by Sony Interactive Entertainment. PlayStation and PS4 are trademarks of their respective owners. Hatsune Miku is a trademark of Crypton Future Media, Inc.
+    </div>
   </div>
 </footer>
+<script src="lightbox.js"></script>
 </body>
 </html>

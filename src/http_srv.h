@@ -17,16 +17,18 @@ typedef struct {
     uint64_t seed;
     int eco_mode;   // 0=Turbo(36CU), 1=Balanced(25CU), 2=Quiet(20CU), 3=Silent(14CU)
     int sampler;    // 0=Euler a, 1=Euler, 2=LCM
-    int upscale;    // 0=Off, 1=1080p Anime (RealESRGAN), 2=2x Anime HD
+    int upscale;    // 0=Off, 1=1080p Anime (RealESRGAN), 2=2x Anime HD, 3=4K UHD (up to 3840x2160)
     int pending;
     int cancel_req;
     char switch_model[64];
     int switch_req;
     int rescan_req;
-    int gal_op;     // 0=none, 1=upscale 1080p, 2=upscale 2x, 3=resize
+    int gal_op;     // 0=none, 1=upscale 1080p, 2=upscale 2x, 3=upscale 4K, 4=resize
     char gal_id[64];
     uint32_t gal_w, gal_h;
     int presets_dirty;
+    int styles_dirty;
+    int chars_dirty;
 } DiffJob;
 
 typedef struct {

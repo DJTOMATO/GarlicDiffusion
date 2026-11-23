@@ -95,14 +95,25 @@ int main(int argc, char** argv) {
     }
     gallery_delete(gid);
     gallery_delete("img_999999");
-    UserPreset up[16];
-    int np = presets_list(up, 16);
-    if (np < 5) { fprintf(stderr, "FAIL: default presets seed (np=%d)\n", np); return 1; }
+    UserPreset up[PRESETS_MAX_ITEMS];
+    int np = presets_list(up, PRESETS_MAX_ITEMS);
+    if (np < 18) { fprintf(stderr, "FAIL: default presets seed (np=%d)\n", np); return 1; }
 
     styles_init("build/test_gal_styles");
-    StyleItem st[16];
-    int ns = styles_list(st, 16);
-    if (ns < 6) { fprintf(stderr, "FAIL: default styles seed (ns=%d)\n", ns); return 1; }
+    StyleItem st[STYLES_MAX_ITEMS];
+    int ns = styles_list(st, STYLES_MAX_ITEMS);
+    if (ns < 20) { fprintf(stderr, "FAIL: default styles seed (ns=%d)\n", ns); return 1; }
+
+    characters_init("build/test_gal_chars");
+    CharacterItem ch[CHARS_MAX_ITEMS];
+    int nc = characters_list(ch, CHARS_MAX_ITEMS);
+    if (nc < 35) { fprintf(stderr, "FAIL: default characters seed (nc=%d)\n", nc); return 1; }
+    CharacterItem custom_c = { "test_custom_char", "Test Hero", "Custom", "1boy, test hero", "blurry" };
+    if (characters_save(&custom_c, NULL, 0) != 0 || characters_delete("test_custom_char") != 0) {
+        fprintf(stderr, "FAIL: characters_save/delete roundtrip\n");
+        return 1;
+    }
+    printf("Seeded Presets (%d) + Styles (%d) + Characters (%d) PASS!\n", np, ns, nc);
     model_dl_init("diffusion/models", "build/test_repo.cfg");
     model_dl_set_repo("https://huggingface.co/testuser/garlic-diffusion-models/");
     char rchk[128] = {0};

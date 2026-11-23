@@ -33,4 +33,10 @@ void clip_tok_free(ClipTok* t);
 // Returns index of EOS token (0..76) for pooled embedding lookup.
 uint32_t clip_tok_encode(const ClipTok* t, const char* text, uint32_t out_ids[CLIP_MAX_LEN], uint32_t pad_id);
 
+// Encodes UTF-8 prompt with Automatic1111 prompt weighting syntax:
+//   (tag:1.3), ((tag)), [tag] -> strips syntax brackets/weights and outputs per-token multipliers in out_weights[0..76].
+//   Preserves Danbooru character qualifiers like "rem (re:zero)" or "artoria pendragon (fate)".
+uint32_t clip_tok_encode_weighted(const ClipTok* t, const char* text,
+                                  uint32_t out_ids[CLIP_MAX_LEN], float out_weights[CLIP_MAX_LEN], uint32_t pad_id);
+
 #endif

@@ -22,12 +22,13 @@
 #include <orbis/VideoOut.h>
 #include <orbis/libkernel.h>
 
-#include "font8x8.h"
 #include "gallery.h"
+#include "garlic_ui.h"
 #include "http_srv.h"
 #include "model_dl.h"
 #include "png_write.h"
 #include "sdxl.h"
+#include "studio_menu.h"
 
 #define SCREEN_W 1920
 #define SCREEN_H 1080
@@ -36,6 +37,7 @@
 #define OUT_ROOT "/data/garlic-diffusion/out"
 #define PRESETS_ROOT "/data/garlic-diffusion/presets"
 #define STYLES_ROOT "/data/garlic-diffusion/styles"
+#define CHARS_ROOT "/data/garlic-diffusion/characters"
 #define REPO_CFG "/data/garlic-diffusion/repo.cfg"
 #define LOG_FILE "/data/garlic_diffusion_log.txt"
 
@@ -102,67 +104,6 @@ static void present(void) {
     flip_id++;
 }
 
-// ---- Simple Crisp Software Renderer -------------------------------------------------------------
-static void rect(int x, int y, int w, int h, uint32_t rgb) {
-    if (x < 0) { w += x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
-    if (x + w > SCREEN_W) w = SCREEN_W - x;
-    if (y + h > SCREEN_H) h = SCREEN_H - y;
-    uint32_t c = 0x80000000u | rgb;
-    for (int j = 0; j < h; j++) {
-        uint32_t* row = back + (size_t)(y + j) * SCREEN_W + x;
-        for (int i = 0; i < w; i++) row[i] = c;
-    }
-}
-
-static void draw_text(int x, int y, int scale, uint32_t rgb, const char* s) {
-    uint32_t c = 0x80000000u | rgb;
-    int cx = x;
-    for (; s && *s; s++) {
-        unsigned char ch = (unsigned char)*s;
-        if (ch == '\n') { cx = x; y += 10 * scale; continue; }
-        if (ch < 32 || ch > 126) ch = '?';
-        const uint8_t* g = FONT8X8[ch - 32];
-        for (int r = 0; r < 8; r++) {
-            uint8_t bits = g[r];
-            for (int col = 0; col < 8; col++) {
-                if (!(bits & (0x80u >> col))) continue;
-                for (int sy = 0; sy < scale; sy++) {
-                    int py = y + r * scale + sy;
-                    if (py < 0 || py >= SCREEN_H) continue;
-                    for (int sx = 0; sx < scale; sx++) {
-                        int px = cx + col * scale + sx;
-                        if (px >= 0 && px < SCREEN_W) back[(size_t)py * SCREEN_W + px] = c;
-                    }
-                }
-            }
-        }
-        cx += 8 * scale;
-    }
-}
-
-static void draw_wrapped(int x, int y, int max_w, int scale, uint32_t rgb, const char* s, int max_lines) {
-    int cols = max_w / (8 * scale);
-    if (cols < 8) cols = 8;
-    char line[128];
-    int lines = 0;
-    while (s && *s && lines < max_lines) {
-        int n = 0;
-        while (s[n] && s[n] != '\n' && n < cols && n < (int)sizeof(line) - 1) n++;
-        if (s[n] && s[n] != '\n' && s[n] != ' ') {
-            int sp = n;
-            while (sp > 0 && s[sp] != ' ') sp--;
-            if (sp > 0) n = sp;
-        }
-        memcpy(line, s, (size_t)n);
-        line[n] = 0;
-        draw_text(x, y + lines * (11 * scale), scale, rgb, line);
-        s += n;
-        while (*s == ' ' || *s == '\n') s++;
-        lines++;
-    }
-}
-
 // ---- App State ----------------------------------------------------------------------------------
 static SdxlEngine eng;
 static DiffJob g_job;
@@ -171,16 +112,21 @@ static uint8_t* preview_rgb = NULL;
 static uint32_t preview_w = 0, preview_h = 0;
 static char toast[128] = "";
 
-// Dynamic User Presets + TV Gallery + TV Model Manager state
+// Dynamic User Presets, Art Styles, Character Presets + TV Gallery + TV Model Manager state
 static UserPreset g_presets[PRESETS_MAX_ITEMS];
 static int g_num_presets = 0;
+static StyleItem g_styles[STYLES_MAX_ITEMS];
+static int g_num_styles = 0, style_idx = -1;
+static CharacterItem g_chars[CHARS_MAX_ITEMS];
+static int g_num_chars = 0, char_idx = -1;
+static int g_tv_gen = 0;
 static GalleryItem g_gal[GALLERY_MAX_ITEMS];
 static int g_gal_count = 0, g_gal_idx = 0;
 static int g_in_gallery = 0, g_gal_full = 0, g_del_arm = 0;
 static uint8_t* g_gal_rgb = NULL;
 static uint32_t g_gal_w = 0, g_gal_h = 0;
 
-static int g_in_models = 0, g_mdl_sel = 0, g_mdl_del_arm = 0, g_last_dl_fin = 0;
+static int g_in_models = 0, g_in_credits = 0, g_mdl_sel = 0, g_mdl_del_arm = 0, g_last_dl_fin = 0;
 static InstalledModel g_inst[MODEL_DL_MAX_INSTALLED];
 static int g_inst_cnt = 0;
 static CatalogModel g_cat[MODEL_DL_MAX_CATALOG];
@@ -189,11 +135,13 @@ static int g_cat_cnt = 0;
 static void format_a1111_params(char* out, size_t max, const char* prompt, const char* neg,
                                 uint32_t steps, const char* sampler, float cfg, uint64_t seed,
                                 uint32_t w, uint32_t h, const char* model, int upscaled) {
+    const char* up_str = upscaled == 3 ? ", Hires upscaler: RealESRGAN Anime v3 (4K UHD)"
+                       : (upscaled > 0 ? ", Hires upscaler: RealESRGAN Anime v3" : "");
     snprintf(out, max,
-             "%s\nNegative prompt: %s\nSteps: %u, Sampler: %s, CFG scale: %.1f, Seed: %llu, Size: %ux%u, Model: %s, Clip skip: 2%s, Generator: Garlic Diffusion PS4",
+             "%s\nNegative prompt: %s\nSteps: %u, Sampler: %s, CFG scale: %.1f, Seed: %llu, Size: %ux%u, Model: %s, Clip skip: 2%s, Generator: GarlicDiffusion PS4 (GPLv3)",
              prompt ? prompt : "", neg ? neg : "", steps, (sampler && sampler[0]) ? sampler : "Euler a",
              (double)cfg, (unsigned long long)seed, w, h, (model && model[0]) ? model : "GarlicDiffusion",
-             upscaled ? ", Hires upscaler: RealESRGAN Anime v3" : "");
+             up_str);
 }
 
 static void models_mgr_refresh(void) {
@@ -204,9 +152,94 @@ static void models_mgr_refresh(void) {
     g_mdl_del_arm = 0;
 }
 
-static const uint32_t RES_LIST[][2] = {{512, 512}, {512, 768}, {768, 512}, {768, 768}, {768, 1024}, {896, 512}, {832, 1216}, {1024, 1024}};
-static const uint32_t STEP_LIST[] = {4, 6, 8, 10, 12, 16, 20, 25, 30};
-static int preset_idx = 0, res_idx = 3, model_idx = 0;
+static const uint32_t RES_LIST[][2] = {
+    {512, 512}, {512, 768}, {768, 512}, {768, 768}, {768, 1024},
+    {896, 512}, {1024, 576}, {1152, 640}, {1280, 704},
+    {832, 1216}, {1216, 832}, {1024, 1024}
+};
+static const int RES_COUNT = (int)(sizeof(RES_LIST) / sizeof(RES_LIST[0]));
+static int preset_idx = 0, res_idx = 4, model_idx = 0;
+
+// Studio menu state (arrow navigation, dropdown modal, slider adjust with revert)
+static int sm_focus = ROW_MODEL;
+static int sm_adjust = 0;
+static uint32_t sm_saved_steps = 8;
+static float sm_saved_cfg = 1.4f;
+static int sm_dd_open = 0, sm_dd_row = 0, sm_dd_sel = 0, sm_dd_top = 0, sm_dd_n = 0, sm_dd_cur = -1;
+static int sm_dd_models_n = 0;
+static char sm_dd_models[DIFF_MAX_MODELS][64];
+static uint64_t sm_last_seed = 0;
+
+static void sm_dd_clamp(void) {
+    if (sm_dd_n <= 0) { sm_dd_sel = 0; sm_dd_top = 0; return; }
+    if (sm_dd_sel < 0) sm_dd_sel = sm_dd_n - 1;
+    if (sm_dd_sel >= sm_dd_n) sm_dd_sel = 0;
+    if (sm_dd_sel < sm_dd_top) sm_dd_top = sm_dd_sel;
+    if (sm_dd_sel >= sm_dd_top + SM_DD_VIS) sm_dd_top = sm_dd_sel - SM_DD_VIS + 1;
+    int max_top = sm_dd_n > SM_DD_VIS ? (sm_dd_n - SM_DD_VIS) : 0;
+    if (sm_dd_top > max_top) sm_dd_top = max_top;
+    if (sm_dd_top < 0) sm_dd_top = 0;
+}
+
+static void sm_dd_item_label(void* ctx, int row, int i, char* out, size_t cap) {
+    (void)ctx;
+    switch (row) {
+    case ROW_MODEL:
+        if (i < sm_dd_models_n) snprintf(out, cap, "%s", sm_dd_models[i]);
+        else snprintf(out, cap, "+ Download / Manage Models (Hugging Face)...");
+        break;
+    case ROW_PRESET:
+        if (i >= 0 && i < g_num_presets) snprintf(out, cap, "%s", g_presets[i].name);
+        break;
+    case ROW_CHAR:
+        if (i == 0) snprintf(out, cap, "Off (No Character Overlay)");
+        else if (i - 1 < g_num_chars) snprintf(out, cap, "%s  ·  %s", g_chars[i - 1].name, g_chars[i - 1].series);
+        break;
+    case ROW_STYLE:
+        if (i == 0) snprintf(out, cap, "Off (No Art Style)");
+        else if (i - 1 < g_num_styles) snprintf(out, cap, "%s", g_styles[i - 1].name);
+        break;
+    case ROW_RES:
+        if (i >= 0 && i < RES_COUNT) sm_res_label(RES_LIST[i][0], RES_LIST[i][1], out, cap);
+        break;
+    case ROW_SAMPLER:
+        if (i >= 0 && i < 4) snprintf(out, cap, "%s", SM_SAMPLER[i]);
+        break;
+    case ROW_UPSCALE:
+        if (i >= 0 && i < 4) snprintf(out, cap, "%s", SM_UPSCALE[i]);
+        break;
+    case ROW_POWER:
+        // Ordered coolest -> loudest: 0=Silent(eco 3), 1=Quiet(eco 2), 2=Balanced(eco 1), 3=Turbo(eco 0)
+        sm_power_label(3 - i, eng.neo, out, cap);
+        break;
+    case ROW_SEED:
+        if (i == 0) snprintf(out, cap, "Random each time");
+        else if (i == 1) {
+            if (sm_last_seed) snprintf(out, cap, "Lock last seed (%llu)", (unsigned long long)sm_last_seed);
+            else snprintf(out, cap, "Lock seed 42");
+        } else {
+            snprintf(out, cap, "Enter custom seed number...");
+        }
+        break;
+    default:
+        out[0] = 0;
+        break;
+    }
+}
+
+static float sm_step_cfg(float cur, int dir) {
+    float v;
+    if (dir > 0) {
+        if (cur < 1.99f) v = cur + 0.2f;
+        else v = cur + 0.5f;
+    } else {
+        if (cur <= 2.01f) v = cur - 0.2f;
+        else v = cur - 0.5f;
+    }
+    if (v < SM_CFG_MIN) v = SM_CFG_MIN;
+    if (v > SM_CFG_MAX) v = SM_CFG_MAX;
+    return floorf(v * 10.0f + 0.5f) * 0.1f;
+}
 
 static void blit_rgb_fit(const uint8_t* rgb, uint32_t rw, uint32_t rh, int px, int py, int pw, int ph) {
     float sx = (float)pw / (float)rw;
@@ -252,213 +285,278 @@ static void gal_refresh(void) {
 }
 
 static void draw_ui(void) {
-    if (g_in_models) {
-        rect(0, 0, SCREEN_W, SCREEN_H, 0x080D18);
-        rect(0, 0, SCREEN_W, 92, 0x101829);
-        rect(0, 92, SCREEN_W, 2, 0x1F2E4A);
-        draw_text(40, 26, 3, 0x5FB2FF, "MODEL MANAGER & DOWNLOADER");
-        char repo[128], rline[200];
-        model_dl_get_repo(repo, sizeof(repo));
-        snprintf(rline, sizeof(rline), "HF Repo: %s  (Configure on Web UI -> Models tab)",
-                 repo[0] ? repo : "(not set - open Web UI -> Models tab)");
-        draw_text(740, 38, 2, repo[0] ? 0x45D6A0 : 0xF59ADB, rline);
-
-        ModelDlStatus dl;
-        model_dl_get_status(&dl);
-        int y0 = 114;
-        if (dl.active || dl.error[0] || dl.stage[0]) {
-            rect(40, y0, SCREEN_W - 80, 74, 0x131D32);
-            char dmsg[220];
-            if (dl.active) {
-                float pct = dl.bytes_total ? (100.0f * (float)dl.bytes_done / (float)dl.bytes_total) : 0.0f;
-                snprintf(dmsg, sizeof(dmsg), "Downloading %s [%d/%d] %s: %llu / %llu MiB (%.0f%%) %.1f MB/s",
-                         dl.model_id, dl.file_idx, dl.file_total, dl.cur_file,
-                         (unsigned long long)(dl.bytes_done >> 20), (unsigned long long)(dl.bytes_total >> 20),
-                         (double)pct, dl.speed_mbs);
-                draw_text(60, y0 + 12, 2, 0x5FB2FF, dmsg);
-                rect(60, y0 + 44, SCREEN_W - 120, 16, 0x1F2E4A);
-                int bw = (int)((float)(SCREEN_W - 120) * (pct / 100.0f));
-                if (bw > SCREEN_W - 120) bw = SCREEN_W - 120;
-                rect(60, y0 + 44, bw, 16, 0x45D6A0);
-            } else {
-                draw_text(60, y0 + 26, 2, dl.error[0] ? 0xFF7A85 : 0x45D6A0, dl.error[0] ? dl.error : dl.stage);
-            }
-            y0 += 92;
-        }
-
-        draw_text(40, y0, 2, 0x8BA2C4, "INSTALLED MODELS ON PS4 (/data/garlic-diffusion/models):");
-        y0 += 30;
-        http_srv_lock();
-        char cur_m[64];
-        snprintf(cur_m, sizeof(cur_m), "%s", g_st.model);
-        http_srv_unlock();
-
-        int idx = 0;
-        for (int i = 0; i < g_inst_cnt && y0 < 880; i++, idx++) {
-            int sel = (idx == g_mdl_sel);
-            rect(40, y0, SCREEN_W - 80, 42, sel ? 0x1D3357 : 0x101829);
-            char row[220];
-            int act = (strcmp(g_inst[i].name, cur_m) == 0);
-            snprintf(row, sizeof(row), "%s %-30s [%4s] %4u MiB  %s%s",
-                     sel ? ">" : " ", g_inst[i].name, g_inst[i].arch, g_inst[i].size_mb,
-                     act ? "*ACTIVE* " : "", g_inst[i].detail);
-            draw_text(56, y0 + 12, 2, act ? 0x45D6A0 : (g_inst[i].complete ? 0xE8EFFA : 0xFF7A85), row);
-            y0 += 46;
-        }
-        y0 += 14;
-        draw_text(40, y0, 2, 0x8BA2C4, "DOWNLOADABLE CATALOG (Hugging Face):");
-        y0 += 30;
-        for (int i = 0; i < g_cat_cnt && y0 < 930; i++, idx++) {
-            int sel = (idx == g_mdl_sel);
-            rect(40, y0, SCREEN_W - 80, 42, sel ? 0x1D3357 : 0x0D1424);
-            char row[220];
-            snprintf(row, sizeof(row), "%s %-30s [%4s] ~%4u MiB  %s",
-                     sel ? ">" : " ", g_cat[i].id, g_cat[i].arch, g_cat[i].size_mb, g_cat[i].desc);
-            draw_text(56, y0 + 12, 2, sel ? 0x66B8FF : 0xA8BCD9, row);
-            y0 += 46;
-        }
-
-        if (toast[0]) draw_text(40, 962, 2, g_mdl_del_arm ? 0xFF7A85 : 0x45D6A0, toast);
-        rect(40, 1002, SCREEN_W - 80, 2, 0x1F2E4A);
-        draw_text(40, 1020, 2, 0xE8EFFA, "[Up/Down] Select   [X] Load / Download   [Triangle] Cancel Download   [OPTIONS x2] Delete   [Circle] Back");
-        present();
-        return;
-    }
-
-    if (g_in_gallery) {
-        rect(0, 0, SCREEN_W, SCREEN_H, 0x05080F);
-        if (g_gal_full && g_gal_rgb) {
-            blit_rgb_fit(g_gal_rgb, g_gal_w, g_gal_h, 0, 0, SCREEN_W, SCREEN_H);
-            present();
-            return;
-        }
-        rect(0, 0, 620, SCREEN_H, 0x101829);
-        rect(620, 0, 2, SCREEN_H, 0x1F2E4A);
-        draw_text(32, 28, 3, 0x5FB2FF, "GALLERY VIEWER");
-        if (g_gal_count <= 0) {
-            draw_text(32, 96, 2, 0x8BA2C4, "No saved images yet.");
-            draw_text(32, 136, 2, 0x45D6A0, "Press [Circle] or [Square] to return.");
-            present();
-            return;
-        }
-        const GalleryItem* it = &g_gal[g_gal_idx];
-        char hdr[96];
-        snprintf(hdr, sizeof(hdr), "Image %d / %d  (%ux%u%s)", g_gal_idx + 1, g_gal_count,
-                 it->width, it->height, it->upscaled ? " HD" : "");
-        draw_text(32, 72, 2, 0x45D6A0, hdr);
-        char info[128];
-        snprintf(info, sizeof(info), "%s | %ustp CFG%.1f %s", it->model[0] ? it->model : "?",
-                 it->steps, (double)it->cfg, it->sampler);
-        draw_wrapped(32, 108, 560, 2, 0xE8EFFA, info, 2);
-        snprintf(info, sizeof(info), "Seed: %llu  (%.1fs)", (unsigned long long)it->seed, it->sec);
-        draw_text(32, 160, 2, 0x8BA2C4, info);
-        rect(32, 198, 556, 2, 0x1F2E4A);
-        draw_text(32, 214, 2, 0x8BA2C4, "PROMPT:");
-        rect(32, 244, 556, 280, 0x0B1220);
-        draw_wrapped(44, 258, 532, 2, 0xE8EFFA, it->prompt[0] ? it->prompt : "(no metadata)", 11);
-        if (toast[0]) draw_wrapped(32, 548, 556, 2, g_del_arm ? 0xFF6B76 : 0x45D6A0, toast, 2);
-
-        rect(32, 650, 556, 2, 0x1F2E4A);
-        draw_text(32, 672, 2, 0xE8EFFA, "[Left / Right] Browse Images");
-        draw_text(32, 708, 2, 0x66B2FF, "[R1]           Full-Screen 100% View");
-        draw_text(32, 744, 2, 0x8AB4FF, "[X]            Load Prompt to Studio");
-        draw_text(32, 780, 2, 0x45D6A0, "[Triangle]     Recreate (New Seed)");
-        draw_text(32, 816, 2, 0xF59ADB, "[L3]           AI Upscale 1080p");
-        draw_text(32, 852, 2, 0xFF7A85, "[OPTIONS x2]   Delete Image");
-        draw_text(32, 888, 2, 0xA3B5D2, "[Circle/Sq]    Back to Studio");
-
-        if (g_gal_rgb && g_gal_w && g_gal_h) {
-            blit_rgb_fit(g_gal_rgb, g_gal_w, g_gal_h, 640, 20, 1260, 1040);
-        } else {
-            draw_text(980, 520, 2, 0x617594, "Preview unavailable for this PNG");
-        }
-        present();
-        return;
-    }
-
-    rect(0, 0, SCREEN_W, SCREEN_H, 0x0A101D);
-    rect(0, 0, 660, SCREEN_H, 0x101829);
-    rect(660, 0, 2, SCREEN_H, 0x1F2E4A);
-
-    draw_text(36, 32, 3, 0x5FB2FF, "GARLIC DIFFUSION");
-    int cur_temp = sdxl_read_temp_c(NULL, NULL);
-    char sub[128];
-    if (cur_temp > 0)
-        snprintf(sub, sizeof(sub), "%s | %u MiB | %dC", eng.neo ? "PS4 Pro Neo" : "PS4 Base", (unsigned)(eng.next >> 20), cur_temp);
-    else
-        snprintf(sub, sizeof(sub), "%s | %u / %u MiB GPU", eng.neo ? "PS4 Pro Neo" : "PS4 Base",
-                 (unsigned)(eng.next >> 20), (unsigned)(eng.mem_size >> 20));
-    draw_text(36, 72, 2, cur_temp >= 83 ? 0xFF7A85 : 0x8BA2C4, sub);
-
-    char url[96];
-    snprintf(url, sizeof(url), "Web/A1111: http://%s", http_srv_address());
-    draw_text(36, 106, 2, 0x45D6A0, url);
-
     http_srv_lock();
-    g_st.temp_c = cur_temp;
-    char mdl[64], stg[128], err[256], pr[1024];
+    char cur_m[64], stg[128], err[256], pr[1024];
     float prog = g_st.progress;
-    int busy = g_st.busy, ready = g_st.ready, eco = g_job.eco_mode, ups = g_job.upscale, nmod = g_st.num_models;
-    double lsec = g_st.last_sec, tf = g_st.eff_tflops, rest = g_st.cooldown_sec;
-    int pk = g_st.temp_peak_c;
+    int busy = g_st.busy, eco = g_job.eco_mode, ups = g_job.upscale;
+    uint32_t vram_u = (uint32_t)(eng.next >> 20), vram_t = (uint32_t)(eng.mem_size >> 20);
+    double lsec = g_st.last_sec, tf = g_st.eff_tflops;
     uint32_t w = g_job.width, h = g_job.height, steps = g_job.steps;
     float cfg = g_job.cfg;
-    snprintf(mdl, sizeof(mdl), "%s", g_st.model);
+    snprintf(cur_m, sizeof(cur_m), "%s", g_st.model);
     snprintf(stg, sizeof(stg), "%s", g_st.stage);
     snprintf(err, sizeof(err), "%s", g_st.error);
     snprintf(pr, sizeof(pr), "%s", g_job.prompt);
     http_srv_unlock();
+
     if (eco < 0 || eco > 3) eco = 2;
-    if (ups < 0 || ups > 2) ups = 0;
-    static const char* UPS_SHORT[3] = {"1x", "1080p", "2xHD"};
+    if (ups < 0 || ups > 3) ups = 0;
 
-    rect(32, 142, 596, 2, 0x1F2E4A);
-    draw_text(36, 158, 2, 0x8BA2C4, "MODEL:");
-    draw_text(148, 158, 2, mdl[0] ? 0xE8EFFA : 0xFF7A85, mdl[0] ? mdl : (ready ? "loading..." : "(none - press OPTIONS / Web UI)"));
+    // ---- 1. CREDITS, SUPPORT & QR CODES SCREEN (Garlic LLM style) ----
+    if (g_in_credits) {
+        g_draw_bg(back);
+        g_draw_header(back, "Credits, Licenses & Support", cur_m, busy, vram_u, vram_t, http_srv_address());
 
-    char cfgline[128];
-    snprintf(cfgline, sizeof(cfgline), "%ux%u->%s | %ustp | CFG%.1f | %s",
-             w, h, UPS_SHORT[ups], steps, (double)cfg, sdxl_eco_name_ex(eco, eng.neo));
-    draw_text(36, 194, 2, 0xE8EFFA, cfgline);
+        // Top lineage & license banner card
+        g_rrect(back, 56, 112, 1808, 174, 18, C_SURFACE, 235);
+        g_rrect_line(back, 56, 112, 1808, 174, 18, 1, C_LINE_HI, 255);
+        g_rrect(back, 72, 128, 4, 142, 2, C_ACCENT_HI, 220);
+        g_draw_str(back, &g_fbold, 94, 126, "GarlicDiffusion v1.10  ·  Open-Source GNU GPLv3  ·  Inspired by Garlic LLM", 0xFFFFFF);
+        g_draw_str(back, &g_fsmall, 94, 158,
+                   "Built upon Leonardo Alegria's Garlic LLM (garlicllm.dev) bare-metal PS4 GCN PM4 compute & OpenOrbis architecture.",
+                   C_TEXT_DIM);
+        g_draw_str(back, &g_fsmall, 94, 186,
+                   "Models & components keep their own licenses: SDXL / SD 1.5 (OpenRAIL), WAI-Illustrious (Fair AI 1.0-SD), DMD2 (MIT),",
+                   C_TEXT_DIM);
+        g_draw_str(back, &g_fsmall, 94, 212,
+                   "Real-ESRGAN Anime v3 (BSD-3-Clause), OpenOrbis Toolchain (GPLv3), Selawik Font (SIL OFL 1.1).",
+                   C_TEXT_DIM);
+        g_draw_str(back, &g_fsmall, 94, 244,
+                   "DISCLAIMER: Provided 'AS IS' without warranty. Use Quiet/Silent mode on aging PS4 hardware and ensure good ventilation.",
+                   0xF2A65A);
 
-    draw_text(36, 238, 2, 0x8BA2C4, "PROMPT (X to edit, D-Pad presets):");
-    rect(32, 268, 596, 210, 0x0B1220);
-    draw_wrapped(44, 282, 572, 2, 0xE8EFFA, pr, 8);
+        // 4 Scannable QR Code Cards across the center
+        struct {
+            const char* title;
+            const char* sub1;
+            const char* sub2;
+            const uint8_t* mat;
+            int sz;
+            uint32_t accent;
+        } qcards[4] = {
+            { "Support on Ko-fi", "ko-fi.com/djtomato", "Fund PS4 AI kernels & models", QR_KOFI, QR_KOFI_SIZE, C_TRIANGLE },
+            { "Support Discord", "discord.gg/Gbyq3kpGjc", "Request new models & bot setup", QR_DISCORD, QR_DISCORD_SIZE, C_CROSS },
+            { "GitHub Repository", "DJTOMATO/GarlicDiffusion", "Source code, PKG & issues", QR_GITHUB, QR_GITHUB_SIZE, C_ACCENT_HI },
+            { "Hugging Face Models", "DJTomato/ps4-diffusion-models", "10 pre-converted PSD1 models", QR_HF, QR_HF_SIZE, C_SQUARE },
+        };
+        for (int i = 0; i < 4; i++) {
+            int cx = 56 + i * 458, cy = 306, cw = 434, ch = 664;
+            g_rrect(back, cx, cy, cw, ch, 18, C_SURFACE, 235);
+            g_rrect_line(back, cx, cy, cw, ch, 18, 1, C_LINE_HI, 255);
+            g_rrect(back, cx + 20, cy + 20, cw - 40, 4, 2, qcards[i].accent, 220);
+            g_draw_str(back, &g_fbold, cx + 28, cy + 38, qcards[i].title, 0xFFFFFF);
+            g_draw_str(back, &g_fsmall, cx + 28, cy + 72, qcards[i].sub1, qcards[i].accent);
+            g_draw_str(back, &g_fsmall, cx + 28, cy + 98, qcards[i].sub2, C_TEXT_MUTED);
 
-    // Progress bar
-    rect(32, 510, 596, 20, 0x1B2740);
-    int fw = (int)(596.0f * (prog < 0 ? 0 : prog > 1 ? 1 : prog));
-    rect(32, 510, fw, 20, busy ? 0x3FA9F5 : (ready ? 0x3DDC97 : 0xF59ADB));
-    draw_wrapped(36, 544, 590, 2, err[0] ? 0xFF6B76 : 0xD2E1F7, err[0] ? err : stg, 3);
-    if (lsec > 0.0) {
-        char tm[112];
-        if (pk > 0) snprintf(tm, sizeof(tm), "Last: %.1fs | %.2f TF | Rest %.1fs | %dC", lsec, tf, rest, pk);
-        else snprintf(tm, sizeof(tm), "Last: %.1fs | %.2f TFLOPS | Rest %.1fs", lsec, tf, rest);
-        draw_text(36, 622, 2, 0x8BA2C4, tm);
+            int scale = (qcards[i].sz <= 25) ? 11 : 10;
+            int qpix = (qcards[i].sz + 4) * scale;
+            int qx = cx + (cw - qpix) / 2;
+            int qy = cy + 148 + (460 - qpix) / 2;
+            g_draw_qr(back, qcards[i].mat, qcards[i].sz, qx, qy, scale, 0x0B1C3A, 0xFFFFFF);
+            g_draw_str(back, &g_fsmall, cx + 28, cy + 618, "Scan with phone camera", C_TEXT_DIM);
+        }
+
+        const GHint fhints[] = {
+            { GBTN_CIRCLE, "Back to Studio" },
+            { GBTN_SQUARE, "Gallery" },
+            { GBTN_UPDOWN, "Model Manager" },
+        };
+        g_draw_footer(back, fhints, 3, "Not affiliated with Sony Interactive Entertainment · GPLv3");
+        present();
+        return;
     }
-    if (toast[0]) draw_text(36, 660, 2, 0x45D6A0, toast);
 
-    // Controls
-    rect(32, 706, 596, 2, 0x1F2E4A);
-    draw_text(36, 722, 2, 0x8AB4FF, "[X]        Edit Prompt (OSK / USB KB)");
-    draw_text(36, 754, 2, 0x45D6A0, "[Triangle] Generate Image");
-    draw_text(36, 786, 2, 0xFF7A85, "[Circle]   Cancel Generation");
-    draw_text(36, 818, 2, 0xF59ADB, "[Square]   Open Image Gallery");
-    draw_text(36, 850, 2, 0xA3B5D2, "[L1 / R1]  Resolution");
-    draw_text(36, 882, 2, 0xA3B5D2, "[L2 / R2]  Steps (4..30)");
-    draw_text(36, 914, 2, 0xA3B5D2, "[L3 / R3]  Upscale(1080p) / Power Mode");
-    draw_text(36, 946, 2, 0xA3B5D2, "[Left/Right] Presets   [Up] Model Manager");
-    if (nmod > 1 || !ready) draw_text(36, 978, 2, 0x66B2FF, "[OPTIONS]  Switch / Reload Model");
+    // ---- 2. MODEL MANAGER & HUGGING FACE DOWNLOADER (Garlic LLM style) ----
+    if (g_in_models) {
+        g_draw_bg(back);
+        char repo[128], rsub[180];
+        model_dl_get_repo(repo, sizeof(repo));
+        snprintf(rsub, sizeof(rsub), "HF Repo: %s", repo[0] ? repo : "DJTomato/ps4-diffusion-models");
+        g_draw_header(back, rsub, cur_m, busy, vram_u, vram_t, http_srv_address());
 
-    // Right panel: image preview
-    int px = 690, py = 30, pw = 1200, ph = 1020;
-    rect(px, py, pw, ph, 0x070B14);
-    if (preview_rgb && preview_w > 0 && preview_h > 0) {
-        blit_rgb_fit(preview_rgb, preview_w, preview_h, px, py, pw, ph);
-    } else {
-        draw_text(px + 330, py + 490, 2, 0x4A5E7D, "Press [Triangle] or open Web UI to generate");
+        ModelDlStatus dl;
+        model_dl_get_status(&dl);
+        int y0 = 110;
+        if (dl.active || dl.error[0] || dl.stage[0]) {
+            g_rrect(back, 56, y0, 1808, 74, 16, C_SURFACE, 240);
+            g_rrect_line(back, 56, y0, 1808, 74, 16, 1, C_LINE_HI, 255);
+            if (dl.active) {
+                float pct = dl.bytes_total ? (100.0f * (float)dl.bytes_done / (float)dl.bytes_total) : 0.0f;
+                char dmsg[220];
+                snprintf(dmsg, sizeof(dmsg), "Downloading %s [%d/%d] %s  ·  %llu / %llu MiB (%.0f%%)  ·  %.1f MB/s",
+                         dl.model_id, dl.file_idx, dl.file_total, dl.cur_file,
+                         (unsigned long long)(dl.bytes_done >> 20), (unsigned long long)(dl.bytes_total >> 20),
+                         (double)pct, dl.speed_mbs);
+                g_draw_str(back, &g_fsmall, 80, y0 + 14, dmsg, C_ACCENT_HI);
+                g_rrect(back, 80, y0 + 46, 1760, 12, 6, 0x1B3156, 255);
+                int bw = (int)(1760.0f * (pct / 100.0f));
+                if (bw > 1760) bw = 1760;
+                if (bw > 0) g_rrect(back, 80, y0 + 46, bw < 12 ? 12 : bw, 12, 6, C_GREEN, 255);
+            } else {
+                g_draw_str(back, &g_fsmall, 80, y0 + 26, dl.error[0] ? dl.error : dl.stage, dl.error[0] ? C_RED : C_GREEN);
+            }
+            y0 += 88;
+        }
+
+        g_draw_str(back, &g_fbold, 56, y0, "Installed Models on PS4 (/data/garlic-diffusion/models)", 0xFFFFFF);
+        y0 += 34;
+        int idx = 0;
+        for (int i = 0; i < g_inst_cnt && y0 < 860; i++, idx++) {
+            int sel = (idx == g_mdl_sel);
+            int act = (strcmp(g_inst[i].name, cur_m) == 0);
+            g_rrect(back, 56, y0, 1808, 44, 12, sel ? C_SURFACE_HI : C_SURFACE, sel ? 255 : 210);
+            g_rrect_line(back, 56, y0, 1808, 44, 12, 1, sel ? C_ACCENT_HI : C_LINE, 255);
+            if (act || sel) g_circle(back, 80.0f, (float)(y0 + 22), 5.0f, 0.0f, act ? C_GREEN : C_ACCENT_HI, 255);
+            char row[240];
+            snprintf(row, sizeof(row), "%s   [%s · %u MiB]   %s%s",
+                     g_inst[i].name, g_inst[i].arch, g_inst[i].size_mb,
+                     act ? "ACTIVE · " : "", g_inst[i].detail);
+            g_draw_str(back, &g_fsmall, 100, y0 + 11, row, act ? C_GREEN : (g_inst[i].complete ? C_TEXT : C_RED));
+            y0 += 50;
+        }
+        y0 += 12;
+        g_draw_str(back, &g_fbold, 56, y0, "Downloadable Hugging Face Catalog (1-Click HTTPS)", 0xFFFFFF);
+        y0 += 34;
+        for (int i = 0; i < g_cat_cnt && y0 < 935; i++, idx++) {
+            int sel = (idx == g_mdl_sel);
+            g_rrect(back, 56, y0, 1808, 44, 12, sel ? C_SURFACE_HI : C_PANEL, sel ? 255 : 210);
+            g_rrect_line(back, 56, y0, 1808, 44, 12, 1, sel ? C_ACCENT_HI : C_LINE, 255);
+            char row[240];
+            snprintf(row, sizeof(row), "%s   [%s · ~%u MiB]   %s",
+                     g_cat[i].id, g_cat[i].arch, g_cat[i].size_mb, g_cat[i].desc);
+            g_draw_str(back, &g_fsmall, 84, y0 + 11, row, sel ? 0xFFFFFF : C_TEXT_DIM);
+            y0 += 50;
+        }
+
+        if (toast[0]) g_draw_str(back, &g_fsmall, 56, 956, toast, g_mdl_del_arm ? C_RED : C_GREEN);
+        const GHint mhints[] = {
+            { GBTN_UPDOWN, "Select" },
+            { GBTN_CROSS, "Load / Download" },
+            { GBTN_TRIANGLE, "Cancel Download" },
+            { GBTN_OPTIONS, "Delete (x2)" },
+            { GBTN_CIRCLE, "Back" },
+        };
+        g_draw_footer(back, mhints, 5, "Models stream directly over PS4 HTTPS");
+        present();
+        return;
     }
-    present();
+
+    // ---- 3. TV GALLERY VIEWER (Garlic LLM style) ----
+    if (g_in_gallery) {
+        if (g_gal_full && g_gal_rgb) {
+            g_fill(back, 0, 0, SCREEN_W, SCREEN_H, 0x040812, 255);
+            blit_rgb_fit(g_gal_rgb, g_gal_w, g_gal_h, 0, 0, SCREEN_W, SCREEN_H);
+            present();
+            return;
+        }
+        g_draw_bg(back);
+        g_draw_header(back, "Saved Artwork Gallery", cur_m, busy, vram_u, vram_t, http_srv_address());
+        if (g_gal_count <= 0) {
+            g_rrect(back, 56, 120, 620, 220, 18, C_SURFACE, 235);
+            g_rrect_line(back, 56, 120, 620, 220, 18, 1, C_LINE_HI, 255);
+            g_draw_str(back, &g_fbold, 84, 154, "No saved images yet", 0xFFFFFF);
+            g_draw_str(back, &g_fsmall, 84, 196, "Press Circle or Square to return to Studio and generate artwork.", C_TEXT_DIM);
+            const GHint ehints[] = {{ GBTN_CIRCLE, "Back to Studio" }};
+            g_draw_footer(back, ehints, 1, "");
+            present();
+            return;
+        }
+        const GalleryItem* it = &g_gal[g_gal_idx];
+        g_rrect(back, 56, 112, 612, 868, 18, C_SURFACE, 235);
+        g_rrect_line(back, 56, 112, 612, 868, 18, 1, C_LINE_HI, 255);
+
+        char hdr[96];
+        snprintf(hdr, sizeof(hdr), "Artwork %d / %d   ·   %ux%u%s", g_gal_idx + 1, g_gal_count,
+                 it->width, it->height, it->upscaled == 3 ? " 4K" : (it->upscaled ? " HD" : ""));
+        g_draw_str(back, &g_fbold, 82, 134, hdr, 0xFFFFFF);
+
+        char info[160];
+        snprintf(info, sizeof(info), "%s  ·  %u steps  ·  CFG %.1f  ·  %s",
+                 it->model[0] ? it->model : "Model", it->steps, (double)it->cfg, it->sampler);
+        g_draw_str(back, &g_fsmall, 82, 172, info, C_ACCENT_HI);
+        snprintf(info, sizeof(info), "Seed: %llu   ·   Render time: %.1fs", (unsigned long long)it->seed, it->sec);
+        g_draw_str(back, &g_fsmall, 82, 200, info, C_TEXT_DIM);
+
+        // Prompt inside Garlic LLM blue user bubble
+        int rad_b[4] = {22, 22, 8, 22};
+        g_rrect4(back, 78, 240, 568, 280, rad_b, 0, C_USER, 245);
+        g_draw_wrapped(back, &g_fsmall, 98, 258, 528, 26, 0xFFFFFF, it->prompt[0] ? it->prompt : "(no prompt metadata)", 9);
+
+        if (toast[0]) g_draw_wrapped(back, &g_fsmall, 82, 544, 560, 26, g_del_arm ? C_RED : C_GREEN, toast, 2);
+
+        g_draw_str(back, &g_fsmall, 82, 620, "All gallery PNGs contain embedded Automatic1111 parameters.", C_TEXT_MUTED);
+        g_draw_str(back, &g_fsmall, 82, 648, "Download or inspect full resolution at http://", C_TEXT_MUTED);
+        g_draw_str(back, &g_fsmall, 82, 674, http_srv_address(), C_GREEN);
+
+        // Right image showcase card
+        g_rrect(back, 692, 112, 1172, 868, 18, C_PANEL, 245);
+        g_rrect_line(back, 692, 112, 1172, 868, 18, 1, C_LINE_HI, 255);
+        if (g_gal_rgb && g_gal_w && g_gal_h) {
+            blit_rgb_fit(g_gal_rgb, g_gal_w, g_gal_h, 708, 128, 1140, 836);
+        } else {
+            g_draw_str(back, &g_fsmall, 1120, 530, "Preview unavailable for this PNG", C_TEXT_MUTED);
+        }
+
+        const GHint ghints[] = {
+            { GBTN_LEFTRIGHT, "Browse" },
+            { GBTN_R1, "Full Screen" },
+            { GBTN_CROSS, "Use Prompt" },
+            { GBTN_TRIANGLE, "Recreate" },
+            { GBTN_L3, "Upscale 1080p" },
+            { GBTN_OPTIONS, "Delete (x2)" },
+            { GBTN_CIRCLE, "Back" },
+        };
+        g_draw_footer(back, ghints, 7, "");
+        present();
+        return;
+    }
+
+    // ---- 4. MAIN STUDIO SCREEN (Dropdowns, Sliders & D-Pad/X/O Navigation) ----
+    {
+        char neg_buf[512];
+        int smp_v = 0, ready_v = 0;
+        uint64_t seed_v = 0;
+        http_srv_lock();
+        snprintf(neg_buf, sizeof(neg_buf), "%s", g_job.negative);
+        smp_v = g_job.sampler;
+        seed_v = g_job.seed;
+        ready_v = g_st.ready;
+        http_srv_unlock();
+
+        StudioView sv;
+        memset(&sv, 0, sizeof(sv));
+        sv.model = cur_m;
+        sv.neo = eng.neo;
+        sv.busy = busy;
+        sv.ready = ready_v;
+        sv.has_upscaler = eng.has_upscaler;
+        sv.vram_u = vram_u;
+        sv.vram_t = vram_t;
+        sv.prog = prog;
+        sv.stage = stg;
+        sv.err = err;
+        sv.toast = toast;
+        sv.addr = http_srv_address();
+        sv.preset_name = (preset_idx >= 0 && preset_idx < g_num_presets) ? g_presets[preset_idx].name : NULL;
+        sv.char_name = (char_idx >= 0 && char_idx < g_num_chars) ? g_chars[char_idx].name : NULL;
+        sv.char_series = (char_idx >= 0 && char_idx < g_num_chars) ? g_chars[char_idx].series : NULL;
+        sv.style_name = (style_idx >= 0 && style_idx < g_num_styles) ? g_styles[style_idx].name : NULL;
+        sv.prompt = pr;
+        sv.neg = neg_buf;
+        sv.w = w; sv.h = h; sv.steps = steps; sv.cfg = cfg;
+        sv.sampler = smp_v; sv.upscale = ups; sv.eco = eco;
+        sv.seed = seed_v; sv.last_seed = sm_last_seed;
+        sv.last_sec = lsec; sv.last_tf = tf;
+        sv.preview = preview_rgb; sv.pw = preview_w; sv.ph = preview_h;
+        sv.focus = sm_focus; sv.adjust = sm_adjust;
+        sv.dd_open = sm_dd_open; sv.dd_row = sm_dd_row;
+        sv.dd_sel = sm_dd_sel; sv.dd_top = sm_dd_top;
+        sv.dd_n = sm_dd_n; sv.dd_cur = sm_dd_cur;
+        sv.dd_label = sm_dd_item_label;
+        sv.dd_ctx = NULL;
+        sm_draw_studio(back, &sv);
+        present();
+    }
 }
 
 static void on_progress(void* user, float frac, const char* msg) {
@@ -491,23 +589,25 @@ static int on_cancel(void* user) {
     return c;
 }
 
-static void edit_prompt_osk(void) {
+static int edit_text_osk(const wchar_t* title, char* target, size_t target_sz, int numeric_only) {
     static wchar_t buf[513];
     memset(buf, 0, sizeof(buf));
-    for (int i = 0; g_job.prompt[i] && i < 512; i++) buf[i] = (uint8_t)g_job.prompt[i];
+    http_srv_lock();
+    for (int i = 0; target[i] && i < 512; i++) buf[i] = (uint8_t)target[i];
+    http_srv_unlock();
     OrbisImeDialogSetting s;
     memset(&s, 0, sizeof(s));
     s.userId = user_id;
-    s.type = ORBIS_TYPE_DEFAULT;
+    s.type = numeric_only ? ORBIS_TYPE_NUMBER : ORBIS_TYPE_DEFAULT;
     s.enterLabel = ORBIS_BUTTON_LABEL_SEND;
-    s.maxTextLength = 512;
+    s.maxTextLength = numeric_only ? 20 : 512;
     s.inputTextBuffer = buf;
     s.posx = SCREEN_W / 2;
     s.posy = SCREEN_H / 2;
     s.horizontalAlignment = ORBIS_H_CENTER;
     s.verticalAlignment = ORBIS_V_CENTER;
-    s.title = L"Garlic Diffusion Prompt";
-    if (sceImeDialogInit(&s, NULL) < 0) return;
+    s.title = title;
+    if (sceImeDialogInit(&s, NULL) < 0) return 0;
     int frames = 0, running = 0;
     for (;;) {
         OrbisDialogStatus st = sceImeDialogGetStatus();
@@ -520,14 +620,16 @@ static void edit_prompt_osk(void) {
     memset(&res, 0, sizeof(res));
     sceImeDialogGetResult(&res);
     sceImeDialogTerm();
-    if (res.endstatus == ORBIS_DIALOG_OK && buf[0]) {
+    if (res.endstatus == ORBIS_DIALOG_OK) {
         http_srv_lock();
         int n = 0;
-        for (int i = 0; buf[i] && n < (int)sizeof(g_job.prompt) - 1; i++)
-            g_job.prompt[n++] = (buf[i] < 128) ? (char)buf[i] : ' ';
-        g_job.prompt[n] = 0;
+        for (int i = 0; buf[i] && n < (int)target_sz - 1; i++)
+            target[n++] = (buf[i] < 128) ? (char)buf[i] : ' ';
+        target[n] = 0;
         http_srv_unlock();
+        return 1;
     }
+    return 0;
 }
 
 static int file_exists(const char* path) {
@@ -632,12 +734,15 @@ static void log_console_info(void) {
 int main(void) {
     __libc.threads_minus_1 = 1;
     if (rename(LOG_FILE, "/data/garlic_diffusion_log_prev.txt")) unlink(LOG_FILE);
-    glog("Garlic Diffusion v1.70 starting (PS4 Base/Pro + SD1.5/SDXL + 1080p + Gallery + Models + Styles)");
+    glog("GarlicDiffusion v1.10 starting (GPLv3 · PS4 Base/Pro + SD1.5/SDXL + 1080p/4K + Presets/Styles/Characters)");
     log_console_info();
     gallery_init(OUT_ROOT, PRESETS_ROOT);
     styles_init(STYLES_ROOT);
+    characters_init(CHARS_ROOT);
     model_dl_init(MODELS_ROOT, REPO_CFG);
     g_num_presets = presets_list(g_presets, PRESETS_MAX_ITEMS);
+    g_num_styles = styles_list(g_styles, STYLES_MAX_ITEMS);
+    g_num_chars = characters_list(g_chars, CHARS_MAX_ITEMS);
     sceSysmoduleLoadModule(ORBIS_SYSMODULE_IME_DIALOG);
     sceCommonDialogInitialize();
     sceUserServiceInitialize(NULL);
@@ -762,22 +867,45 @@ int main(void) {
 
     draw_ui();
     uint32_t prev_btn = 0;
+    uint32_t hold_dir = 0;
+    int hold_ticks = 0;
     int idle_ticks = 0;
     for (;;) {
         int ui_dirty = 0;
         OrbisPadData pd;
-        uint32_t btn = 0;
-        if (pad_fd >= 0 && scePadReadState(pad_fd, &pd) == 0) btn = pd.buttons;
+        uint32_t btn = 0, dir_now = 0;
+        if (pad_fd >= 0 && scePadReadState(pad_fd, &pd) == 0) {
+            btn = pd.buttons;
+            dir_now = btn & (ORBIS_PAD_BUTTON_UP | ORBIS_PAD_BUTTON_DOWN | ORBIS_PAD_BUTTON_LEFT | ORBIS_PAD_BUTTON_RIGHT);
+            if (pd.leftStick.y < 56) dir_now |= ORBIS_PAD_BUTTON_UP;
+            else if (pd.leftStick.y > 200) dir_now |= ORBIS_PAD_BUTTON_DOWN;
+            if (pd.leftStick.x < 56) dir_now |= ORBIS_PAD_BUTTON_LEFT;
+            else if (pd.leftStick.x > 200) dir_now |= ORBIS_PAD_BUTTON_RIGHT;
+        }
         uint32_t pressed = btn & ~prev_btn;
         prev_btn = btn;
 
-        // Reload user presets or rescan models if requested by Web UI
+        // Smooth directional auto-repeat (D-Pad + Left Stick): immediate on edge, repeat after ~290ms every ~80ms
+        uint32_t nav = 0;
+        if (dir_now != hold_dir) {
+            nav = dir_now & ~hold_dir;
+            hold_dir = dir_now;
+            hold_ticks = 0;
+        } else if (dir_now != 0) {
+            hold_ticks++;
+            if (hold_ticks >= 18 && ((hold_ticks - 18) % 5) == 0) nav = dir_now;
+        }
+
+        // Reload user presets, styles, characters, or rescan models if requested by Web UI
         http_srv_lock();
-        int pdirty = g_job.presets_dirty;
-        g_job.presets_dirty = 0;
+        int pdirty = g_job.presets_dirty; g_job.presets_dirty = 0;
+        int sdirty = g_job.styles_dirty;  g_job.styles_dirty = 0;
+        int cdirty = g_job.chars_dirty;   g_job.chars_dirty = 0;
         int do_rescan = g_job.rescan_req;
         http_srv_unlock();
         if (pdirty) g_num_presets = presets_list(g_presets, PRESETS_MAX_ITEMS);
+        if (sdirty) { g_num_styles = styles_list(g_styles, STYLES_MAX_ITEMS); if (style_idx >= g_num_styles) style_idx = -1; }
+        if (cdirty) { g_num_chars = characters_list(g_chars, CHARS_MAX_ITEMS); if (char_idx >= g_num_chars) char_idx = -1; }
         if (do_rescan) {
             int nm = scan_models();
             http_srv_lock();
@@ -801,13 +929,21 @@ int main(void) {
             if (g_in_models && dl.active) ui_dirty = 1;
         }
 
-        if (g_in_models) {
+        if (g_in_credits) {
+            if (pressed & ORBIS_PAD_BUTTON_CIRCLE) {
+                g_in_credits = 0; ui_dirty = 1;
+            } else if (pressed & ORBIS_PAD_BUTTON_SQUARE) {
+                g_in_credits = 0; g_in_gallery = 1; g_gal_full = 0; g_gal_idx = 0; gal_refresh(); ui_dirty = 1;
+            } else if (pressed & ORBIS_PAD_BUTTON_OPTIONS) {
+                g_in_credits = 0; g_in_models = 1; g_mdl_sel = 0; models_mgr_refresh(); ui_dirty = 1;
+            }
+        } else if (g_in_models) {
             int total = g_inst_cnt + g_cat_cnt;
             if (pressed & ORBIS_PAD_BUTTON_CIRCLE) {
                 g_in_models = 0; g_mdl_del_arm = 0; toast[0] = 0; ui_dirty = 1;
-            } else if ((pressed & ORBIS_PAD_BUTTON_DOWN) && total > 0) {
+            } else if ((nav & ORBIS_PAD_BUTTON_DOWN) && total > 0) {
                 g_mdl_sel = (g_mdl_sel + 1) % total; g_mdl_del_arm = 0; ui_dirty = 1;
-            } else if ((pressed & ORBIS_PAD_BUTTON_UP) && total > 0) {
+            } else if ((nav & ORBIS_PAD_BUTTON_UP) && total > 0) {
                 g_mdl_sel = (g_mdl_sel + total - 1) % total; g_mdl_del_arm = 0; ui_dirty = 1;
             } else if (pressed & ORBIS_PAD_BUTTON_TRIANGLE) {
                 model_dl_cancel(); snprintf(toast, sizeof(toast), "Cancelling download..."); ui_dirty = 1;
@@ -847,12 +983,12 @@ int main(void) {
         } else if (g_in_gallery) {
             if (g_gal_full) {
                 if (pressed) { g_gal_full = 0; ui_dirty = 1; }
-            } else if (pressed) {
+            } else if (pressed || nav) {
                 if (pressed & (ORBIS_PAD_BUTTON_CIRCLE | ORBIS_PAD_BUTTON_SQUARE)) {
                     g_in_gallery = 0; g_del_arm = 0; toast[0] = 0; ui_dirty = 1;
-                } else if (pressed & ORBIS_PAD_BUTTON_RIGHT) {
+                } else if (nav & ORBIS_PAD_BUTTON_RIGHT) {
                     if (g_gal_count > 0) { g_gal_idx = (g_gal_idx + 1) % g_gal_count; toast[0] = 0; gal_load_current(); ui_dirty = 1; }
-                } else if (pressed & ORBIS_PAD_BUTTON_LEFT) {
+                } else if (nav & ORBIS_PAD_BUTTON_LEFT) {
                     if (g_gal_count > 0) { g_gal_idx = (g_gal_idx + g_gal_count - 1) % g_gal_count; toast[0] = 0; gal_load_current(); ui_dirty = 1; }
                 } else if (pressed & ORBIS_PAD_BUTTON_R1) {
                     if (g_gal_rgb) { g_gal_full = 1; ui_dirty = 1; }
@@ -863,7 +999,7 @@ int main(void) {
                     if (it->negative[0]) snprintf(g_job.negative, sizeof(g_job.negative), "%s", it->negative);
                     if (it->steps) g_job.steps = it->steps;
                     if (it->cfg > 0) g_job.cfg = it->cfg;
-                    g_job.sampler = (strcmp(it->sampler, "LCM") == 0) ? 2 : (strcmp(it->sampler, "Euler") == 0 ? 1 : 0);
+                    g_job.sampler = strstr(it->sampler, "DPM") ? 3 : ((strcmp(it->sampler, "LCM") == 0) ? 2 : (strcmp(it->sampler, "Euler") == 0 ? 1 : 0));
                     http_srv_unlock();
                     snprintf(toast, sizeof(toast), "Loaded prompt from %s", it->id);
                     g_in_gallery = 0; ui_dirty = 1;
@@ -874,7 +1010,7 @@ int main(void) {
                     if (it->negative[0]) snprintf(g_job.negative, sizeof(g_job.negative), "%s", it->negative);
                     if (it->steps) g_job.steps = it->steps;
                     if (it->cfg > 0) g_job.cfg = it->cfg;
-                    g_job.sampler = (strcmp(it->sampler, "LCM") == 0) ? 2 : (strcmp(it->sampler, "Euler") == 0 ? 1 : 0);
+                    g_job.sampler = strstr(it->sampler, "DPM") ? 3 : ((strcmp(it->sampler, "LCM") == 0) ? 2 : (strcmp(it->sampler, "Euler") == 0 ? 1 : 0));
                     g_job.seed = 0;
                     g_job.cancel_req = 0;
                     g_job.pending = 1;
@@ -900,104 +1036,366 @@ int main(void) {
                     ui_dirty = 1;
                 }
             }
+        } else if (sm_dd_open) {
+            // ---- DROPDOWN MODAL (Up/Down + L1/R1 page, X Select, O Cancel) ----
+            if (pressed & ORBIS_PAD_BUTTON_CIRCLE) {
+                sm_dd_open = 0; ui_dirty = 1;
+            } else if (nav & ORBIS_PAD_BUTTON_DOWN) {
+                sm_dd_sel++; sm_dd_clamp(); ui_dirty = 1;
+            } else if (nav & ORBIS_PAD_BUTTON_UP) {
+                sm_dd_sel--; sm_dd_clamp(); ui_dirty = 1;
+            } else if (pressed & ORBIS_PAD_BUTTON_R1) {
+                sm_dd_sel += SM_DD_VIS;
+                if (sm_dd_sel >= sm_dd_n) sm_dd_sel = sm_dd_n - 1;
+                sm_dd_clamp(); ui_dirty = 1;
+            } else if (pressed & ORBIS_PAD_BUTTON_L1) {
+                sm_dd_sel -= SM_DD_VIS;
+                if (sm_dd_sel < 0) sm_dd_sel = 0;
+                sm_dd_clamp(); ui_dirty = 1;
+            } else if (pressed & ORBIS_PAD_BUTTON_CROSS) {
+                int sel = sm_dd_sel, row = sm_dd_row;
+                sm_dd_open = 0;
+                toast[0] = 0;
+                switch (row) {
+                case ROW_MODEL:
+                    if (sel < sm_dd_models_n) {
+                        http_srv_lock();
+                        snprintf(g_job.switch_model, sizeof(g_job.switch_model), "%s", sm_dd_models[sel]);
+                        g_job.switch_req = 1;
+                        http_srv_unlock();
+                        snprintf(toast, sizeof(toast), "Loading %s...", sm_dd_models[sel]);
+                    } else {
+                        g_in_models = 1; g_mdl_sel = 0; g_mdl_del_arm = 0; models_mgr_refresh();
+                    }
+                    break;
+                case ROW_PRESET:
+                    if (sel >= 0 && sel < g_num_presets) {
+                        preset_idx = sel;
+                        http_srv_lock();
+                        snprintf(g_job.prompt, sizeof(g_job.prompt), "%s", g_presets[preset_idx].prompt);
+                        if (g_presets[preset_idx].negative[0])
+                            snprintf(g_job.negative, sizeof(g_job.negative), "%s", g_presets[preset_idx].negative);
+                        http_srv_unlock();
+                        snprintf(toast, sizeof(toast), "Preset: %s", g_presets[preset_idx].name);
+                    }
+                    break;
+                case ROW_CHAR:
+                    char_idx = sel - 1;
+                    if (char_idx >= g_num_chars) char_idx = -1;
+                    if (char_idx >= 0) snprintf(toast, sizeof(toast), "Character: %s (%s)", g_chars[char_idx].name, g_chars[char_idx].series);
+                    else snprintf(toast, sizeof(toast), "Character overlay: Off");
+                    break;
+                case ROW_STYLE:
+                    style_idx = sel - 1;
+                    if (style_idx >= g_num_styles) style_idx = -1;
+                    if (style_idx >= 0) snprintf(toast, sizeof(toast), "Art Style: %s", g_styles[style_idx].name);
+                    else snprintf(toast, sizeof(toast), "Art Style: Off");
+                    break;
+                case ROW_RES:
+                    if (sel >= 0 && sel < RES_COUNT) {
+                        res_idx = sel;
+                        http_srv_lock();
+                        g_job.width = RES_LIST[res_idx][0];
+                        g_job.height = RES_LIST[res_idx][1];
+                        http_srv_unlock();
+                    }
+                    break;
+                case ROW_SAMPLER:
+                    if (sel >= 0 && sel <= 3) {
+                        http_srv_lock(); g_job.sampler = sel; http_srv_unlock();
+                    }
+                    break;
+                case ROW_UPSCALE:
+                    if (sel >= 0 && sel <= 3) {
+                        http_srv_lock(); g_job.upscale = sel; http_srv_unlock();
+                    }
+                    break;
+                case ROW_POWER:
+                    if (sel >= 0 && sel <= 3) {
+                        int eco_val = 3 - sel;
+                        http_srv_lock(); g_job.eco_mode = eco_val; g_st.eco_mode = eco_val; http_srv_unlock();
+                    }
+                    break;
+                case ROW_SEED:
+                    if (sel == 0) {
+                        http_srv_lock(); g_job.seed = 0; http_srv_unlock();
+                        snprintf(toast, sizeof(toast), "Seed: Random each time");
+                    } else if (sel == 1) {
+                        uint64_t ls = sm_last_seed ? sm_last_seed : 42ull;
+                        http_srv_lock(); g_job.seed = ls; http_srv_unlock();
+                        snprintf(toast, sizeof(toast), "Seed locked to %llu", (unsigned long long)ls);
+                    } else {
+                        char sbuf[32] = {0};
+                        if (g_job.seed) snprintf(sbuf, sizeof(sbuf), "%llu", (unsigned long long)g_job.seed);
+                        if (edit_text_osk(L"Custom Seed (0 = Random)", sbuf, sizeof(sbuf), 1)) {
+                            uint64_t nv = strtoull(sbuf, NULL, 10);
+                            http_srv_lock(); g_job.seed = nv; http_srv_unlock();
+                            if (nv) snprintf(toast, sizeof(toast), "Seed locked to %llu", (unsigned long long)nv);
+                            else snprintf(toast, sizeof(toast), "Seed: Random each time");
+                        }
+                    }
+                    break;
+                }
+                ui_dirty = 1;
+            }
+        } else if (sm_adjust) {
+            // ---- SLIDER ADJUST MODE (Left/Right + L1/R1 coarse, X Confirm, O Revert) ----
+            if (pressed & ORBIS_PAD_BUTTON_CROSS) {
+                sm_adjust = 0; ui_dirty = 1;
+            } else if (pressed & ORBIS_PAD_BUTTON_CIRCLE) {
+                http_srv_lock();
+                if (sm_focus == ROW_STEPS) g_job.steps = sm_saved_steps;
+                else if (sm_focus == ROW_CFG) g_job.cfg = sm_saved_cfg;
+                http_srv_unlock();
+                sm_adjust = 0; ui_dirty = 1;
+            } else if ((nav & (ORBIS_PAD_BUTTON_LEFT | ORBIS_PAD_BUTTON_RIGHT)) ||
+                       (pressed & (ORBIS_PAD_BUTTON_L1 | ORBIS_PAD_BUTTON_R1))) {
+                int dir = ((nav & ORBIS_PAD_BUTTON_RIGHT) || (pressed & ORBIS_PAD_BUTTON_R1)) ? 1 : -1;
+                int big = (pressed & (ORBIS_PAD_BUTTON_L1 | ORBIS_PAD_BUTTON_R1)) ? 1 : 0;
+                http_srv_lock();
+                if (sm_focus == ROW_STEPS) {
+                    int ns = (int)g_job.steps + dir * (big ? 5 : 1);
+                    if (ns < SM_STEPS_MIN) ns = SM_STEPS_MIN;
+                    if (ns > SM_STEPS_MAX) ns = SM_STEPS_MAX;
+                    g_job.steps = (uint32_t)ns;
+                } else if (sm_focus == ROW_CFG) {
+                    if (big) {
+                        float nc = g_job.cfg + (float)dir * 1.0f;
+                        if (nc < SM_CFG_MIN) nc = SM_CFG_MIN;
+                        if (nc > SM_CFG_MAX) nc = SM_CFG_MAX;
+                        g_job.cfg = floorf(nc * 10.0f + 0.5f) * 0.1f;
+                    } else {
+                        g_job.cfg = sm_step_cfg(g_job.cfg, dir);
+                    }
+                }
+                http_srv_unlock();
+                ui_dirty = 1;
+            }
         } else {
-            if (pressed & ORBIS_PAD_BUTTON_CROSS) { edit_prompt_osk(); ui_dirty = 1; }
-            if ((pressed & ORBIS_PAD_BUTTON_RIGHT) && g_num_presets > 0) {
-                preset_idx = (preset_idx + 1) % g_num_presets;
-                http_srv_lock();
-                snprintf(g_job.prompt, sizeof(g_job.prompt), "%s", g_presets[preset_idx].prompt);
-                if (g_presets[preset_idx].negative[0])
-                    snprintf(g_job.negative, sizeof(g_job.negative), "%s", g_presets[preset_idx].negative);
-                http_srv_unlock();
-                snprintf(toast, sizeof(toast), "Preset: %s", g_presets[preset_idx].name);
-                ui_dirty = 1;
-            }
-            if ((pressed & ORBIS_PAD_BUTTON_LEFT) && g_num_presets > 0) {
-                preset_idx = (preset_idx + g_num_presets - 1) % g_num_presets;
-                http_srv_lock();
-                snprintf(g_job.prompt, sizeof(g_job.prompt), "%s", g_presets[preset_idx].prompt);
-                if (g_presets[preset_idx].negative[0])
-                    snprintf(g_job.negative, sizeof(g_job.negative), "%s", g_presets[preset_idx].negative);
-                http_srv_unlock();
-                snprintf(toast, sizeof(toast), "Preset: %s", g_presets[preset_idx].name);
-                ui_dirty = 1;
-            }
-            if (pressed & ORBIS_PAD_BUTTON_R1) {
-                res_idx = (res_idx + 1) % 8;
-                http_srv_lock();
-                g_job.width = RES_LIST[res_idx][0];
-                g_job.height = RES_LIST[res_idx][1];
-                http_srv_unlock();
-                ui_dirty = 1;
-            }
-            if (pressed & ORBIS_PAD_BUTTON_L1) {
-                res_idx = (res_idx + 7) % 8;
-                http_srv_lock();
-                g_job.width = RES_LIST[res_idx][0];
-                g_job.height = RES_LIST[res_idx][1];
-                http_srv_unlock();
-                ui_dirty = 1;
-            }
-            if (pressed & ORBIS_PAD_BUTTON_R2) {
-                http_srv_lock();
-                for (int i = 0; i < (int)(sizeof(STEP_LIST) / sizeof(STEP_LIST[0])); i++) {
-                    if (STEP_LIST[i] > g_job.steps) { g_job.steps = STEP_LIST[i]; break; }
+            // ---- MAIN STUDIO SETTINGS LIST ----
+            if (nav & ORBIS_PAD_BUTTON_DOWN) {
+                sm_focus = (sm_focus + 1) % ROW_COUNT;
+                toast[0] = 0; ui_dirty = 1;
+            } else if (nav & ORBIS_PAD_BUTTON_UP) {
+                sm_focus = (sm_focus + ROW_COUNT - 1) % ROW_COUNT;
+                toast[0] = 0; ui_dirty = 1;
+            } else if (nav & (ORBIS_PAD_BUTTON_LEFT | ORBIS_PAD_BUTTON_RIGHT)) {
+                int dir = (nav & ORBIS_PAD_BUTTON_RIGHT) ? 1 : -1;
+                toast[0] = 0;
+                switch (sm_focus) {
+                case ROW_PRESET:
+                    if (g_num_presets > 0) {
+                        preset_idx = (preset_idx + g_num_presets + dir) % g_num_presets;
+                        http_srv_lock();
+                        snprintf(g_job.prompt, sizeof(g_job.prompt), "%s", g_presets[preset_idx].prompt);
+                        if (g_presets[preset_idx].negative[0])
+                            snprintf(g_job.negative, sizeof(g_job.negative), "%s", g_presets[preset_idx].negative);
+                        http_srv_unlock();
+                        snprintf(toast, sizeof(toast), "Preset: %s", g_presets[preset_idx].name);
+                    }
+                    break;
+                case ROW_CHAR:
+                    if (g_num_chars > 0) {
+                        int n = g_num_chars + 1;
+                        int cur = (char_idx + 1 + n + dir) % n;
+                        char_idx = cur - 1;
+                    }
+                    break;
+                case ROW_STYLE:
+                    if (g_num_styles > 0) {
+                        int n = g_num_styles + 1;
+                        int cur = (style_idx + 1 + n + dir) % n;
+                        style_idx = cur - 1;
+                    }
+                    break;
+                case ROW_RES:
+                    res_idx = (res_idx + RES_COUNT + dir) % RES_COUNT;
+                    http_srv_lock();
+                    g_job.width = RES_LIST[res_idx][0];
+                    g_job.height = RES_LIST[res_idx][1];
+                    http_srv_unlock();
+                    break;
+                case ROW_STEPS:
+                    http_srv_lock();
+                    {
+                        int ns = (int)g_job.steps + dir;
+                        if (ns < SM_STEPS_MIN) ns = SM_STEPS_MIN;
+                        if (ns > SM_STEPS_MAX) ns = SM_STEPS_MAX;
+                        g_job.steps = (uint32_t)ns;
+                    }
+                    http_srv_unlock();
+                    break;
+                case ROW_CFG:
+                    http_srv_lock();
+                    g_job.cfg = sm_step_cfg(g_job.cfg, dir);
+                    http_srv_unlock();
+                    break;
+                case ROW_SAMPLER:
+                    http_srv_lock();
+                    g_job.sampler = (g_job.sampler + 4 + dir) % 4;
+                    http_srv_unlock();
+                    break;
+                case ROW_UPSCALE:
+                    http_srv_lock();
+                    g_job.upscale = (g_job.upscale + 4 + dir) % 4;
+                    http_srv_unlock();
+                    break;
+                case ROW_POWER:
+                    http_srv_lock();
+                    {
+                        // Left = cooler (higher eco_mode), Right = faster (lower eco_mode)
+                        int ne = g_job.eco_mode - dir;
+                        if (ne < 0) ne = 3;
+                        if (ne > 3) ne = 0;
+                        g_job.eco_mode = ne;
+                        g_st.eco_mode = ne;
+                    }
+                    http_srv_unlock();
+                    break;
+                case ROW_SEED:
+                    http_srv_lock();
+                    if (g_job.seed == 0) g_job.seed = sm_last_seed ? sm_last_seed : 42ull;
+                    else g_job.seed = 0;
+                    http_srv_unlock();
+                    break;
                 }
-                http_srv_unlock();
                 ui_dirty = 1;
-            }
-            if (pressed & ORBIS_PAD_BUTTON_L2) {
-                http_srv_lock();
-                for (int i = (int)(sizeof(STEP_LIST) / sizeof(STEP_LIST[0])) - 1; i >= 0; i--) {
-                    if (STEP_LIST[i] < g_job.steps) { g_job.steps = STEP_LIST[i]; break; }
+            } else if (pressed & ORBIS_PAD_BUTTON_CROSS) {
+                toast[0] = 0;
+                switch (sm_focus) {
+                case ROW_MODEL:
+                    scan_models();
+                    http_srv_lock();
+                    sm_dd_models_n = g_st.num_models;
+                    sm_dd_cur = -1;
+                    for (int i = 0; i < sm_dd_models_n; i++) {
+                        snprintf(sm_dd_models[i], sizeof(sm_dd_models[i]), "%s", g_st.models[i]);
+                        if (strcmp(sm_dd_models[i], g_st.model) == 0) sm_dd_cur = i;
+                    }
+                    http_srv_unlock();
+                    sm_dd_row = ROW_MODEL;
+                    sm_dd_n = sm_dd_models_n + 1;
+                    sm_dd_sel = sm_dd_cur >= 0 ? sm_dd_cur : 0;
+                    sm_dd_top = 0; sm_dd_clamp();
+                    sm_dd_open = 1;
+                    break;
+                case ROW_PRESET:
+                    if (g_num_presets > 0) {
+                        sm_dd_row = ROW_PRESET;
+                        sm_dd_n = g_num_presets;
+                        sm_dd_cur = preset_idx;
+                        sm_dd_sel = preset_idx >= 0 ? preset_idx : 0;
+                        sm_dd_top = 0; sm_dd_clamp();
+                        sm_dd_open = 1;
+                    }
+                    break;
+                case ROW_CHAR:
+                    sm_dd_row = ROW_CHAR;
+                    sm_dd_n = g_num_chars + 1;
+                    sm_dd_cur = char_idx + 1;
+                    sm_dd_sel = char_idx + 1;
+                    sm_dd_top = 0; sm_dd_clamp();
+                    sm_dd_open = 1;
+                    break;
+                case ROW_STYLE:
+                    sm_dd_row = ROW_STYLE;
+                    sm_dd_n = g_num_styles + 1;
+                    sm_dd_cur = style_idx + 1;
+                    sm_dd_sel = style_idx + 1;
+                    sm_dd_top = 0; sm_dd_clamp();
+                    sm_dd_open = 1;
+                    break;
+                case ROW_PROMPT:
+                    if (edit_text_osk(L"Positive Prompt", g_job.prompt, sizeof(g_job.prompt), 0))
+                        snprintf(toast, sizeof(toast), "Prompt updated");
+                    break;
+                case ROW_NEG:
+                    if (edit_text_osk(L"Negative Prompt", g_job.negative, sizeof(g_job.negative), 0))
+                        snprintf(toast, sizeof(toast), "Negative prompt updated");
+                    break;
+                case ROW_RES:
+                    sm_dd_row = ROW_RES;
+                    sm_dd_n = RES_COUNT;
+                    sm_dd_cur = res_idx;
+                    sm_dd_sel = res_idx;
+                    sm_dd_top = 0; sm_dd_clamp();
+                    sm_dd_open = 1;
+                    break;
+                case ROW_STEPS:
+                    http_srv_lock(); sm_saved_steps = g_job.steps; http_srv_unlock();
+                    sm_adjust = 1;
+                    break;
+                case ROW_CFG:
+                    http_srv_lock(); sm_saved_cfg = g_job.cfg; http_srv_unlock();
+                    sm_adjust = 1;
+                    break;
+                case ROW_SAMPLER:
+                    sm_dd_row = ROW_SAMPLER;
+                    sm_dd_n = 4;
+                    http_srv_lock(); sm_dd_cur = g_job.sampler; http_srv_unlock();
+                    sm_dd_sel = (sm_dd_cur >= 0 && sm_dd_cur <= 3) ? sm_dd_cur : 0;
+                    sm_dd_top = 0; sm_dd_clamp();
+                    sm_dd_open = 1;
+                    break;
+                case ROW_UPSCALE:
+                    sm_dd_row = ROW_UPSCALE;
+                    sm_dd_n = 4;
+                    http_srv_lock(); sm_dd_cur = g_job.upscale; http_srv_unlock();
+                    sm_dd_sel = (sm_dd_cur >= 0 && sm_dd_cur <= 3) ? sm_dd_cur : 0;
+                    sm_dd_top = 0; sm_dd_clamp();
+                    sm_dd_open = 1;
+                    break;
+                case ROW_POWER:
+                    sm_dd_row = ROW_POWER;
+                    sm_dd_n = 4;
+                    http_srv_lock(); sm_dd_cur = 3 - g_job.eco_mode; http_srv_unlock();
+                    if (sm_dd_cur < 0 || sm_dd_cur > 3) sm_dd_cur = 1;
+                    sm_dd_sel = sm_dd_cur;
+                    sm_dd_top = 0; sm_dd_clamp();
+                    sm_dd_open = 1;
+                    break;
+                case ROW_SEED:
+                    sm_dd_row = ROW_SEED;
+                    sm_dd_n = 3;
+                    http_srv_lock(); sm_dd_cur = g_job.seed ? 1 : 0; http_srv_unlock();
+                    sm_dd_sel = sm_dd_cur;
+                    sm_dd_top = 0; sm_dd_clamp();
+                    sm_dd_open = 1;
+                    break;
+                case ROW_GEN:
+                    http_srv_lock();
+                    if (g_st.ready) {
+                        g_job.cancel_req = 0;
+                        g_tv_gen = 1;
+                        g_job.pending = 1;
+                    } else {
+                        snprintf(toast, sizeof(toast), "No complete model loaded - select Model or press OPTIONS");
+                    }
+                    http_srv_unlock();
+                    break;
                 }
-                http_srv_unlock();
                 ui_dirty = 1;
-            }
-            if (pressed & ORBIS_PAD_BUTTON_L3) {
-                http_srv_lock();
-                g_job.upscale = (g_job.upscale + 1) % 3;
-                http_srv_unlock();
-                ui_dirty = 1;
-            }
-            if (pressed & ORBIS_PAD_BUTTON_R3) {
-                http_srv_lock();
-                g_job.eco_mode = (g_job.eco_mode + 1) % 4;
-                g_st.eco_mode = g_job.eco_mode;
-                http_srv_unlock();
-                ui_dirty = 1;
-            }
-            if (pressed & ORBIS_PAD_BUTTON_OPTIONS) {
-                scan_models();
-                http_srv_lock();
-                if (g_st.num_models > 0) {
-                    model_idx = (model_idx + 1) % g_st.num_models;
-                    snprintf(g_job.switch_model, sizeof(g_job.switch_model), "%s", g_st.models[model_idx]);
-                    g_job.switch_req = 1;
-                }
-                http_srv_unlock();
-                ui_dirty = 1;
-            }
-            if (pressed & ORBIS_PAD_BUTTON_TRIANGLE) {
+            } else if (pressed & ORBIS_PAD_BUTTON_TRIANGLE) {
                 http_srv_lock();
                 if (g_st.ready) {
                     g_job.cancel_req = 0;
+                    g_tv_gen = 1;
                     g_job.pending = 1;
                 } else {
-                    snprintf(toast, sizeof(toast), "No complete model loaded - press [OPTIONS]");
+                    snprintf(toast, sizeof(toast), "No complete model loaded - press OPTIONS");
                 }
                 http_srv_unlock();
                 ui_dirty = 1;
-            }
-            if (pressed & ORBIS_PAD_BUTTON_SQUARE) {
+            } else if (pressed & ORBIS_PAD_BUTTON_SQUARE) {
                 g_in_gallery = 1; g_gal_full = 0; g_gal_idx = 0; toast[0] = 0;
                 gal_refresh();
                 ui_dirty = 1;
-            }
-            if (pressed & ORBIS_PAD_BUTTON_UP) {
+            } else if (pressed & ORBIS_PAD_BUTTON_OPTIONS) {
                 g_in_models = 1; g_mdl_sel = 0; g_mdl_del_arm = 0; toast[0] = 0;
                 models_mgr_refresh();
                 ui_dirty = 1;
+            } else if (pressed & ORBIS_PAD_BUTTON_CIRCLE) {
+                g_in_credits = 1; toast[0] = 0; ui_dirty = 1;
             }
         }
 
@@ -1029,9 +1427,9 @@ int main(void) {
                 uint8_t* drgb = NULL;
                 uint32_t dw = 0, dh = 0;
                 int ok = -1;
-                if (gop == 1 || gop == 2) {
+                if (gop >= 1 && gop <= 3) {
                     ok = sdxl_upscale_rgb(&eng, srgb, sw, sh, &drgb, &dw, &dh, gop, geco, on_progress, on_cancel, NULL);
-                } else if (gop == 3) {
+                } else if (gop == 4) {
                     on_progress(NULL, 0.5f, "Resizing image...");
                     drgb = rgb_resize(srgb, sw, sh, gw, gh);
                     dw = gw; dh = gh;
@@ -1041,7 +1439,7 @@ int main(void) {
                 if (ok == 0 && drgb) {
                     size_t nsz = 0;
                     src_meta.width = dw; src_meta.height = dh;
-                    if (gop == 1 || gop == 2) src_meta.upscaled = gop;
+                    if (gop >= 1 && gop <= 3) src_meta.upscaled = gop;
                     char pmeta[2048];
                     format_a1111_params(pmeta, sizeof(pmeta), src_meta.prompt, src_meta.negative,
                                         src_meta.steps, src_meta.sampler, src_meta.cfg, src_meta.seed,
@@ -1156,6 +1554,34 @@ int main(void) {
 
         if (do_run) {
             toast[0] = 0;
+            if (g_tv_gen) {
+                g_tv_gen = 0;
+                char tmp_p[1024], tmp_n[512];
+                snprintf(tmp_p, sizeof(tmp_p), "%s", run_job.prompt);
+                snprintf(tmp_n, sizeof(tmp_n), "%s", run_job.negative);
+                if (char_idx >= 0 && char_idx < g_num_chars && g_chars[char_idx].prompt[0]) {
+                    char merged[1024];
+                    snprintf(merged, sizeof(merged), "%s, %s", g_chars[char_idx].prompt, tmp_p);
+                    snprintf(tmp_p, sizeof(tmp_p), "%s", merged);
+                    if (g_chars[char_idx].negative[0]) {
+                        char mn[512];
+                        snprintf(mn, sizeof(mn), "%s, %s", tmp_n, g_chars[char_idx].negative);
+                        snprintf(tmp_n, sizeof(tmp_n), "%s", mn);
+                    }
+                }
+                if (style_idx >= 0 && style_idx < g_num_styles && g_styles[style_idx].prompt[0]) {
+                    char merged[1024];
+                    snprintf(merged, sizeof(merged), "%s, %s", tmp_p, g_styles[style_idx].prompt);
+                    snprintf(tmp_p, sizeof(tmp_p), "%s", merged);
+                    if (g_styles[style_idx].negative[0]) {
+                        char mn[512];
+                        snprintf(mn, sizeof(mn), "%s, %s", tmp_n, g_styles[style_idx].negative);
+                        snprintf(tmp_n, sizeof(tmp_n), "%s", mn);
+                    }
+                }
+                snprintf(run_job.prompt, sizeof(run_job.prompt), "%s", tmp_p);
+                snprintf(run_job.negative, sizeof(run_job.negative), "%s", tmp_n);
+            }
             uint32_t rw = (run_job.width + 32u) & ~63u;
             uint32_t rh = (run_job.height + 32u) & ~63u;
             if (rw < 256u) rw = 256u;
@@ -1170,12 +1596,13 @@ int main(void) {
             uint32_t rsteps = run_job.steps < 1u ? 20u : (run_job.steps > 64u ? 64u : run_job.steps);
             float rcfg = run_job.cfg <= 0.0f ? 7.0f : run_job.cfg;
             uint64_t seed = run_job.seed ? run_job.seed : (sceKernelReadTsc() & 0xFFFFFFFFull);
+            sm_last_seed = seed;
             SdxlParams p = {run_job.prompt, run_job.negative, rw, rh, rsteps, rcfg, seed, run_job.eco_mode, run_job.sampler};
             uint8_t* rgb = (uint8_t*)malloc((size_t)p.width * p.height * 3);
-            static const char* SMP_LOG2[3] = {"EulerA", "Euler", "LCM"};
+            static const char* SMP_LOG2[4] = {"EulerA", "Euler", "LCM", "DPM2MKarras"};
             glog("gen start %s %ux%u steps=%u cfg=%.1f %s %s seed=%llu",
                  eng.is_sd15 ? "SD1.5" : "SDXL", p.width, p.height, p.steps, (double)p.cfg_scale,
-                 SMP_LOG2[(p.sampler >= 0 && p.sampler <= 2) ? p.sampler : 0], sdxl_eco_name_ex(p.eco_mode, eng.neo), (unsigned long long)seed);
+                 SMP_LOG2[(p.sampler >= 0 && p.sampler <= 3) ? p.sampler : 0], sdxl_eco_name_ex(p.eco_mode, eng.neo), (unsigned long long)seed);
             int rc = rgb ? sdxl_generate(&eng, &p, rgb, on_progress, on_cancel, NULL) : -1;
             uint32_t out_w = p.width, out_h = p.height;
             if (rc == 0 && run_job.upscale > 0 && eng.has_upscaler) {
@@ -1194,8 +1621,8 @@ int main(void) {
                 }
             }
             if (rc == 0) {
-                static const char* SMP_META[3] = {"Euler a", "Euler", "LCM"};
-                const char* smp_str = SMP_META[(p.sampler >= 0 && p.sampler <= 2) ? p.sampler : 0];
+                static const char* SMP_META[4] = {"Euler a", "Euler", "LCM", "DPM++ 2M Karras"};
+                const char* smp_str = SMP_META[(p.sampler >= 0 && p.sampler <= 3) ? p.sampler : 0];
                 int did_up = (out_w != p.width || out_h != p.height) ? run_job.upscale : 0;
                 char pmeta[2048];
                 format_a1111_params(pmeta, sizeof(pmeta), p.prompt, p.negative, p.steps, smp_str,

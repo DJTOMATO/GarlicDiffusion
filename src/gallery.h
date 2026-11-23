@@ -5,8 +5,9 @@
 #include <stdint.h>
 
 #define GALLERY_MAX_ITEMS 128
-#define PRESETS_MAX_ITEMS 64
+#define PRESETS_MAX_ITEMS 96
 #define STYLES_MAX_ITEMS 64
+#define CHARS_MAX_ITEMS 96
 
 typedef struct {
     char id[64];
@@ -14,6 +15,14 @@ typedef struct {
     char prompt[512];
     char negative[384];
 } StyleItem;
+
+typedef struct {
+    char id[64];
+    char name[64];
+    char series[48];
+    char prompt[512];
+    char negative[384];
+} CharacterItem;
 
 typedef struct {
     char id[64];
@@ -67,6 +76,12 @@ void styles_init(const char* styles_dir);
 int styles_list(StyleItem* items, int max_items);
 int styles_save(const StyleItem* s, char* out_id, size_t out_id_max);
 int styles_delete(const char* id);
+
+// Character Presets Manager (saved to /data/garlic-diffusion/characters/)
+void characters_init(const char* chars_dir);
+int characters_list(CharacterItem* items, int max_items);
+int characters_save(const CharacterItem* c, char* out_id, size_t out_id_max);
+int characters_delete(const char* id);
 
 // Per-model default preset.cfg writer
 int model_preset_save(const char* models_root, const char* model_name,

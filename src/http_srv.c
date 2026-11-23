@@ -174,10 +174,11 @@ static void apply_job_json(const char* body, DiffJob* j) {
     if (json_get_str(body, "negative_prompt", tmp, sizeof(tmp)) || json_get_str(body, "negative", tmp, sizeof(tmp)))
         snprintf(j->negative, sizeof(j->negative), "%s", tmp);
     if (json_get_str(body, "sampler_name", tmp, sizeof(tmp)) || json_get_str(body, "sampler_index", tmp, sizeof(tmp))) {
-        if (strcmp(tmp, "LCM") == 0 || strcmp(tmp, "lcm") == 0) j->sampler = 2;
+        if (strstr(tmp, "DPM") || strstr(tmp, "dpm")) j->sampler = 3;
+        else if (strcmp(tmp, "LCM") == 0 || strcmp(tmp, "lcm") == 0) j->sampler = 2;
         else if (strcmp(tmp, "Euler") == 0 || strcmp(tmp, "euler") == 0) j->sampler = 1;
         else if (strcmp(tmp, "Euler a") == 0 || strcmp(tmp, "euler_a") == 0 || strcmp(tmp, "k_euler_a") == 0) j->sampler = 0;
-        // Unsupported A1111 sampler names (e.g. DPM++ 2M) keep the active model's optimal preset sampler!
+        // Unsupported A1111 sampler names keep the active model's optimal preset sampler!
     }
     double v;
     if (json_get_str(body, "size", tmp, sizeof(tmp))) {
@@ -190,7 +191,7 @@ static void apply_job_json(const char* body, DiffJob* j) {
     if (json_get_double(body, "cfg_scale", &v) || json_get_double(body, "cfg", &v)) j->cfg = (float)v;
     if (json_get_double(body, "seed", &v)) j->seed = (v > 0) ? (uint64_t)v : 0;
     if (json_get_double(body, "eco", &v)) j->eco_mode = (v >= 0 && v <= 3) ? (int)v : 2;
-    if (json_get_double(body, "upscale", &v)) j->upscale = (v >= 0 && v <= 2) ? (int)v : 0;
+    if (json_get_double(body, "upscale", &v)) j->upscale = (v >= 0 && v <= 3) ? (int)v : 0;
     else if (strstr(body, "\"enable_hr\":true") || strstr(body, "\"enable_hr\": true")) j->upscale = 1;
 }
 
@@ -366,7 +367,8 @@ static void handle_client(int fd) {
         int ok = gallery_valid_id(id) && g_st->ready && !g_st->busy && !g_job->pending && !g_job->switch_req && !g_job->gal_op;
         if (ok) {
             snprintf(g_job->gal_id, sizeof(g_job->gal_id), "%s", id);
-            g_job->gal_op = ((int)md == 2) ? 2 : 1;
+            int m = (int)md;
+            g_job->gal_op = (m == 3) ? 3 : ((m == 2) ? 2 : 1);
             g_job->cancel_req = 0;
         }
         http_srv_unlock();
@@ -379,13 +381,13 @@ static void handle_client(int fd) {
         json_get_double(body, "width", &rw);
         json_get_double(body, "height", &rh);
         http_srv_lock();
-        int ok = gallery_valid_id(id) && rw >= 64 && rh >= 64 && rw <= 1920 && rh <= 1920 &&
+        int ok = gallery_valid_id(id) && rw >= 64 && rh >= 64 && rw <= 3840 && rh <= 3840 &&
                  g_st->ready && !g_st->busy && !g_job->pending && !g_job->switch_req && !g_job->gal_op;
         if (ok) {
             snprintf(g_job->gal_id, sizeof(g_job->gal_id), "%s", id);
             g_job->gal_w = (uint32_t)rw;
             g_job->gal_h = (uint32_t)rh;
-            g_job->gal_op = 3;
+            g_job->gal_op = 4;
         }
         http_srv_unlock();
         if (ok) send_resp(fd, 202, "Accepted", "application/json", "{\"ok\":true}", 11);
@@ -478,7 +480,7 @@ static void handle_client(int fd) {
             if (strcmp(mdl, g_st->model) == 0) {
                 g_st->preset_w = w; g_st->preset_h = h; g_st->preset_steps = st;
                 g_st->preset_cfg = cf; g_st->preset_upscale = ups;
-                g_st->preset_sampler = (strcmp(smp, "LCM") == 0) ? 2 : (strcmp(smp, "Euler") == 0 ? 1 : 0);
+                g_st->preset_sampler = (strstr(smp, "DPM") || strstr(smp, "dpm")) ? 3 : ((strcmp(smp, "LCM") == 0) ? 2 : (strcmp(smp, "Euler") == 0 ? 1 : 0));
                 snprintf(g_st->preset_desc, sizeof(g_st->preset_desc), "%s", desc);
                 snprintf(g_st->preset_prompt, sizeof(g_st->preset_prompt), "%s", pr);
                 snprintf(g_st->preset_negative, sizeof(g_st->preset_negative), "%s", ng);
@@ -522,6 +524,7 @@ static void handle_client(int fd) {
             json_get_str(body, "negative_prompt", s.negative, sizeof(s.negative));
         char sid[64] = {0};
         if (styles_save(&s, sid, sizeof(sid)) == 0) {
+            http_srv_lock(); g_job->styles_dirty = 1; http_srv_unlock();
             char resp[128];
             int n = snprintf(resp, sizeof(resp), "{\"ok\":true,\"id\":\"%s\"}", sid);
             send_resp(fd, 200, "OK", "application/json", resp, (size_t)n);
@@ -531,8 +534,60 @@ static void handle_client(int fd) {
     } else if (strcmp(method, "POST") == 0 && strcmp(path, "/styles/delete") == 0) {
         char id[64] = {0};
         json_get_str(body, "id", id, sizeof(id));
-        if (styles_delete(id) == 0) send_resp(fd, 200, "OK", "application/json", "{\"ok\":true}", 11);
-        else send_resp(fd, 404, "Not Found", "application/json", "{\"error\":\"not found\"}", 21);
+        if (styles_delete(id) == 0) {
+            http_srv_lock(); g_job->styles_dirty = 1; http_srv_unlock();
+            send_resp(fd, 200, "OK", "application/json", "{\"ok\":true}", 11);
+        } else send_resp(fd, 404, "Not Found", "application/json", "{\"error\":\"not found\"}", 21);
+    } else if (strcmp(method, "GET") == 0 && strcmp(path, "/characters") == 0) {
+        CharacterItem* items = (CharacterItem*)malloc(sizeof(CharacterItem) * CHARS_MAX_ITEMS);
+        if (!items) { send_resp(fd, 500, "Internal Server Error", "text/plain", "oom", 3); free(req); return; }
+        int cnt = characters_list(items, CHARS_MAX_ITEMS);
+        size_t cap = (size_t)(cnt + 1) * 1500u + 256u;
+        char* out = (char*)malloc(cap);
+        if (out) {
+            size_t pos = 0;
+            out[pos++] = '[';
+            for (int i = 0; i < cnt && pos + 1400u < cap; i++) {
+                char nm[128], sr[96], pr[800], ng[600];
+                json_escape(items[i].name, nm, sizeof(nm));
+                json_escape(items[i].series, sr, sizeof(sr));
+                json_escape(items[i].prompt, pr, sizeof(pr));
+                json_escape(items[i].negative, ng, sizeof(ng));
+                pos += (size_t)snprintf(out + pos, cap - pos,
+                                        "%s{\"id\":\"%s\",\"name\":\"%s\",\"series\":\"%s\",\"prompt\":\"%s\",\"negative\":\"%s\"}",
+                                        i ? "," : "", items[i].id, nm, sr, pr, ng);
+            }
+            out[pos++] = ']';
+            out[pos] = 0;
+            send_resp(fd, 200, "OK", "application/json", out, pos);
+            free(out);
+        }
+        free(items);
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/characters/save") == 0) {
+        CharacterItem c;
+        memset(&c, 0, sizeof(c));
+        json_get_str(body, "id", c.id, sizeof(c.id));
+        json_get_str(body, "name", c.name, sizeof(c.name));
+        json_get_str(body, "series", c.series, sizeof(c.series));
+        json_get_str(body, "prompt", c.prompt, sizeof(c.prompt));
+        if (!json_get_str(body, "negative", c.negative, sizeof(c.negative)))
+            json_get_str(body, "negative_prompt", c.negative, sizeof(c.negative));
+        char cid[64] = {0};
+        if (characters_save(&c, cid, sizeof(cid)) == 0) {
+            http_srv_lock(); g_job->chars_dirty = 1; http_srv_unlock();
+            char resp[128];
+            int n = snprintf(resp, sizeof(resp), "{\"ok\":true,\"id\":\"%s\"}", cid);
+            send_resp(fd, 200, "OK", "application/json", resp, (size_t)n);
+        } else {
+            send_resp(fd, 400, "Bad Request", "application/json", "{\"error\":\"invalid character\"}", 29);
+        }
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/characters/delete") == 0) {
+        char id[64] = {0};
+        json_get_str(body, "id", id, sizeof(id));
+        if (characters_delete(id) == 0) {
+            http_srv_lock(); g_job->chars_dirty = 1; http_srv_unlock();
+            send_resp(fd, 200, "OK", "application/json", "{\"ok\":true}", 11);
+        } else send_resp(fd, 404, "Not Found", "application/json", "{\"error\":\"not found\"}", 21);
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/models/manager") == 0) {
         InstalledModel* inst = (InstalledModel*)malloc(sizeof(InstalledModel) * MODEL_DL_MAX_INSTALLED);
         CatalogModel* cat = (CatalogModel*)malloc(sizeof(CatalogModel) * MODEL_DL_MAX_CATALOG);
@@ -641,7 +696,7 @@ static void handle_client(int fd) {
         }
     } else if (strcmp(method, "GET") == 0 && (strcmp(path, "/status") == 0 || strcmp(path, "/stats") == 0)) {
         char st_esc[256], err_esc[512], mdl_esc[128], pd_esc[192], pp_esc[768], pn_esc[512], mlist[1400], out[5600];
-        static const char* SMP_NAMES[3] = {"Euler a", "Euler", "LCM"};
+        static const char* SMP_NAMES[4] = {"Euler a", "Euler", "LCM", "DPM++ 2M Karras"};
         http_srv_lock();
         json_escape(g_st->stage, st_esc, sizeof(st_esc));
         json_escape(g_st->error, err_esc, sizeof(err_esc));
@@ -658,7 +713,7 @@ static void handle_client(int fd) {
         }
         mlist[mp++] = ']';
         mlist[mp] = 0;
-        int ps = (g_st->preset_sampler >= 0 && g_st->preset_sampler <= 2) ? g_st->preset_sampler : 0;
+        int ps = (g_st->preset_sampler >= 0 && g_st->preset_sampler <= 3) ? g_st->preset_sampler : 0;
         int n = snprintf(out, sizeof(out),
                          "{\"gpu_ready\":%s,\"ready\":%s,\"busy\":%s,\"neo\":%d,\"arch\":\"%s\",\"has_upscaler\":%s,"
                          "\"temp_c\":%d,\"temp_peak_c\":%d,\"eco_mode\":%d,"
@@ -777,7 +832,8 @@ static void handle_client(int fd) {
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/sdapi/v1/samplers") == 0) {
         const char* s = "[{\"name\":\"Euler a\",\"aliases\":[\"euler_a\",\"k_euler_a\"],\"options\":{}},"
                         "{\"name\":\"Euler\",\"aliases\":[\"euler\",\"k_euler\"],\"options\":{}},"
-                        "{\"name\":\"LCM\",\"aliases\":[\"lcm\"],\"options\":{}}]";
+                        "{\"name\":\"LCM\",\"aliases\":[\"lcm\"],\"options\":{}},"
+                        "{\"name\":\"DPM++ 2M Karras\",\"aliases\":[\"dpmpp_2m\",\"k_dpmpp_2m\"],\"options\":{\"scheduler\":\"karras\"}}]";
         send_resp(fd, 200, "OK", "application/json", s, strlen(s));
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/sdapi/v1/schedulers") == 0) {
         const char* s = "[{\"name\":\"Automatic\",\"label\":\"Automatic\",\"aliases\":null,\"default_rho\":-1,\"need_inner_model\":false}]";
@@ -879,8 +935,8 @@ static void handle_client(int fd) {
         if (!b64) { send_resp(fd, 500, "Internal Server Error", "text/plain", "oom", 3); free(req); return; }
 
         // Build full A1111-compliant `info` JSON (including `infotexts` required by bz-cogs/aimage, SillyTavern, etc.)
-        static const char* SMP_N[3] = {"Euler a", "Euler", "LCM"};
-        const char* smpn = SMP_N[(used_smp >= 0 && used_smp <= 2) ? used_smp : 0];
+        static const char* SMP_N[4] = {"Euler a", "Euler", "LCM", "DPM++ 2M Karras"};
+        const char* smpn = SMP_N[(used_smp >= 0 && used_smp <= 3) ? used_smp : 0];
         char* pr_e = (char*)malloc(1600);
         char* ng_e = (char*)malloc(900);
         char* md_e = (char*)malloc(160);
