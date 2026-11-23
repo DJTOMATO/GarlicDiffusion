@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Garlic Diffusion · PS4 Pro Studio</title>
+<style>
+:root{--bg:#0b0f18;--panel:#131a29;--card:#182135;--border:#25334e;--accent:#3b9eff;--accent2:#35d49a;--danger:#e04f5f;--text:#e8effa;--muted:#899fc0}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh;display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--border);gap:12px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;color:#66b8ff}
+.badge{font-size:11px;padding:2px 7px;border-radius:99px;background:#1d2e4c;color:#8cc8ff;font-weight:600}
+.tabs{display:flex;gap:6px}
+.tab{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 14px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px}
+.tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.page{display:none;flex:1}.page.active{display:flex}
+/* Studio */
+#pg-studio{flex-wrap:wrap}
+.side{width:400px;max-width:100%;padding:16px 18px;background:var(--panel);border-right:1px solid var(--border);overflow-y:auto}
+.stage-wrap{flex:1;min-width:320px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px;gap:12px}
+label{display:block;font-size:11.5px;color:var(--muted);margin:9px 0 4px;font-weight:600;letter-spacing:.2px}
+textarea,input,select{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:8px 9px;font-family:inherit;font-size:13px}
+textarea{min-height:68px;resize:vertical}
+.row{display:flex;gap:8px}.row>div{flex:1}
+.btn{padding:9px 13px;border:0;border-radius:7px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;font-size:13px}
+.btn.sec{background:#22304d;color:#d6e4fb}.btn.ok{background:#1b8d66}.btn.stop{background:var(--danger)}.btn.sm{padding:6px 10px;font-size:12px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.full{width:100%;margin-top:10px}
+.bar{height:8px;background:#1e2940;border-radius:4px;overflow:hidden;margin:10px 0 6px}
+.fill{height:100%;background:linear-gradient(90deg,#2d8cf0,#45d6a0);width:0%;transition:width .25s}
+#stage{font-size:12px;color:#b2c4e0}#tstat{font-size:11px;color:var(--muted);margin-top:4px}
+#img{max-width:100%;max-height:78vh;border-radius:10px;border:1px solid var(--border);display:none;cursor:zoom-in}
+.quick-bar{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+/* Gallery */
+#pg-gallery{flex-direction:column;padding:18px;gap:14px}
+.gal-top{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.gal-top input{max-width:340px}
+.gal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}
+.gcard{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;cursor:pointer;transition:transform .12s,border-color .12s;display:flex;flex-direction:column}
+.gcard:hover{transform:translateY(-2px);border-color:var(--accent)}
+.gcard img{width:100%;aspect-ratio:3/4;object-fit:cover;background:#070a12;display:block}
+.gmeta{padding:8px 10px;font-size:11.5px;color:var(--muted)}
+.gmeta b{color:var(--text);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px}
+.chips{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.chip{font-size:10px;padding:1px 6px;border-radius:4px;background:#11192a;color:#93b8e8;border:1px solid #233350}
+.chip.hd{background:#123429;color:#52e3ab;border-color:#1f5e48}
+/* Lightbox */
+.modal{position:fixed;inset:0;background:rgba(4,7,14,.92);display:none;z-index:100;flex-direction:column}
+.modal.open{display:flex}
+.mbar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--border);gap:10px;flex-wrap:wrap}
+.mbody{flex:1;display:flex;overflow:hidden;min-height:0}
+.mview{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:14px;position:relative;background:#05080f}
+.mview.fullsize{align-items:flex-start;justify-content:flex-start}
+.mview img{max-width:100%;max-height:100%;border-radius:6px;cursor:zoom-in}
+.mview.fullsize img{max-width:none;max-height:none;cursor:zoom-out}
+.minfo{width:340px;max-width:100%;background:var(--panel);border-left:1px solid var(--border);padding:14px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+.macts{display:flex;flex-wrap:wrap;gap:6px}
+.box{background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:8px;font-size:12px;color:#cfe0f7;word-break:break-word;white-space:pre-wrap}
+/* Presets & Models */
+#pg-presets,#pg-models{flex-direction:column;padding:18px;gap:16px;max-width:1180px;width:100%;margin:0 auto}
+.inline-box{background:#0d1424;border:1px solid var(--border);border-radius:8px;padding:9px;margin-top:6px;display:none}
+.style-preview{font-size:11px;color:#52e3ab;margin-top:4px;line-height:1.35}
+.pcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px}
+.pbox{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px}
+.pbox h2{margin:0 0 8px;font-size:15px;color:#66b8ff}
+.plist{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.pcard{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:12px;display:flex;flex-direction:column;gap:6px}
+.pcard h3{margin:0;font-size:14px;color:var(--text)}
+.pcard p{margin:0;font-size:12px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+#toast{position:fixed;bottom:18px;right:18px;background:#193458;color:#fff;padding:10px 15px;border-radius:8px;border:1px solid var(--accent);font-size:13px;display:none;z-index:200}
+@media(max-width:860px){.mbody{flex-direction:column}.minfo{width:100%;border-left:0;border-top:1px solid var(--border);max-height:46vh}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Garlic Diffusion <span id="hcon" class="badge">PS4</span> <span id="harch" class="badge">SDXL</span> <span id="hmdl" style="font-size:12px;color:var(--muted);font-weight:400">Connecting...</span></div>
+  <div class="tabs">
+    <button class="tab active" id="tb-studio" onclick="showTab('studio')">Studio</button>
+    <button class="tab" id="tb-gallery" onclick="showTab('gallery')">Gallery (<span id="gcnt">0</span>)</button>
+    <button class="tab" id="tb-presets" onclick="showTab('presets')">Presets</button>
+    <button class="tab" id="tb-models" onclick="showTab('models')">Models</button>
+  </div>
+</header>
+
+<!-- TAB 1: STUDIO -->
+<div class="page active" id="pg-studio">
+  <div class="side">
+    <label>Checkpoint Model</label>
+    <div style="display:flex;gap:6px">
+      <select id="msel" name="msel" autocomplete="off" onchange="swModel()"><option>Loading...</option></select>
+      <button class="btn sec sm" style="width:auto;white-space:nowrap" onclick="rescanModels()" title="Rescan models folder on PS4">↻</button>
+    </div>
+    <div id="mdesc" style="font-size:11px;color:#5fb2ff;margin-top:4px"></div>
+
+    <div class="row">
+      <div>
+        <label>Saved Prompt Preset</label>
+        <select id="psel" name="psel" autocomplete="off" onchange="applyQuickPreset()"><option value="">— Saved prompts —</option></select>
+      </div>
+      <div>
+        <label>Art Style <a href="#" onclick="toggleQuickStyle();return false" style="color:#52e3ab;float:right;text-decoration:none;font-weight:600">+ Style</a></label>
+        <select id="stsel" name="stsel" autocomplete="off" onchange="onStyleChange()"><option value="">— No Style —</option></select>
+      </div>
+    </div>
+    <div id="stprev" class="style-preview" style="display:none"></div>
+    <div id="qstyle-box" class="inline-box">
+      <div style="font-size:11.5px;color:#52e3ab;font-weight:600;margin-bottom:5px">Save Reusable Art Style (appends on Generate)</div>
+      <input id="qs-name" type="text" placeholder="Style name (e.g. Glossy Cel Anime)" autocomplete="off">
+      <input id="qs-pr" type="text" placeholder="Style prompt tags (e.g. vibrant colors, sharp lineart)" autocomplete="off" style="margin-top:5px">
+      <input id="qs-ng" type="text" placeholder="Style negative tags (optional)" autocomplete="off" style="margin-top:5px">
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn ok sm" onclick="saveQuickStyle()">Save Style</button>
+        <button class="btn sec sm" onclick="bakeStyleIntoPrompt()">Bake Active into Prompt</button>
+        <button class="btn stop sm" onclick="deleteSelectedStyle()">Delete Selected</button>
+        <button class="btn sec sm" onclick="toggleQuickStyle()">Close</button>
+      </div>
+    </div>
+
+    <label>Prompt
+      <span style="float:right;display:flex;gap:10px">
+        <a href="#" onclick="toggleQuickPromptSave();return false" style="color:#52e3ab;text-decoration:none;font-weight:600">Save Prompt</a>
+        <a href="#" onclick="loadModelPrompt();return false" style="color:#66b8ff;text-decoration:none;font-weight:500">Model Default</a>
+      </span>
+    </label>
+    <div id="qprompt-box" class="inline-box" style="margin-bottom:6px">
+      <div style="display:flex;gap:6px">
+        <input id="qp-name" type="text" placeholder="Name this prompt preset..." autocomplete="off">
+        <button class="btn ok sm" style="width:auto;white-space:nowrap" onclick="saveQuickPrompt()">Save</button>
+        <button class="btn sec sm" style="width:auto" onclick="toggleQuickPromptSave()">✕</button>
+      </div>
+    </div>
+    <textarea id="pr" name="positive_prompt" autocomplete="off">masterpiece, best quality, 1girl, silver hair, blue eyes, glowing sakura petals, night sky, anime style</textarea>
+
+    <label>Negative Prompt</label>
+    <textarea id="ng" name="negative_prompt" autocomplete="off">lowres, bad anatomy, bad hands, text, error, blurry, worst quality, low quality</textarea>
+
+    <div class="row">
+      <div><label>Resolution</label>
+        <select id="sz" name="sz" autocomplete="off">
+          <option value="512x512">512x512 (SD1.5 fast)</option>
+          <option value="512x768">512x768 (SD1.5 portrait)</option>
+          <option value="768x512">768x512 (SD1.5 wide)</option>
+          <option value="768x768" selected>768x768 (SDXL)</option>
+          <option value="768x1024">768x1024 (SDXL portrait)</option>
+          <option value="896x512">896x512 (16:9 → 1080p)</option>
+          <option value="832x1216">832x1216 (tall)</option>
+          <option value="1024x1024">1024x1024 (HD)</option>
+        </select>
+      </div>
+      <div><label>Steps</label><input id="st" name="steps" autocomplete="off" type="number" value="20" min="4" max="40"></div>
+    </div>
+
+    <div class="row">
+      <div><label>CFG Scale</label><input id="cfg" name="cfg" autocomplete="off" type="number" value="7.0" step="0.5" min="1" max="15"></div>
+      <div><label>Sampler</label>
+        <select id="smp" name="smp" autocomplete="off">
+          <option value="Euler a" selected>Euler a</option>
+          <option value="Euler">Euler</option>
+          <option value="LCM">LCM (DMD2)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div><label>GPU Power / Fan</label>
+        <select id="eco" name="eco" autocomplete="off">
+          <option value="3">Silent (~14CU · 35% · Coolest)</option>
+          <option value="2" selected>Quiet (~20CU · 58% · Default)</option>
+          <option value="1">Balanced (~25CU · 70%)</option>
+          <option value="0">Turbo (36CU · 100% · Loud)</option>
+        </select>
+      </div>
+      <div><label>AI Upscaler (RealESRGAN)</label>
+        <select id="ups" name="ups" autocomplete="off">
+          <option value="0">Off (Native)</option>
+          <option value="1">1080p Anime HD</option>
+          <option value="2">2x Anime HD</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div><label>Seed (0 = random)</label><input id="sd" name="seed" autocomplete="off" type="number" value="0" min="0"></div>
+    </div>
+
+    <button id="go" class="btn full" onclick="gen()">Generate Image</button>
+    <button id="can" class="btn stop full" onclick="cancel()" style="display:none">Cancel Generation</button>
+
+    <div class="bar"><div id="fill" class="fill"></div></div>
+    <div id="stage">Idle</div>
+    <div id="tstat"></div>
+  </div>
+
+  <div class="stage-wrap">
+    <img id="img" onclick="openLatestInGallery()">
+    <div id="ph" style="color:#617594">Generated anime artwork will appear here (auto-saved to Gallery)</div>
+    <div id="qbar" class="quick-bar" style="display:none">
+      <button class="btn sec sm" onclick="recreateLatest()">Recreate (New Seed)</button>
+      <button class="btn ok sm" onclick="upscaleLatest(1)">Upscale 1080p</button>
+      <button class="btn sec sm" onclick="openLatestInGallery()">Inspect Full Size</button>
+      <a id="dl" class="btn sec sm" style="text-decoration:none" download="garlic_diffusion.png">Download PNG</a>
+    </div>
+  </div>
+</div>
+
+<!-- TAB 2: GALLERY -->
+<div class="page" id="pg-gallery">
+  <div class="gal-top">
+    <input id="gsearch" type="text" placeholder="Filter gallery by prompt, model, or seed..." oninput="renderGallery()">
+    <button class="btn sec sm" onclick="loadGallery()">Refresh</button>
+    <span id="ginfo" style="font-size:12px;color:var(--muted)"></span>
+  </div>
+  <div id="ggrid" class="gal-grid"></div>
+</div>
+
+<!-- TAB 3: PRESETS MANAGER -->
+<div class="page" id="pg-presets">
+  <div class="pcols">
+    <div class="pbox">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        <h2 style="margin:0" id="pe-title">Create / Edit User Preset</h2>
+        <div style="display:flex;gap:6px">
+          <button class="btn sec sm" onclick="fillEditorFromStudio()">Copy from Studio</button>
+          <button class="btn sec sm" onclick="clearPresetEditor()">New</button>
+        </div>
+      </div>
+      <input id="pe-id" type="hidden">
+      <div class="row">
+        <div><label>Preset Name</label><input id="pname" type="text" placeholder="e.g. Pekora Beach 8-Step" autocomplete="off"></div>
+        <div><label>Link Model (optional)</label><select id="pe-mdl" autocomplete="off"><option value="">(Any Model)</option></select></div>
+      </div>
+      <label>Prompt</label>
+      <textarea id="pe-pr" autocomplete="off" placeholder="Positive prompt..."></textarea>
+      <label>Negative Prompt</label>
+      <textarea id="pe-ng" autocomplete="off" style="min-height:48px" placeholder="Negative prompt..."></textarea>
+      <div class="row">
+        <div><label>Size</label><input id="pe-sz" type="text" value="768x1024"></div>
+        <div><label>Steps</label><input id="pe-st" type="number" value="8" min="1" max="40"></div>
+        <div><label>CFG</label><input id="pe-cfg" type="number" step="0.5" value="3.5"></div>
+      </div>
+      <div class="row">
+        <div><label>Sampler</label><select id="pe-smp"><option>Euler a</option><option>Euler</option><option>LCM</option></select></div>
+        <div><label>Upscale</label><select id="pe-ups"><option value="0">Off</option><option value="1">1080p</option><option value="2">2x</option></select></div>
+        <div><label>Power</label><select id="pe-eco"><option value="3">Silent</option><option value="2" selected>Quiet</option><option value="1">Balanced</option><option value="0">Turbo</option></select></div>
+      </div>
+      <button class="btn full" onclick="saveEditorPreset()">Save User Preset to PS4</button>
+    </div>
+
+    <div class="pbox">
+      <h2>Active Model Auto-Defaults (<span id="mp-mdl">—</span>)</h2>
+      <div class="row">
+        <div><label>Default Size</label><input id="mp-sz" type="text" value="768x1024"></div>
+        <div><label>Steps</label><input id="mp-st" type="number" value="8"></div>
+        <div><label>CFG</label><input id="mp-cfg" type="number" step="0.5" value="3.5"></div>
+      </div>
+      <div class="row">
+        <div><label>Sampler</label><select id="mp-smp"><option>Euler a</option><option>Euler</option><option>LCM</option></select></div>
+        <div><label>Auto-Upscale</label><select id="mp-ups"><option value="0">Off</option><option value="1">1080p</option><option value="2">2x</option></select></div>
+      </div>
+      <label>Description</label><input id="mp-desc" type="text">
+      <button class="btn ok full" onclick="saveModelPreset()">Save Model preset.cfg on PS4</button>
+
+      <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:12px">
+        <h2 style="margin-bottom:8px">Export / Import Presets (JSON)</h2>
+        <div class="macts">
+          <button class="btn sec sm" onclick="exportAllPresets()">Export All (.json)</button>
+          <button class="btn sec sm" onclick="document.getElementById('pimp-file').click()">Import File (.json)</button>
+          <button class="btn sec sm" onclick="togglePasteImport()">Paste JSON...</button>
+          <input id="pimp-file" type="file" accept=".json,application/json" style="display:none" onchange="importPresetsFile(this)">
+        </div>
+        <div id="pimp-box" style="display:none;margin-top:8px">
+          <textarea id="pimp-txt" placeholder='Paste exported JSON array [...] or single preset {...}' style="min-height:74px"></textarea>
+          <button class="btn sm" style="margin-top:6px" onclick="importPresetsText()">Import JSON to PS4</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pbox">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <h2 style="margin:0">Saved User Presets (<span id="pcnt">0</span>)</h2>
+      <input id="psearch" type="text" placeholder="Search presets..." style="max-width:280px" oninput="renderPresets()">
+    </div>
+    <div id="plist" class="plist"></div>
+  </div>
+</div>
+
+<!-- TAB 4: MODEL MANAGER & DOWNLOADER -->
+<div class="page" id="pg-models">
+  <div class="pbox">
+    <h2>Hugging Face Model Repository</h2>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">
+      Point Garlic Diffusion to a Hugging Face model repo containing converted <code>PSD1</code> model folders and a <code>manifest.json</code> (generated with <code>diffusion/pc/upload_to_hf.py</code>), then download models directly onto your PS4 over HTTPS.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input id="hf-repo" type="text" placeholder="e.g. yourname/garlic-diffusion-models (or full https://huggingface.co/... URL)" style="flex:1;min-width:240px" autocomplete="off">
+      <button class="btn" style="width:auto" onclick="saveHfRepo(true)">Save & Fetch Catalog</button>
+      <button class="btn sec" style="width:auto" onclick="loadModelsMgr()">Refresh</button>
+    </div>
+  </div>
+
+  <div id="dl-box" class="pbox" style="display:none;border-color:var(--accent)">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <h2 style="margin:0" id="dl-title">Downloading...</h2>
+      <button id="dl-can" class="btn stop sm" onclick="cancelModelDl()">Cancel Download</button>
+    </div>
+    <div class="bar"><div id="dl-fill" class="fill"></div></div>
+    <div id="dl-info" style="font-size:12px;color:#b2c4e0"></div>
+  </div>
+
+  <div class="pbox">
+    <h2>Installed Models on PS4 (<span id="mcnt">0</span>)</h2>
+    <div id="minst" class="plist"></div>
+  </div>
+
+  <div class="pbox">
+    <h2>Downloadable Models Catalog</h2>
+    <div id="mcat" class="plist"></div>
+  </div>
+
+  <div class="pbox">
+    <h2>Download Custom Folder from Hugging Face</h2>
+    <div class="row" style="flex-wrap:wrap">
+      <div><label>Model Folder Name</label><input id="cdl-id" type="text" placeholder="e.g. WAI_Illustrious_v17_dmd2" autocomplete="off"></div>
+      <div><label>HF Repo (optional, uses default above)</label><input id="cdl-repo" type="text" placeholder="owner/repo" autocomplete="off"></div>
+      <div><label>Files (comma-separated)</label><input id="cdl-files" type="text" value="unet.psd1,clip_l.psd1,clip_g.psd1,vae.psd1,preset.cfg" autocomplete="off"></div>
+    </div>
+    <button class="btn ok full" onclick="startCustomDl()">Download Model to PS4</button>
+  </div>
+</div>
+
+<!-- GALLERY LIGHTBOX MODAL -->
+<div id="modal" class="modal" onclick="if(event.target===this)closeModal()">
+  <div class="mbar">
+    <div style="display:flex;align-items:center;gap:8px">
+      <button class="btn sec sm" onclick="stepModal(-1)">← Prev</button>
+      <button class="btn sec sm" onclick="stepModal(1)">Next →</button>
+      <button class="btn sec sm" id="zoombtn" onclick="toggleZoom()">1:1 Full Size</button>
+      <span id="mtitle" style="font-size:13px;color:var(--muted)"></span>
+    </div>
+    <button class="btn stop sm" onclick="closeModal()">Close (Esc)</button>
+  </div>
+  <div class="mbody">
+    <div id="mview" class="mview"><img id="mimg" onclick="toggleZoom()"></div>
+    <div class="minfo">
+      <div id="mchips" class="chips"></div>
+      <label style="margin-top:2px">Prompt</label>
+      <div id="mpr" class="box"></div>
+      <label style="margin-top:2px">Negative Prompt</label>
+      <div id="mng" class="box"></div>
+
+      <div class="macts">
+        <button class="btn sm" onclick="copyModalPrompt()">Copy Prompt</button>
+        <button class="btn sec sm" onclick="loadModalToStudio()">Load to Studio</button>
+        <button class="btn ok sm" onclick="recreateModal()">Recreate (New Seed)</button>
+        <button class="btn sm" onclick="upscaleModal(1)">AI Upscale 1080p</button>
+        <button class="btn sec sm" onclick="upscaleModal(2)">AI Upscale 2x</button>
+        <a id="mdl-dl" class="btn sec sm" style="text-decoration:none" download>Download</a>
+        <button class="btn stop sm" onclick="deleteModal()">Delete</button>
+      </div>
+
+      <div style="border-top:1px solid var(--border);padding-top:8px">
+        <label style="margin-top:0">Resize Image (saves copy to Gallery)</label>
+        <div class="row">
+          <div><input id="rz-w" type="number" min="64" max="1920" placeholder="W"></div>
+          <div><input id="rz-h" type="number" min="64" max="1920" placeholder="H"></div>
+          <div><button class="btn sec sm" style="width:100%;height:100%" onclick="resizeModal()">Resize</button></div>
+        </div>
+        <div class="chips" style="margin-top:6px">
+          <button class="chip" style="cursor:pointer" onclick="setRz(1920,1080)">1920x1080</button>
+          <button class="chip" style="cursor:pointer" onclick="setRz(1080,1920)">1080x1920</button>
+          <button class="chip" style="cursor:pointer" onclick="setRz(1080,1080)">1080x1080</button>
+          <button class="chip" style="cursor:pointer" onclick="setRz(768,1024)">768x1024</button>
+          <button class="chip" style="cursor:pointer" onclick="setRz(512,768)">512x768</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+let lastId=0,lastModels='',curModel='',lastPreset=null,galItems=[],presetItems=[],styleItems=[],modalIdx=-1,lastStatus=null,switchingModel=false,lastNeo=null,dlLastFin=0,mdlMgrData=null;
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(t._tm);t._tm=setTimeout(()=>t.style.display='none',2800);}
+function copyText(txt){
+  if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(()=>toast('Copied prompt!')).catch(()=>fallbackCopy(txt));}
+  else fallbackCopy(txt);
+}
+function fallbackCopy(txt){
+  const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';
+  document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);toast('Copied prompt!');
+}
+function showTab(name){
+  ['studio','gallery','presets','models'].forEach(t=>{
+    document.getElementById('pg-'+t).classList.toggle('active',t===name);
+    document.getElementById('tb-'+t).classList.toggle('active',t===name);
+  });
+  if(name==='gallery')loadGallery();
+  if(name==='presets')loadPresets();
+  if(name==='models')loadModelsMgr();
+}
+function applyModelPresetUI(p){
+  if(!p)return;lastPreset=p;
+  const k=p.width+'x'+p.height;
+  if([...sz.options].some(o=>o.value===k))sz.value=k;
+  st.value=p.steps;cfg.value=p.cfg;smp.value=p.sampler;ups.value=String(p.upscale||0);
+  mdesc.textContent=p.description||'';
+  document.getElementById('mp-mdl').textContent=curModel||'—';
+  document.getElementById('mp-sz').value=k;
+  document.getElementById('mp-st').value=p.steps;
+  document.getElementById('mp-cfg').value=p.cfg;
+  document.getElementById('mp-smp').value=p.sampler;
+  document.getElementById('mp-ups').value=String(p.upscale||0);
+  document.getElementById('mp-desc').value=p.description||'';
+}
+function loadModelPrompt(){
+  if(!lastPreset)return;
+  if(lastPreset.prompt)pr.value=lastPreset.prompt;
+  if(lastPreset.negative)ng.value=lastPreset.negative;
+  toast('Loaded model default prompt');
+}
+async function rescanModels(){
+  await fetch('/models/rescan',{method:'POST'});
+  lastModels='';toast('Rescanned models folder on PS4');poll();
+}
+async function swModel(){
+  if(!msel.value)return;
+  if(msel.value===curModel&&lastStatus&&lastStatus.ready)return;
+  switchingModel=true;
+  const r=await fetch('/model',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:msel.value})});
+  if(!r.ok){switchingModel=false;msel.value=curModel||'';toast('PS4 is busy — try again in a moment');return;}
+  toast('Switching to '+msel.value+'...');poll();
+}
+function getSelectedStyle(){
+  const idx=stsel.value;
+  return (idx!==''&&styleItems[+idx])?styleItems[+idx]:null;
+}
+function onStyleChange(){
+  const s=getSelectedStyle(),pv=document.getElementById('stprev');
+  if(!s){pv.style.display='none';pv.textContent='';return;}
+  pv.style.display='block';
+  pv.textContent='Style active: + '+(s.prompt||'')+(s.negative?(' | Neg: '+s.negative):'');
+}
+function toggleQuickStyle(){
+  const b=document.getElementById('qstyle-box');
+  b.style.display=b.style.display==='block'?'none':'block';
+}
+function toggleQuickPromptSave(){
+  const b=document.getElementById('qprompt-box');
+  b.style.display=b.style.display==='block'?'none':'block';
+  if(b.style.display==='block')document.getElementById('qp-name').focus();
+}
+async function saveQuickPrompt(){
+  const nm=document.getElementById('qp-name').value.trim();
+  if(!nm)return toast('Enter a name for this prompt');
+  const [w,h]=sz.value.split('x').map(Number);
+  const body={name:nm,model:curModel||'',prompt:pr.value,negative:ng.value,width:w||768,height:h||1024,steps:+st.value||20,cfg:+cfg.value||7.0,sampler_name:smp.value,upscale:+ups.value||0,eco:+eco.value};
+  const r=await fetch('/presets/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r.ok){document.getElementById('qp-name').value='';toggleQuickPromptSave();toast('Saved prompt preset: '+nm);loadPresets();}
+  else toast('Failed to save prompt');
+}
+async function loadStyles(){
+  try{
+    const prev=stsel.value;
+    styleItems=await(await fetch('/styles')).json();
+    stsel.innerHTML='<option value="">— No Style —</option>'+styleItems.map((s,i)=>`<option value="${i}">${s.name}</option>`).join('');
+    if(prev!==''&&styleItems[+prev])stsel.value=prev;
+    onStyleChange();
+  }catch(e){}
+}
+async function saveQuickStyle(){
+  const nm=document.getElementById('qs-name').value.trim();
+  const spr=document.getElementById('qs-pr').value.trim();
+  const sng=document.getElementById('qs-ng').value.trim();
+  if(!nm||!spr)return toast('Enter a style name and prompt tags');
+  const r=await fetch('/styles/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nm,prompt:spr,negative:sng})});
+  if(r.ok){document.getElementById('qs-name').value='';document.getElementById('qs-pr').value='';document.getElementById('qs-ng').value='';toggleQuickStyle();toast('Saved style: '+nm);loadStyles();}
+}
+function bakeStyleIntoPrompt(){
+  const s=getSelectedStyle();if(!s)return toast('Pick a style first');
+  if(s.prompt&&!pr.value.includes(s.prompt))pr.value=(pr.value.trim()?pr.value.trim()+', ':'')+s.prompt;
+  if(s.negative&&!ng.value.includes(s.negative))ng.value=(ng.value.trim()?ng.value.trim()+', ':'')+s.negative;
+  stsel.value='';onStyleChange();toast('Baked style tags into prompt');
+}
+async function deleteSelectedStyle(){
+  const s=getSelectedStyle();if(!s)return toast('Select a style to delete');
+  if(!confirm('Delete style "'+s.name+'"?'))return;
+  await fetch('/styles/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:s.id})});
+  stsel.value='';toast('Deleted style: '+s.name);loadStyles();
+}
+async function gen(override){
+  const [w,h]=sz.value.split('x').map(Number);
+  const stObj=getSelectedStyle();
+  let fp=pr.value,fn=ng.value;
+  if(stObj&&stObj.prompt)fp=(fp.trim()?fp.trim()+', ':'')+stObj.prompt;
+  if(stObj&&stObj.negative)fn=(fn.trim()?fn.trim()+', ':'')+stObj.negative;
+  const body=Object.assign({prompt:fp,negative:fn,width:w,height:h,steps:+st.value,cfg:+cfg.value,seed:+sd.value,eco:+eco.value,sampler_name:smp.value,upscale:+ups.value},override||{});
+  const r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok)toast('PS4 is busy — wait or cancel current job');
+  else{showTab('studio');poll();}
+}
+async function cancel(){await fetch('/cancel',{method:'POST'});toast('Cancelling...');}
+function recreateLatest(){sd.value=0;gen({seed:0});}
+function findLatestGalIdx(){
+  if(!galItems.length)return -1;
+  const lid=lastStatus&&lastStatus.last_gallery_id;
+  if(lid){const i=galItems.findIndex(x=>x.id===lid);if(i>=0)return i;}
+  return 0;
+}
+async function upscaleLatest(mode){
+  await loadGallery();
+  const idx=findLatestGalIdx();
+  if(idx<0)return toast('No gallery image yet');
+  await fetch('/gallery/upscale',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:galItems[idx].id,mode})});
+  toast('Upscaling on PS4 GPU...');poll();
+}
+async function openLatestInGallery(){
+  await loadGallery();
+  const idx=findLatestGalIdx();
+  if(idx>=0)openModal(idx);
+}
+
+async function loadGallery(){
+  try{
+    galItems=await(await fetch('/gallery')).json();
+    document.getElementById('gcnt').textContent=galItems.length;
+    renderGallery();
+  }catch(e){}
+}
+function renderGallery(){
+  const q=(document.getElementById('gsearch').value||'').toLowerCase();
+  const list=galItems.map((it,idx)=>({it,idx})).filter(x=>!q||(x.it.prompt||'').toLowerCase().includes(q)||(x.it.model||'').toLowerCase().includes(q)||String(x.it.seed).includes(q));
+  document.getElementById('ginfo').textContent=`${list.length} of ${galItems.length} saved images`;
+  const grid=document.getElementById('ggrid');
+  if(!list.length){grid.innerHTML='<div style="color:var(--muted)">No saved images yet — generate one in Studio!</div>';return;}
+  grid.innerHTML=list.map(({it,idx})=>`<div class="gcard" onclick="openModal(${idx})">
+    <img loading="lazy" src="/gallery/${it.id}.png">
+    <div class="gmeta">
+      <b>${(it.prompt||it.id).replace(/</g,'&lt;')}</b>
+      <div class="chips">
+        <span class="chip ${it.upscaled?'hd':''}">${it.width}x${it.height}${it.upscaled?' HD':''}</span>
+        <span class="chip">${it.model||'model'}</span>
+        ${it.steps?`<span class="chip">${it.steps} stp · ${it.sampler}</span>`:''}
+      </div>
+    </div></div>`).join('');
+}
+function openModal(idx){
+  if(idx<0||idx>=galItems.length)return;
+  modalIdx=idx;const it=galItems[idx];
+  const mv=document.getElementById('mview');mv.classList.remove('fullsize');
+  document.getElementById('zoombtn').textContent='1:1 Full Size';
+  document.getElementById('mimg').src=`/gallery/${it.id}.png`;
+  document.getElementById('mtitle').textContent=`${idx+1}/${galItems.length} · ${it.id} (${it.width}x${it.height})`;
+  document.getElementById('mpr').textContent=it.prompt||'(no prompt metadata)';
+  document.getElementById('mng').textContent=it.negative||'(none)';
+  document.getElementById('mchips').innerHTML=
+    `<span class="chip ${it.upscaled?'hd':''}">${it.width}x${it.height}</span>`+
+    `<span class="chip">${it.model||'unknown'}</span>`+
+    `<span class="chip">${it.steps} steps · CFG ${it.cfg} · ${it.sampler}</span>`+
+    `<span class="chip">Seed ${it.seed}</span>`+
+    (it.sec?`<span class="chip">${it.sec.toFixed(1)}s</span>`:'');
+  document.getElementById('mdl-dl').href=`/gallery/${it.id}.png`;
+  document.getElementById('mdl-dl').download=`${it.id}.png`;
+  document.getElementById('rz-w').value=it.width;
+  document.getElementById('rz-h').value=it.height;
+  document.getElementById('modal').classList.add('open');
+}
+function closeModal(){document.getElementById('modal').classList.remove('open');modalIdx=-1;}
+function stepModal(d){if(modalIdx<0||!galItems.length)return;openModal((modalIdx+d+galItems.length)%galItems.length);}
+function toggleZoom(){
+  const mv=document.getElementById('mview');
+  const f=mv.classList.toggle('fullsize');
+  document.getElementById('zoombtn').textContent=f?'Fit Screen':'1:1 Full Size';
+}
+function copyModalPrompt(){if(modalIdx>=0)copyText(galItems[modalIdx].prompt||'');}
+function loadModalToStudio(newSeed){
+  if(modalIdx<0)return;const it=galItems[modalIdx];
+  if(it.prompt)pr.value=it.prompt;
+  if(it.negative)ng.value=it.negative;
+  const k=it.width+'x'+it.height;if([...sz.options].some(o=>o.value===k))sz.value=k;
+  if(it.steps)st.value=it.steps;
+  if(it.cfg)cfg.value=it.cfg;
+  if(it.sampler&&[...smp.options].some(o=>o.value===it.sampler))smp.value=it.sampler;
+  sd.value=newSeed?0:(it.seed||0);
+  closeModal();showTab('studio');
+  if(!newSeed)toast('Loaded settings into Studio');
+}
+function recreateModal(){
+  if(modalIdx<0)return;const it=galItems[modalIdx];
+  loadModalToStudio(true);
+  gen({seed:0,width:Math.min(it.width||768,1024),height:Math.min(it.height||1024,1024)});
+}
+async function upscaleModal(mode){
+  if(modalIdx<0)return;const it=galItems[modalIdx];
+  const r=await fetch('/gallery/upscale',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:it.id,mode})});
+  if(!r.ok)return toast('PS4 is busy');
+  closeModal();showTab('studio');toast('AI Upscaling on PS4 GPU...');poll();
+}
+function setRz(w,h){document.getElementById('rz-w').value=w;document.getElementById('rz-h').value=h;}
+async function resizeModal(){
+  if(modalIdx<0)return;const it=galItems[modalIdx];
+  const w=+document.getElementById('rz-w').value,h=+document.getElementById('rz-h').value;
+  if(w<64||h<64||w>1920||h>1920)return toast('Size must be 64..1920');
+  const r=await fetch('/gallery/resize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:it.id,width:w,height:h})});
+  if(!r.ok)return toast('PS4 is busy');
+  closeModal();toast(`Resizing to ${w}x${h}...`);setTimeout(loadGallery,1200);
+}
+async function deleteModal(){
+  if(modalIdx<0)return;const it=galItems[modalIdx];
+  if(!confirm('Delete '+it.id+'.png from PS4?'))return;
+  await fetch('/gallery/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:it.id})});
+  toast('Deleted '+it.id);closeModal();loadGallery();
+}
+document.addEventListener('keydown',e=>{
+  if(modalIdx<0)return;
+  if(e.key==='Escape')closeModal();
+  if(e.key==='ArrowLeft')stepModal(-1);
+  if(e.key==='ArrowRight')stepModal(1);
+});
+
+/* Presets Manager */
+async function loadPresets(){
+  try{
+    presetItems=await(await fetch('/presets')).json();
+    psel.innerHTML='<option value="">— Select saved preset —</option>'+presetItems.map((p,i)=>`<option value="${i}">${p.name}</option>`).join('');
+    document.getElementById('pcnt').textContent=presetItems.length;
+    renderPresets();
+  }catch(e){}
+}
+function renderPresets(){
+  const q=(document.getElementById('psearch')?.value||'').toLowerCase();
+  const list=presetItems.map((p,i)=>({p,i})).filter(x=>!q||(x.p.name||'').toLowerCase().includes(q)||(x.p.prompt||'').toLowerCase().includes(q)||(x.p.model||'').toLowerCase().includes(q));
+  document.getElementById('plist').innerHTML=list.map(({p,i})=>`<div class="pcard">
+    <h3>${p.name.replace(/</g,'&lt;')}</h3>
+    <div class="chips">
+      <span class="chip">${p.width}x${p.height}</span>
+      <span class="chip">${p.steps} stp · CFG ${p.cfg} · ${p.sampler}</span>
+      ${p.upscale?`<span class="chip hd">${p.upscale==1?'1080p':'2x'}</span>`:''}
+      ${p.model?`<span class="chip">${p.model}</span>`:''}
+    </div>
+    <p>${(p.prompt||'').replace(/</g,'&lt;')}</p>
+    <div class="macts">
+      <button class="btn sm" onclick="applyUserPreset(${i})">Apply</button>
+      <button class="btn sec sm" onclick="editUserPreset(${i})">Edit</button>
+      <button class="btn sec sm" onclick="dupUserPreset(${i})">Duplicate</button>
+      <button class="btn sec sm" onclick="exportOnePreset(${i})">Export</button>
+      <button class="btn stop sm" onclick="delUserPreset('${p.id}')">Delete</button>
+    </div>
+  </div>`).join('')||'<div style="color:var(--muted)">No matching presets.</div>';
+}
+function applyUserPreset(i){
+  const p=presetItems[i];if(!p)return;
+  pr.value=p.prompt||'';ng.value=p.negative||'';
+  const k=p.width+'x'+p.height;if([...sz.options].some(o=>o.value===k))sz.value=k;
+  st.value=p.steps;cfg.value=p.cfg;smp.value=p.sampler;ups.value=String(p.upscale||0);eco.value=String(p.eco??2);
+  if(p.model&&p.model!==curModel&&[...msel.options].some(o=>o.value===p.model)){msel.value=p.model;swModel();}
+  showTab('studio');toast('Applied preset: '+p.name);
+}
+function applyQuickPreset(){if(psel.value!=='')applyUserPreset(+psel.value);}
+function fillEditorFromStudio(){
+  document.getElementById('pe-pr').value=pr.value;
+  document.getElementById('pe-ng').value=ng.value;
+  document.getElementById('pe-sz').value=sz.value;
+  document.getElementById('pe-st').value=st.value;
+  document.getElementById('pe-cfg').value=cfg.value;
+  document.getElementById('pe-smp').value=smp.value;
+  document.getElementById('pe-ups').value=ups.value;
+  document.getElementById('pe-eco').value=eco.value;
+  toast('Copied Studio settings into Preset Editor');
+}
+function clearPresetEditor(){
+  document.getElementById('pe-id').value='';
+  document.getElementById('pe-title').textContent='Create / Edit User Preset';
+  document.getElementById('pname').value='';
+  document.getElementById('pe-mdl').value='';
+  fillEditorFromStudio();
+}
+function editUserPreset(i){
+  const p=presetItems[i];if(!p)return;
+  document.getElementById('pe-id').value=p.id;
+  document.getElementById('pe-title').textContent='Editing: '+p.name;
+  document.getElementById('pname').value=p.name;
+  document.getElementById('pe-mdl').value=p.model||'';
+  document.getElementById('pe-pr').value=p.prompt||'';
+  document.getElementById('pe-ng').value=p.negative||'';
+  document.getElementById('pe-sz').value=p.width+'x'+p.height;
+  document.getElementById('pe-st').value=p.steps;
+  document.getElementById('pe-cfg').value=p.cfg;
+  document.getElementById('pe-smp').value=p.sampler||'Euler a';
+  document.getElementById('pe-ups').value=String(p.upscale||0);
+  document.getElementById('pe-eco').value=String(p.eco??2);
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+async function dupUserPreset(i){
+  const p=presetItems[i];if(!p)return;
+  const body={name:p.name+' Copy',model:p.model||'',prompt:p.prompt||'',negative:p.negative||'',width:p.width,height:p.height,steps:p.steps,cfg:p.cfg,sampler_name:p.sampler||'Euler a',upscale:p.upscale||0,eco:p.eco??2};
+  await fetch('/presets/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  toast('Duplicated preset');loadPresets();
+}
+async function saveEditorPreset(){
+  const nm=document.getElementById('pname').value.trim();
+  if(!nm)return toast('Enter a preset name');
+  const [w,h]=(document.getElementById('pe-sz').value||'768x1024').split('x').map(Number);
+  const body={
+    id:document.getElementById('pe-id').value.trim(),
+    name:nm,model:document.getElementById('pe-mdl').value||'',
+    prompt:document.getElementById('pe-pr').value||pr.value,
+    negative:document.getElementById('pe-ng').value||ng.value,
+    width:w||768,height:h||1024,steps:+document.getElementById('pe-st').value||20,
+    cfg:+document.getElementById('pe-cfg').value||7.0,
+    sampler_name:document.getElementById('pe-smp').value||'Euler a',
+    upscale:+document.getElementById('pe-ups').value||0,
+    eco:+document.getElementById('pe-eco').value??2
+  };
+  await fetch('/presets/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  toast('Saved preset: '+nm);clearPresetEditor();loadPresets();
+}
+function downloadJson(obj,filename){
+  const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+function exportAllPresets(){
+  downloadJson({garlic_diffusion_presets:presetItems},'garlic_diffusion_presets.json');
+  toast(`Exported ${presetItems.length} presets`);
+}
+function exportOnePreset(i){
+  const p=presetItems[i];if(!p)return;
+  downloadJson(p,(p.id||'preset')+'.json');
+  toast('Exported '+p.name);
+}
+function togglePasteImport(){
+  const b=document.getElementById('pimp-box');
+  b.style.display=b.style.display==='none'?'block':'none';
+}
+async function importPresetsPayload(raw){
+  let data=JSON.parse(raw);
+  let arr=Array.isArray(data)?data:(Array.isArray(data.garlic_diffusion_presets)?data.garlic_diffusion_presets:[data]);
+  let ok=0;
+  for(const p of arr){
+    if(!p||typeof p!=='object'||!p.name)continue;
+    const body={
+      name:String(p.name),model:String(p.model||''),prompt:String(p.prompt||''),
+      negative:String(p.negative||p.negative_prompt||''),
+      width:+(p.width||768),height:+(p.height||1024),steps:+(p.steps||20),
+      cfg:+(p.cfg||p.cfg_scale||7.0),sampler_name:String(p.sampler||p.sampler_name||'Euler a'),
+      upscale:+(p.upscale||0),eco:(p.eco!==undefined?+p.eco:2)
+    };
+    const r=await fetch('/presets/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.ok)ok++;
+  }
+  toast(`Imported ${ok} preset(s) to PS4!`);loadPresets();
+}
+async function importPresetsFile(inp){
+  const f=inp.files&&inp.files[0];if(!f)return;
+  try{await importPresetsPayload(await f.text());}catch(e){toast('Invalid JSON file');}
+  inp.value='';
+}
+async function importPresetsText(){
+  try{await importPresetsPayload(document.getElementById('pimp-txt').value);document.getElementById('pimp-txt').value='';togglePasteImport();}
+  catch(e){toast('Invalid JSON syntax');}
+}
+async function delUserPreset(id){
+  if(!confirm('Delete preset?'))return;
+  await fetch('/presets/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  toast('Deleted preset');loadPresets();
+}
+async function saveModelPreset(){
+  if(!curModel)return;
+  const [w,h]=document.getElementById('mp-sz').value.split('x').map(Number);
+  const body={model:curModel,width:w||768,height:h||1024,steps:+document.getElementById('mp-st').value,cfg:+document.getElementById('mp-cfg').value,sampler_name:document.getElementById('mp-smp').value,upscale:+document.getElementById('mp-ups').value,description:document.getElementById('mp-desc').value,prompt:pr.value,negative:ng.value};
+  await fetch('/model/preset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  toast('Saved default preset.cfg for '+curModel);poll();
+}
+
+/* Model Manager & Downloader */
+async function loadModelsMgr(){
+  try{
+    const d=await(await fetch('/models/manager')).json();
+    mdlMgrData=d;
+    const hfInp=document.getElementById('hf-repo');
+    if(document.activeElement!==hfInp)hfInp.value=d.repo||'';
+    document.getElementById('mcnt').textContent=(d.installed||[]).length;
+    const instMap=new Map((d.installed||[]).map(x=>[x.name,x]));
+    document.getElementById('minst').innerHTML=(d.installed||[]).map(m=>{
+      const act=m.name===d.active_model;
+      return `<div class="pcard">
+        <h3>${m.name.replace(/</g,'&lt;')}</h3>
+        <div class="chips">
+          <span class="chip">${m.arch.toUpperCase()}</span>
+          <span class="chip">${m.size_mb} MiB</span>
+          <span class="chip ${m.complete?'hd':''}">${act?'ACTIVE':(m.complete?'Ready':m.detail)}</span>
+        </div>
+        <div class="macts">
+          ${act?'':`<button class="btn sm" onclick="loadInstalledModel('${m.name}')">Load</button>`}
+          ${act?'':`<button class="btn stop sm" onclick="deleteModel('${m.name}')">Delete</button>`}
+        </div></div>`;
+    }).join('')||'<div style="color:var(--muted)">No models installed yet — download one below!</div>';
+
+    document.getElementById('mcat').innerHTML=(d.catalog||[]).map(c=>{
+      const ex=instMap.get(c.id);
+      const isOk=ex&&ex.complete;
+      return `<div class="pcard">
+        <h3>${c.title.replace(/</g,'&lt;')}</h3>
+        <div class="chips">
+          <span class="chip">${c.arch.toUpperCase()}</span>
+          <span class="chip">~${c.size_mb} MiB</span>
+          ${isOk?'<span class="chip hd">Installed</span>':(ex?'<span class="chip" style="color:#ff7a85">Incomplete</span>':'')}
+        </div>
+        <p>${(c.desc||'').replace(/</g,'&lt;')}</p>
+        <div class="macts">
+          ${isOk?`<button class="btn sec sm" onclick="loadInstalledModel('${c.id}')">Load Model</button>`:`<button class="btn ok sm" ${d.download&&d.download.active?'disabled':''} onclick="downloadCatalogModel('${c.id}')">${ex?'Resume / Repair':'Download to PS4'}</button>`}
+        </div></div>`;
+    }).join('')||'<div style="color:var(--muted)">No catalog entries.</div>';
+
+    const dl=d.download||{};
+    const box=document.getElementById('dl-box');
+    if(dl.active||dl.error||dl.stage){
+      box.style.display='block';
+      document.getElementById('dl-can').style.display=dl.active?'inline-block':'none';
+      const pct=dl.bytes_total?Math.min(100,Math.round(100*dl.bytes_done/dl.bytes_total)):0;
+      document.getElementById('dl-title').textContent=dl.active?`Downloading ${dl.model_id} (${dl.file_idx}/${dl.file_total}: ${dl.cur_file})`:(dl.error?'Download Stopped':'Download Complete');
+      document.getElementById('dl-fill').style.width=(dl.active?pct:(dl.error?0:100))+'%';
+      const mbD=(dl.bytes_done/1048576).toFixed(1),mbT=(dl.bytes_total/1048576).toFixed(1);
+      document.getElementById('dl-info').style.color=dl.error?'#ff7a85':'#b2c4e0';
+      document.getElementById('dl-info').textContent=dl.active?`${mbD} / ${mbT} MiB (${pct}%) · ${dl.speed_mbs.toFixed(1)} MB/s · ${dl.repo}`:(dl.error||dl.stage);
+    }else{box.style.display='none';}
+    if(dl.finished&&dl.finished!==dlLastFin){dlLastFin=dl.finished;lastModels='';poll();}
+  }catch(e){}
+}
+async function saveHfRepo(andFetch){
+  const repo=document.getElementById('hf-repo').value.trim();
+  await fetch('/models/repo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({repo})});
+  if(andFetch&&repo){
+    toast('Saved repo, fetching manifest.json from Hugging Face...');
+    const r=await(await fetch('/models/catalog/refresh',{method:'POST'})).json();
+    toast(r.ok?`Loaded ${r.count} model(s) from Hugging Face!`:'Repo saved (using built-in catalog; no manifest.json found)');
+  }else toast('Saved Hugging Face repo');
+  loadModelsMgr();
+}
+async function downloadCatalogModel(id){
+  const r=await fetch('/models/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok)return toast(d.error||'Set your Hugging Face repo above first');
+  toast('Started downloading '+id+' onto PS4!');loadModelsMgr();
+}
+async function startCustomDl(){
+  const id=document.getElementById('cdl-id').value.trim();
+  const repo=document.getElementById('cdl-repo').value.trim();
+  const files=document.getElementById('cdl-files').value.trim();
+  if(!id)return toast('Enter a model folder name');
+  const r=await fetch('/models/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,repo,files})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok)return toast(d.error||'Cannot start download');
+  toast('Started custom download: '+id);loadModelsMgr();
+}
+async function cancelModelDl(){
+  await fetch('/models/download/cancel',{method:'POST'});
+  toast('Cancelling download...');loadModelsMgr();
+}
+async function loadInstalledModel(name){
+  msel.value=name;switchingModel=true;
+  const r=await fetch('/model',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:name})});
+  if(r.ok){showTab('studio');toast('Loading '+name+'...');poll();}
+  else toast('PS4 is busy');
+}
+async function deleteModel(name){
+  if(!confirm('Permanently delete '+name+' from PS4 storage?'))return;
+  const r=await fetch('/models/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:name})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok)return toast(d.error||'Delete failed');
+  lastModels='';toast('Deleted '+name);loadModelsMgr();poll();
+}
+
+function updateConsoleModeUI(neo){
+  if(lastNeo===neo)return;lastNeo=neo;
+  document.getElementById('hcon').textContent=neo?'PS4 Pro':'PS4 Base';
+  const cur=eco.value;
+  eco.innerHTML=neo
+    ? '<option value="3">Silent (~14CU · 35% · Coolest)</option><option value="2">Quiet (~20CU · 58% · Default)</option><option value="1">Balanced (~25CU · 70%)</option><option value="0">Turbo (36CU · 100% · Loud)</option>'
+    : '<option value="3">Silent (~7CU · 38% · Coolest)</option><option value="2">Quiet (~11CU · 58%)</option><option value="1">Balanced (~14CU · 75% · Default)</option><option value="0">Turbo (18CU · 100%)</option>';
+  eco.value=cur||(neo?'2':'1');
+}
+
+async function poll(){
+  try{
+    const d=await(await fetch('/status')).json();lastStatus=d;
+    updateConsoleModeUI(d.neo);
+    const canSwitch=(d.gpu_ready!==undefined?d.gpu_ready:d.ready)&&!d.busy;
+    if(d.models&&d.models.length){
+      const mk=(d.ready?'1:':'0:')+d.models.join('|');
+      if(mk!==lastModels){
+        lastModels=mk;
+        const lead=d.ready?'':'<option value="">— Pick a complete model —</option>';
+        msel.innerHTML=lead+d.models.map(m=>`<option value='${m}'>${m}</option>`).join('');
+        document.getElementById('pe-mdl').innerHTML='<option value="">(Any Model)</option>'+d.models.map(m=>`<option value='${m}'>${m}</option>`).join('');
+        msel.value=d.model||'';
+      }
+      if(d.model!==curModel){
+        curModel=d.model||'';msel.value=curModel;
+        if(curModel&&d.preset)applyModelPresetUI(d.preset);
+      } else if(switchingModel&&!d.busy){
+        switchingModel=false;msel.value=curModel;
+        if(d.error)toast(d.error);
+      }
+    }
+    if(d.preset&&d.ready&&!lastPreset)applyModelPresetUI(d.preset);
+    msel.disabled=!canSwitch;
+    document.getElementById('harch').textContent=(d.arch||'sdxl').toUpperCase();
+    document.getElementById('hmdl').textContent=(d.model||(d.gpu_ready?'No model loaded':'Initializing GPU...'))+(d.last_sec?` · ${d.width}x${d.height} in ${d.last_sec.toFixed(1)}s`:'');
+    tstat.textContent=d.eff_tflops?`UNet ${d.unet_gpu_sec.toFixed(1)}s (${d.eff_tflops.toFixed(2)} TF) · VAE ${d.vae_sec.toFixed(1)}s`+(d.upscale_sec?` · Upscale ${d.upscale_sec.toFixed(1)}s`:'')+` · Rest ${d.cooldown_sec.toFixed(1)}s`:(d.bench_gemm_tflops?`GPU GEMM: Turbo ${d.bench_mode_tf[0].toFixed(2)} / Bal ${d.bench_mode_tf[1].toFixed(2)} / Quiet ${d.bench_mode_tf[2].toFixed(2)} / Silent ${d.bench_mode_tf[3].toFixed(2)} TF`:'');
+    fill.style.width=Math.round((d.progress||0)*100)+'%';
+    stage.style.color=d.error?'#ff7a85':'#b2c4e0';
+    stage.textContent=d.error||d.stage||'Ready';
+    go.disabled=!d.ready||d.busy;can.style.display=d.busy?'block':'none';
+    if(d.has_image&&d.image_gen_id!==lastId){
+      lastId=d.image_gen_id;const u='/image.png?t='+lastId;
+      img.src=u;img.style.display='block';ph.style.display='none';
+      document.getElementById('qbar').style.display='flex';dl.href=u;
+      loadGallery();
+    }
+    if(document.getElementById('pg-models').classList.contains('active')||(mdlMgrData&&mdlMgrData.download&&mdlMgrData.download.active))loadModelsMgr();
+  }catch(e){}
+}
+setInterval(poll,900);poll();loadGallery();loadPresets();loadStyles();
+</script>
+</body>
+</html>

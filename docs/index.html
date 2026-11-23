@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GarlicDiffusion — Native Stable Diffusion & SDXL on PS4 / PS4 Pro</title>
+<meta name="description" content="Run Stable Diffusion 1.5, SDXL, and Real-ESRGAN 1080p AI Upscaling natively on a PlayStation 4 or PS4 Pro GPU. 100% offline with built-in Web Studio, Gallery, Hugging Face Downloader, and A1111/Discord API.">
+<style>
+:root{--bg:#070b14;--panel:#101727;--card:#151f34;--border:#233352;--accent:#4aa3ff;--accent2:#35d49a;--text:#eaf1fc;--muted:#8fa5c8}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at 20% 0%,#142347 0%,var(--bg) 52%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+nav{position:sticky;top:0;z-index:20;background:rgba(7,11,20,.85);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+.nav-in{display:flex;align-items:center;justify-content:space-between;padding:12px 0;gap:14px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;color:#fff}
+.brand img{width:30px;height:30px}
+.nav-links{display:flex;gap:18px;font-size:14px;font-weight:600;flex-wrap:wrap}
+.nav-links a{color:var(--muted)}.nav-links a:hover{color:#fff;text-decoration:none}
+.hero{padding:64px 0 42px;text-align:center}
+.pill{display:inline-block;padding:4px 12px;border-radius:99px;background:#16294a;border:1px solid #2b4a80;color:#80c4ff;font-size:12px;font-weight:700;letter-spacing:.3px;margin-bottom:16px}
+h1{font-size:clamp(32px,5.2vw,54px);line-height:1.1;margin:0 0 16px;background:linear-gradient(90deg,#ffffff 0%,#7dc3ff 55%,#4be3ad 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.sub{max-width:740px;margin:0 auto 28px;font-size:18px;color:var(--muted)}
+.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:10px;font-weight:700;font-size:14px;border:1px solid transparent;transition:transform .12s,opacity .12s}
+.btn:hover{transform:translateY(-1px);text-decoration:none}
+.btn.primary{background:linear-gradient(135deg,#2f8cff,#1f6fe0);color:#fff;box-shadow:0 8px 26px rgba(47,140,255,.32)}
+.btn.mint{background:linear-gradient(135deg,#20a876,#16835b);color:#fff}
+.btn.ghost{background:var(--panel);border-color:var(--border);color:var(--text)}
+section{padding:46px 0;border-top:1px solid rgba(35,51,82,.55)}
+h2{font-size:28px;margin:0 0 10px;color:#fff}
+.lead{color:var(--muted);margin:0 0 24px;max-width:720px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px}
+.card h3{margin:0 0 6px;font-size:16px;color:#7cc2ff}
+.card p{margin:0;font-size:13.5px;color:var(--muted)}
+.samples{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px}
+.scard{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+.scard img{width:100%;aspect-ratio:3/4;object-fit:cover;background:#05080f;display:block}
+.scard .ph{width:100%;aspect-ratio:3/4;display:flex;flex-direction:column;align-items:center;justify-content:center;background:repeating-linear-gradient(45deg,#0d1424,#0d1424 14px,#111a2e 14px,#111a2e 28px);color:var(--muted);text-align:center;padding:24px}
+.smeta{padding:14px;font-size:13px}
+.smeta b{color:#fff;display:block;margin-bottom:4px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chip{font-size:11px;padding:2px 8px;border-radius:99px;background:#0d1527;border:1px solid var(--border);color:#9ac4f8}
+.chip.ok{background:#113327;border-color:#20634b;color:#55e6b0}
+table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;font-size:13.5px}
+th,td{padding:11px 14px;text-align:left;border-bottom:1px solid rgba(35,51,82,.6)}
+th{background:#141e33;color:#8cc8ff;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+tr:last-child td{border-bottom:0}
+.tscroll{overflow-x:auto;border-radius:12px}
+pre{background:#0b1120;border:1px solid var(--border);border-radius:10px;padding:14px;overflow-x:auto;font-size:13px;color:#cfe2ff}
+.support-box{background:linear-gradient(135deg,#13203b,#11292a);border:1px solid #2b4a6e;border-radius:16px;padding:28px;text-align:center}
+footer{padding:32px 0;text-align:center;color:var(--muted);font-size:12.5px;border-top:1px solid var(--border)}
+</style>
+</head>
+<body>
+<nav>
+  <div class="wrap nav-in">
+    <div class="brand"><img src="logo.svg" alt="Logo"> GarlicDiffusion <span class="chip ok">v1.0 PS4</span></div>
+    <div class="nav-links">
+      <a href="#samples">Samples</a>
+      <a href="#features">Features</a>
+      <a href="#benchmarks">Benchmarks</a>
+      <a href="#models">Models</a>
+      <a href="#install">Install & API</a>
+      <a href="https://github.com/DJTOMATO/GarlicDiffusion" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://ko-fi.com/djtomato" target="_blank" rel="noopener">Ko-fi</a>
+    </div>
+  </div>
+</nav>
+
+<main class="wrap">
+  <div class="hero">
+    <div class="pill">PS4 · PS4 Slim · PS4 Pro Neo · Bare-Metal GCN Compute</div>
+    <h1>Stable Diffusion & SDXL<br>Running Natively on PS4</h1>
+    <p class="sub">Generate anime and illustration artwork directly on your PlayStation 4 GPU with custom OpenCL GCN kernels, built-in Real-ESRGAN 1080p AI upscaling, Hardware CU Quiet Modes, Web Studio, and Automatic1111 / Discord API.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/DJTOMATO/GarlicDiffusion/releases/latest" target="_blank" rel="noopener">Download PS4 PKG (6.6 MiB)</a>
+      <a class="btn mint" href="https://huggingface.co/DJTomato/ps4-diffusion-models" target="_blank" rel="noopener">Browse Models on Hugging Face</a>
+      <a class="btn ghost" href="https://github.com/DJTOMATO/GarlicDiffusion" target="_blank" rel="noopener">GitHub Repository</a>
+      <a class="btn ghost" href="https://ko-fi.com/djtomato" target="_blank" rel="noopener">Support on Ko-fi</a>
+    </div>
+  </div>
+
+  <section id="samples">
+    <h2>Real PS4 Pro Generated Samples</h2>
+    <p class="lead">Every image below was rendered 100% locally on a PS4 Pro GPU in Quiet Mode (20 CUs) with zero PC involvement — complete with embedded A1111 PNG Info metadata.</p>
+    <div class="samples">
+      <div class="scard">
+        <img src="samples/sample_wai_v14_dmd2.jpg" alt="PS4 Pro WAI-Illustrious v1.4 DMD2 768x1024 output">
+        <div class="smeta">
+          <b>WAI-Illustrious v1.4 DMD2 (SDXL)</b>
+          <div style="color:var(--muted)">768×1024 · 6 steps · CFG 1.0 · Quiet Mode (20 CU)</div>
+          <div class="chips"><span class="chip ok">51.5s Total</span><span class="chip">SDXL Q8_0</span><span class="chip">PS4 Pro</span></div>
+        </div>
+      </div>
+      <div class="scard">
+        <div class="ph">
+          <strong style="color:#7cc2ff;font-size:16px;margin-bottom:8px">SD 1.5 + Real-ESRGAN 1080p Showcase</strong>
+          <span>Placeholder for fresh SFW 1080p upscaled PS4 capture (512×768 → 1080×1620 in 8.2s upscale).</span>
+        </div>
+        <div class="smeta">
+          <b>SD 1.5 + Real-ESRGAN Anime v3 (1080p)</b>
+          <div style="color:var(--muted)">512×768 → 1080×1620 · Quiet Mode (20 CU)</div>
+          <div class="chips"><span class="chip ok">8.2s AI Upscale</span><span class="chip">SD 1.5</span><span class="chip">1080p HD</span></div>
+        </div>
+      </div>
+      <div class="scard">
+        <div class="ph">
+          <strong style="color:#7cc2ff;font-size:16px;margin-bottom:8px">WAI-Illustrious v17 & Base PS4 Showcase</strong>
+          <span>Placeholder for WAI-Illustrious v17 DMD2 & Silent 14CU / Base PS4 verification captures.</span>
+        </div>
+        <div class="smeta">
+          <b>WAI-Illustrious v17 DMD2 (SDXL)</b>
+          <div style="color:var(--muted)">768×1024 · 6 steps · CFG 1.0 · LCM · Quiet/Silent Mode</div>
+          <div class="chips"><span class="chip">Coming Next</span><span class="chip">SDXL Q8_0</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <h2>Built From Scratch for PS4 GCN</h2>
+    <p class="lead">Because PS4 homebrew has no CUDA, PyTorch, or Vulkan compute runtime, the entire inference engine compiles 22 zero-scratch GCN OpenCL kernels dispatched directly via hand-written PM4 command packets.</p>
+    <div class="grid">
+      <div class="card"><h3>Hardware CU Thermal Control</h3><p>Symmetric checkerboard <code>SH_STATIC_THREAD_MGMT</code> CU masks (14 / 20 / 25 / 36 CUs on Pro; 7 / 11 / 14 / 18 CUs on Base PS4) + inter-block breathers prevent jet-engine fan spikes.</p></div>
+      <div class="card"><h3>Built-In 1080p AI Upscaler</h3><p>Bundled Real-ESRGAN Anime v3 (2.4 MiB) runs natively on PS4 GPU, turning 512×768 into crisp 1080×1620 in 8.2 seconds.</p></div>
+      <div class="card"><h3>In-App Hugging Face Downloader</h3><p>Stream pre-converted <code>PSD1</code> models straight onto your PS4 HDD over HTTPS with resume support, live MB/s progress, and zero FTP required.</p></div>
+      <div class="card"><h3>Web Studio, Gallery & Styles</h3><p>Full LAN Web UI on port 8081 with Save Prompt, Reusable Art Styles, 1:1 Lightbox Gallery, Resize/Upscale, and JSON Preset Export/Import.</p></div>
+      <div class="card"><h3>A1111 PNG Info & Discord API</h3><p>Embeds standard Automatic1111 <code>tEXt</code> parameters into every PNG and serves <code>/sdapi/v1/txt2img</code> (works with <code>bz-cogs/aimage</code>) + OpenAI <code>/v1/images/generations</code>.</p></div>
+      <div class="card"><h3>Base PS4, Slim & PS4 Pro</h3><p>Auto-switches to compact 325 MiB scratch buffers on Base/Slim PS4 so both SD 1.5 (1.5 GiB) and full SDXL (4.0 GiB) fit in direct memory.</p></div>
+    </div>
+  </section>
+
+  <section id="benchmarks">
+    <h2>Measured PS4 Benchmarks</h2>
+    <p class="lead">Real timings logged on PS4 Pro Neo (FW 11.00, GoldHEN). Unmeasured configurations are marked <em>TBD</em> until verified on hardware.</p>
+    <div class="tscroll">
+      <table>
+        <thead>
+          <tr><th>Model</th><th>Arch</th><th>Output Size</th><th>Settings</th><th>Power Mode</th><th>Total Time</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>WAI-Illustrious v14 DMD2</b></td><td>SDXL</td><td>768×1024</td><td>6 steps · CFG 1.0 · LCM</td><td>Quiet (20 CU)</td><td><b>50.8s</b> (31.3s UNet + 19.2s VAE)</td></tr>
+          <tr><td><b>WAI-Illustrious v17 DMD2</b></td><td>SDXL</td><td>768×1024</td><td>6 steps · CFG 1.0 · LCM</td><td>Quiet (20 CU)</td><td><i>TBD (~50s expected)</i></td></tr>
+          <tr><td><b>WAI-Illustrious v14 8-Step</b></td><td>SDXL</td><td>768×1024</td><td>8 steps · CFG 3.5 · Euler</td><td>Quiet (20 CU)</td><td><b>98.0s</b> (79.0s UNet + 18.5s VAE)</td></tr>
+          <tr><td><b>Anything V5 + 1080p Upscale</b></td><td>SD 1.5</td><td>1080×1620</td><td>20 steps · CFG 7.0 · Euler a</td><td>Quiet (20 CU)</td><td><b>87.5s</b> (68.2s UNet + 11s VAE + 8.2s AI Upscale)</td></tr>
+          <tr><td><b>MeinaMix V11 8-Step + 1080p</b></td><td>SD 1.5</td><td>1080×1620</td><td>8 steps · CFG 3.5 · Euler</td><td>Quiet (20 CU)</td><td><i>TBD (~46s expected)</i></td></tr>
+          <tr><td><b>PS4 Pro Silent Thermal Check</b></td><td>SDXL</td><td>768×1024</td><td>6 steps · CFG 1.0 · LCM</td><td>Silent (14 CU)</td><td><i>TBD (0.99 TF measured)</i></td></tr>
+          <tr><td><b>Base PS4 / PS4 Slim (18 CU)</b></td><td>SD 1.5 / SDXL</td><td>512×768 / 768×1024</td><td>8 / 6 steps</td><td>Balanced (14 CU)</td><td><i>TBD (Community tests welcome)</i></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="models">
+    <h2>Pre-Converted PS4 Model Catalog</h2>
+    <p class="lead">Hosted publicly on <a href="https://huggingface.co/DJTomato/ps4-diffusion-models" target="_blank" rel="noopener">huggingface.co/DJTomato/ps4-diffusion-models</a> and downloadable in 1 click directly inside the PS4 app.</p>
+    <div class="grid">
+      <div class="card"><h3>WAI-Illustrious v17 DMD2</h3><p>Latest WAI v17 SDXL anime checkpoint fused with DMD2. 6 steps, CFG 1.0, ~3.7 GiB standalone.</p></div>
+      <div class="card"><h3>WAI-Illustrious v14 DMD2</h3><p>Proven razor-sharp anime SDXL checkpoint. 6 steps, CFG 1.0, ~51s in Quiet mode.</p></div>
+      <div class="card"><h3>MeinaMix V11 8-Step</h3><p>Ultra-fast glossy anime SD 1.5 (~1.2 GiB) with automatic 1080p Real-ESRGAN upscale. Ideal for Base PS4!</p></div>
+      <div class="card"><h3>DreamShaper 8 & Anything V5</h3><p>Classic 2.5D fantasy and cel-shaded SD 1.5 checkpoints (~1.2 GiB each) with automatic 1080p upscaling.</p></div>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2>Quick Install & API</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>1. Install the 6.6 MiB PKG</h3>
+        <p>Install <code>Garlic-Diffusion.pkg</code> on any GoldHEN PS4 / PS4 Pro via Package Installer, then launch it from the home screen.</p>
+      </div>
+      <div class="card">
+        <h3>2. Download a Model In-App</h3>
+        <p>Open <code>http://&lt;PS4_IP&gt;:8081</code> → <b>Models</b> tab (or press <b>[Up]</b> on your controller) and click <b>Download to PS4</b>.</p>
+      </div>
+      <div class="card">
+        <h3>3. Connect Discord or A1111</h3>
+        <p>Point Automatic1111 clients or <code>bz-cogs/aimage</code> at <code>http://&lt;PS4_IP&gt;:8081</code> — no extra setup needed.</p>
+      </div>
+    </div>
+    <pre style="margin-top:16px">curl http://192.168.1.29:8081/sdapi/v1/txt2img \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"masterpiece, best quality, 1girl, silver hair, glowing sakura","steps":6,"cfg_scale":1.0,"width":768,"height":1024,"sampler_name":"LCM"}'</pre>
+  </section>
+
+  <section id="support">
+    <div class="support-box">
+      <h2 style="margin-bottom:8px">Support Open-Source PS4 AI Homebrew</h2>
+      <p style="color:var(--muted);max-width:620px;margin:0 auto 20px">Free & open-source under GPLv3. Donations help fund Base PS4 / Slim hardware testing, new fast GCN kernels, and model conversions.</p>
+      <div class="cta">
+        <a class="btn primary" href="https://ko-fi.com/djtomato" target="_blank" rel="noopener">Support on Ko-fi</a>
+        <a class="btn ghost" href="https://github.com/DJTOMATO/GarlicDiffusion" target="_blank" rel="noopener">Star on GitHub</a>
+        <a class="btn mint" href="https://huggingface.co/DJTomato/ps4-diffusion-models" target="_blank" rel="noopener">Hugging Face Models</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    Open-source GPLv3 · Inspired by <a href="https://github.com/leonardo-alegria/garlic-llm">Garlic LLM</a> · Built with OpenOrbis & Zig · Not affiliated with Sony Interactive Entertainment.
+  </div>
+</footer>
+</body>
+</html>

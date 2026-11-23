@@ -1,0 +1,23 @@
+# Local model weights & download cache (hosted on Hugging Face)
+models/
+cache/
+hf_stage/
+*.psd1
+*.safetensors
+*.pth
+*.bin
+!assets/clip_tok.bin
+!assets/kernels.bin
+!assets/upscaler.psd1
+
+# Build outputs
+build/
+*.o
+*.elf
+*.oelf
+*.pkg
+*.gp4
+*.exe
+__pycache__/
+*.pyc
+.DS_Store
