@@ -58,6 +58,7 @@ typedef struct {
     float cfg;
     int sampler, upscale, eco;
     uint32_t batch;
+    int shutdown_after;
     uint64_t seed, last_seed;
     double last_sec, last_tf;
     const uint8_t* preview;                       // RGB, preview_w x preview_h
@@ -170,8 +171,13 @@ static void sm_row_value(const StudioView* v, int row, char* out, size_t cap, fl
         else snprintf(out, cap, "Random each time");
         break;
     case ROW_BATCH:
-        if (v->batch <= 1) snprintf(out, cap, "1 image  ·  single");
-        else snprintf(out, cap, "%u images  ·  random seed each", v->batch);
+        if (v->shutdown_after) {
+            if (v->batch <= 1) snprintf(out, cap, "1 image  ·  SHUTDOWN PS4 AFTER");
+            else snprintf(out, cap, "%u images  ·  SHUTDOWN PS4 AFTER", v->batch);
+        } else {
+            if (v->batch <= 1) snprintf(out, cap, "1 image  ·  single");
+            else snprintf(out, cap, "%u images  ·  random seed each", v->batch);
+        }
         break;
     default:
         out[0] = 0;
@@ -198,7 +204,9 @@ static void sm_draw_row(uint32_t* back, const StudioView* v, int row) {
         char gen_lbl[64];
         if (v->busy) snprintf(gen_lbl, sizeof(gen_lbl), "Generating...  press O to cancel");
         else if (!v->ready) snprintf(gen_lbl, sizeof(gen_lbl), "Load a model first");
+        else if (v->batch > 1 && v->shutdown_after) snprintf(gen_lbl, sizeof(gen_lbl), "Generate %u Images  ·  Auto-Shutdown", v->batch);
         else if (v->batch > 1) snprintf(gen_lbl, sizeof(gen_lbl), "Generate %u Images", v->batch);
+        else if (v->shutdown_after) snprintf(gen_lbl, sizeof(gen_lbl), "Generate Image  ·  Auto-Shutdown");
         else snprintf(gen_lbl, sizeof(gen_lbl), "Generate Image");
         const char* t = gen_lbl;
         int tw = g_str_width(&g_fbold, t) + (v->ready && !v->busy ? 44 : 0);
@@ -264,7 +272,7 @@ static const char* sm_hint(const StudioView* v, int row, char* buf, size_t cap) 
     case ROW_UPSCALE: return "Real-ESRGAN Anime v3 runs on the GPU after rendering: 1080p, 2x or 4K UHD.";
     case ROW_POWER:   return "GPU compute units and fan noise. Quiet is the default; avoid Turbo for long sessions.";
     case ROW_SEED:    return "Random each time, or lock the last used seed to re-render the same composition.";
-    case ROW_BATCH:   return "Generate 1-20 images in a row with the same settings and a fresh random seed each time.";
+    case ROW_BATCH:   return "Generate 1-20 images in a row with random seeds. Press X to also toggle Auto-Shutdown PS4 after batch.";
     case ROW_GEN:
         if (v->last_sec > 0.0) {
             snprintf(buf, cap, "Press X or Triangle to generate.   Last render: %.1fs  ·  %.2f TFLOPS", v->last_sec, v->last_tf);

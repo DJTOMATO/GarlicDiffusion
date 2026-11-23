@@ -19,6 +19,7 @@ typedef struct {
     int sampler;    // 0=Euler a, 1=Euler, 2=LCM, 3=DPM++ 2M Karras
     int upscale;    // 0=Off, 1=1080p Anime (RealESRGAN), 2=2x Anime HD, 3=4K UHD (up to 3840x2160)
     uint32_t batch_count; // 1..20 sequential images with fresh random seeds
+    int shutdown_after;   // 1 = cleanly power off PS4 after batch finishes
     int pending;
     int cancel_req;
     char switch_model[64];
@@ -74,6 +75,7 @@ typedef struct {
     uint32_t image_gen_id;
     uint32_t batch_cur;
     uint32_t batch_total;
+    int shutdown_after;
     char last_gallery_id[64];
 } DiffStatus;
 

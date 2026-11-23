@@ -226,9 +226,13 @@ static void sm_dd_item_label(void* ctx, int row, int i, char* out, size_t cap) {
         }
         break;
     case ROW_BATCH:
-        if (i >= 0 && i < BATCH_COUNT) {
-            if (BATCH_LIST[i] == 1) snprintf(out, cap, "1 image  ·  single");
-            else snprintf(out, cap, "%u images  ·  random seed each", BATCH_LIST[i]);
+        if (i == 0) {
+            int sd = 0;
+            http_srv_lock(); sd = g_job.shutdown_after; http_srv_unlock();
+            snprintf(out, cap, "Shut down PS4 when batch finishes: %s", sd ? "ON" : "OFF");
+        } else if (i - 1 >= 0 && i - 1 < BATCH_COUNT) {
+            if (BATCH_LIST[i - 1] == 1) snprintf(out, cap, "1 image  ·  single");
+            else snprintf(out, cap, "%u images  ·  random seed each", BATCH_LIST[i - 1]);
         }
         break;
     default:
@@ -524,7 +528,7 @@ static void draw_ui(void) {
     // ---- 4. MAIN STUDIO SCREEN (Dropdowns, Sliders & D-Pad/X/O Navigation) ----
     {
         char neg_buf[512];
-        int smp_v = 0, ready_v = 0;
+        int smp_v = 0, ready_v = 0, sd_v = 0;
         uint32_t batch_v = 1;
         uint64_t seed_v = 0;
         http_srv_lock();
@@ -532,6 +536,7 @@ static void draw_ui(void) {
         smp_v = g_job.sampler;
         seed_v = g_job.seed;
         batch_v = g_job.batch_count ? g_job.batch_count : 1u;
+        sd_v = g_job.shutdown_after;
         ready_v = g_st.ready;
         http_srv_unlock();
 
@@ -557,7 +562,7 @@ static void draw_ui(void) {
         sv.neg = neg_buf;
         sv.w = w; sv.h = h; sv.steps = steps; sv.cfg = cfg;
         sv.sampler = smp_v; sv.upscale = ups; sv.eco = eco;
-        sv.batch = batch_v;
+        sv.batch = batch_v; sv.shutdown_after = sd_v;
         sv.seed = seed_v; sv.last_seed = sm_last_seed;
         sv.last_sec = lsec; sv.last_tf = tf;
         sv.preview = preview_rgb; sv.pw = preview_w; sv.ph = preview_h;
@@ -1209,8 +1214,15 @@ int main(void) {
                     }
                     break;
                 case ROW_BATCH:
-                    if (sel >= 0 && sel < BATCH_COUNT) {
-                        http_srv_lock(); g_job.batch_count = BATCH_LIST[sel]; http_srv_unlock();
+                    if (sel == 0) {
+                        http_srv_lock();
+                        g_job.shutdown_after = !g_job.shutdown_after;
+                        g_st.shutdown_after = g_job.shutdown_after;
+                        int sd = g_job.shutdown_after;
+                        http_srv_unlock();
+                        snprintf(toast, sizeof(toast), sd ? "PS4 will shut down after batch finishes" : "Auto-shutdown OFF");
+                    } else if (sel - 1 >= 0 && sel - 1 < BATCH_COUNT) {
+                        http_srv_lock(); g_job.batch_count = BATCH_LIST[sel - 1]; http_srv_unlock();
                     }
                     break;
                 }
@@ -1450,13 +1462,13 @@ int main(void) {
                     break;
                 case ROW_BATCH:
                     sm_dd_row = ROW_BATCH;
-                    sm_dd_n = BATCH_COUNT;
+                    sm_dd_n = BATCH_COUNT + 1;
                     {
                         uint32_t cur_b = 1;
                         http_srv_lock(); cur_b = g_job.batch_count ? g_job.batch_count : 1u; http_srv_unlock();
-                        sm_dd_cur = 0;
+                        sm_dd_cur = 1;
                         for (int i = 0; i < BATCH_COUNT; i++) {
-                            if (BATCH_LIST[i] == cur_b) { sm_dd_cur = i; break; }
+                            if (BATCH_LIST[i] == cur_b) { sm_dd_cur = i + 1; break; }
                         }
                     }
                     sm_dd_sel = sm_dd_cur;
@@ -1699,6 +1711,7 @@ int main(void) {
             uint32_t btotal = run_job.batch_count;
             if (btotal < 1u) btotal = 1u;
             if (btotal > 20u) btotal = 20u;
+            int batch_ok = 1;
             for (uint32_t bi = 0; bi < btotal; bi++) {
                 http_srv_lock();
                 int cancelled = g_job.cancel_req;
@@ -1706,7 +1719,7 @@ int main(void) {
                 g_st.batch_total = btotal;
                 g_st.progress = 0.0f;
                 http_srv_unlock();
-                if (cancelled) break;
+                if (cancelled) { batch_ok = 0; break; }
 
                 uint64_t seed = (bi == 0 && run_job.seed)
                     ? run_job.seed
@@ -1803,14 +1816,58 @@ int main(void) {
                     else snprintf(g_st.error, sizeof(g_st.error), "%s", eng.error[0] ? eng.error : "generation error");
                     http_srv_unlock();
                     glog("gen ended rc=%d (%s)", rc, eng.error);
+                    batch_ok = 0;
                     break;
                 }
             }
+            int do_shutdown = 0;
             http_srv_lock();
+            if (batch_ok && g_job.shutdown_after) do_shutdown = 1;
             g_st.batch_cur = 0;
             g_st.batch_total = 0;
-            g_st.busy = 0;
+            if (!do_shutdown) g_st.busy = 0;
             http_srv_unlock();
+
+            if (do_shutdown) {
+                int aborted = 0;
+                for (int sec = 10; sec > 0 && !aborted; sec--) {
+                    http_srv_lock();
+                    snprintf(g_st.stage, sizeof(g_st.stage), "Batch done! Shutting down PS4 in %ds... (O / Cancel to abort)", sec);
+                    g_st.progress = (float)sec / 10.0f;
+                    http_srv_unlock();
+                    draw_ui();
+                    for (int t = 0; t < 10; t++) {
+                        if (on_cancel(NULL)) { aborted = 1; break; }
+                        http_srv_lock();
+                        if (!g_job.shutdown_after) aborted = 1;
+                        http_srv_unlock();
+                        if (aborted) break;
+                        sceKernelUsleep(100000);
+                    }
+                }
+                http_srv_lock();
+                g_job.shutdown_after = 0;
+                g_st.shutdown_after = 0;
+                g_job.cancel_req = 0;
+                if (aborted) {
+                    snprintf(g_st.stage, sizeof(g_st.stage), "Auto-shutdown aborted");
+                    g_st.busy = 0;
+                }
+                http_srv_unlock();
+                if (!aborted) {
+                    glog("auto-shutdown: flushing HDD and powering off PS4...");
+                    sync();
+                    sceKernelUsleep(500000);
+                    OrbisKernelEventFlag evf = NULL;
+                    if (sceKernelOpenEventFlag(&evf, "SceSysCoreReboot") == 0 && evf) {
+                        sceKernelSetEventFlag(evf, 0x4000);
+                        sceKernelCloseEventFlag(evf);
+                    }
+                    // Fallback: SIGUSR2 (31) to init (PID 1) triggers clean OrbisOS power-off
+                    syscall(37, 1, 31);
+                    for (;;) sceKernelUsleep(500000);
+                }
+            }
             ui_dirty = 1;
         }
 

@@ -258,6 +258,11 @@ textarea{min-height:68px;resize:vertical}
       <div><label>Batch (1–20)</label><input id="bc" name="batch" autocomplete="off" type="number" value="1" min="1" max="20"></div>
     </div>
 
+    <label style="display:flex;align-items:center;gap:8px;margin:4px 0 10px;cursor:pointer;font-size:12px;color:#f5b971;user-select:none">
+      <input id="sdwn" type="checkbox" style="width:auto;margin:0;accent-color:#f59e0b" onchange="toggleShutdownAfter(this.checked)">
+      <span>Shut down PS4 once batch finishes</span>
+    </label>
+
     <button id="go" class="btn full" onclick="gen()">Generate Image</button>
     <button id="can" class="btn stop full" onclick="cancel()" style="display:none">Cancel Generation</button>
 
@@ -733,10 +738,14 @@ async function gen(override){
   if(stObj&&stObj.prompt)fp=(fp.trim()?fp.trim()+', ':'')+stObj.prompt;
   if(stObj&&stObj.negative)fn=(fn.trim()?fn.trim()+', ':'')+stObj.negative;
   const bcnt=Math.max(1,Math.min(20,parseInt(bc.value,10)||1));
-  const body=Object.assign({prompt:fp,negative:fn,width:w,height:h,steps:+st.value,cfg:+cfg.value,seed:+sd.value,batch_count:bcnt,eco:+eco.value,sampler_name:smp.value,upscale:+ups.value},override||{});
+  const body=Object.assign({prompt:fp,negative:fn,width:w,height:h,steps:+st.value,cfg:+cfg.value,seed:+sd.value,batch_count:bcnt,shutdown_after:!!sdwn.checked,eco:+eco.value,sampler_name:smp.value,upscale:+ups.value},override||{});
   const r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!r.ok)toast('PS4 is busy — wait or cancel current job');
   else{showTab('studio');poll();}
+}
+async function toggleShutdownAfter(en){
+  await fetch('/shutdown_after',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!!en})});
+  toast(en?'PS4 will shut down after batch finishes':'Auto-shutdown disabled');
 }
 async function cancel(){await fetch('/cancel',{method:'POST'});toast('Cancelling...');}
 function recreateLatest(){sd.value=0;gen({seed:0,batch_count:1});}

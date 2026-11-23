@@ -203,6 +203,9 @@ static void apply_job_json(const char* body, DiffJob* j) {
     } else {
         j->batch_count = 1;
     }
+    if (json_get_double(body, "shutdown_after", &v)) j->shutdown_after = (v != 0) ? 1 : 0;
+    else if (strstr(body, "\"shutdown_after\":true") || strstr(body, "\"shutdown_after\": true")) j->shutdown_after = 1;
+    else if (strstr(body, "\"shutdown_after\":false") || strstr(body, "\"shutdown_after\": false")) j->shutdown_after = 0;
 }
 
 static int ci_contains(const char* hay, const char* needle) {
@@ -929,7 +932,7 @@ static void handle_client(int fd) {
                          "\"last_sec\":%.2f,\"unet_gpu_sec\":%.2f,\"vae_sec\":%.2f,\"upscale_sec\":%.2f,\"cooldown_sec\":%.2f,"
                          "\"eff_tflops\":%.3f,\"bench_gemm_tflops\":%.3f,\"bench_attn_ms\":%.2f,"
                          "\"bench_mode_tf\":[%.3f,%.3f,%.3f,%.3f],"
-                         "\"has_image\":%s,\"image_gen_id\":%u,\"batch_cur\":%u,\"batch_total\":%u,\"last_gallery_id\":\"%s\"}",
+                         "\"has_image\":%s,\"image_gen_id\":%u,\"batch_cur\":%u,\"batch_total\":%u,\"shutdown_after\":%s,\"last_gallery_id\":\"%s\"}",
                          g_st->gpu_ready ? "true" : "false", g_st->ready ? "true" : "false", g_st->busy ? "true" : "false",
                          g_st->neo, g_st->is_sd15 ? "sd15" : "sdxl", g_st->has_upscaler ? "true" : "false",
                          g_st->temp_c, g_st->temp_peak_c, g_st->eco_mode,
@@ -944,7 +947,7 @@ static void handle_client(int fd) {
                          g_st->bench_mode_tf[0], g_st->bench_mode_tf[1],
                          g_st->bench_mode_tf[2], g_st->bench_mode_tf[3],
                          (g_st->png_data && g_st->png_size) ? "true" : "false", g_st->image_gen_id,
-                         g_st->batch_cur, g_st->batch_total, g_st->last_gallery_id);
+                         g_st->batch_cur, g_st->batch_total, g_st->shutdown_after ? "true" : "false", g_st->last_gallery_id);
         http_srv_unlock();
         send_resp(fd, 200, "OK", "application/json", out, (size_t)n);
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/image.png") == 0) {
@@ -963,6 +966,16 @@ static void handle_client(int fd) {
         } else {
             send_resp(fd, 404, "Not Found", "text/plain", "no image yet", 12);
         }
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/shutdown_after") == 0) {
+        double v = 0;
+        int en = 0;
+        if (json_get_double(body, "enabled", &v)) en = (v != 0) ? 1 : 0;
+        else if (strstr(body, "\"enabled\":true") || strstr(body, "\"enabled\": true")) en = 1;
+        http_srv_lock();
+        g_job->shutdown_after = en;
+        g_st->shutdown_after = en;
+        http_srv_unlock();
+        send_resp(fd, 200, "OK", "application/json", en ? "{\"shutdown_after\":true}" : "{\"shutdown_after\":false}", en ? 23 : 24);
     } else if (strcmp(method, "POST") == 0 &&
                (strcmp(path, "/cancel") == 0 || strcmp(path, "/sdapi/v1/interrupt") == 0)) {
         http_srv_lock();
