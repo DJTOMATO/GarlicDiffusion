@@ -16,8 +16,9 @@ typedef struct {
     float cfg;
     uint64_t seed;
     int eco_mode;   // 0=Turbo(36CU), 1=Balanced(25CU), 2=Quiet(20CU), 3=Silent(14CU)
-    int sampler;    // 0=Euler a, 1=Euler, 2=LCM
+    int sampler;    // 0=Euler a, 1=Euler, 2=LCM, 3=DPM++ 2M Karras
     int upscale;    // 0=Off, 1=1080p Anime (RealESRGAN), 2=2x Anime HD, 3=4K UHD (up to 3840x2160)
+    uint32_t batch_count; // 1..20 sequential images with fresh random seeds
     int pending;
     int cancel_req;
     char switch_model[64];
@@ -71,6 +72,8 @@ typedef struct {
     uint8_t* png_data;
     size_t png_size;
     uint32_t image_gen_id;
+    uint32_t batch_cur;
+    uint32_t batch_total;
     char last_gallery_id[64];
 } DiffStatus;
 

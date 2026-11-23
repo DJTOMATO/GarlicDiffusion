@@ -255,6 +255,7 @@ textarea{min-height:68px;resize:vertical}
 
     <div class="row">
       <div><label>Seed (0 = random)</label><input id="sd" name="seed" autocomplete="off" type="number" value="0" min="0"></div>
+      <div><label>Batch (1–20)</label><input id="bc" name="batch" autocomplete="off" type="number" value="1" min="1" max="20"></div>
     </div>
 
     <button id="go" class="btn full" onclick="gen()">Generate Image</button>
@@ -731,13 +732,14 @@ async function gen(override){
   if(chObj&&chObj.negative)fn=(fn.trim()?fn.trim()+', ':'')+chObj.negative;
   if(stObj&&stObj.prompt)fp=(fp.trim()?fp.trim()+', ':'')+stObj.prompt;
   if(stObj&&stObj.negative)fn=(fn.trim()?fn.trim()+', ':'')+stObj.negative;
-  const body=Object.assign({prompt:fp,negative:fn,width:w,height:h,steps:+st.value,cfg:+cfg.value,seed:+sd.value,eco:+eco.value,sampler_name:smp.value,upscale:+ups.value},override||{});
+  const bcnt=Math.max(1,Math.min(20,parseInt(bc.value,10)||1));
+  const body=Object.assign({prompt:fp,negative:fn,width:w,height:h,steps:+st.value,cfg:+cfg.value,seed:+sd.value,batch_count:bcnt,eco:+eco.value,sampler_name:smp.value,upscale:+ups.value},override||{});
   const r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!r.ok)toast('PS4 is busy — wait or cancel current job');
   else{showTab('studio');poll();}
 }
 async function cancel(){await fetch('/cancel',{method:'POST'});toast('Cancelling...');}
-function recreateLatest(){sd.value=0;gen({seed:0});}
+function recreateLatest(){sd.value=0;gen({seed:0,batch_count:1});}
 function findLatestGalIdx(){
   if(!galItems.length)return -1;
   const lid=lastStatus&&lastStatus.last_gallery_id;

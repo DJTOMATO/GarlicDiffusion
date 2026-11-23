@@ -181,6 +181,9 @@ static void sm_dd_clamp(void) {
     if (sm_dd_top < 0) sm_dd_top = 0;
 }
 
+static const uint32_t BATCH_LIST[] = {1, 2, 3, 4, 5, 8, 10, 15, 20};
+static const int BATCH_COUNT = (int)(sizeof(BATCH_LIST) / sizeof(BATCH_LIST[0]));
+
 static void sm_dd_item_label(void* ctx, int row, int i, char* out, size_t cap) {
     (void)ctx;
     switch (row) {
@@ -219,6 +222,12 @@ static void sm_dd_item_label(void* ctx, int row, int i, char* out, size_t cap) {
             else snprintf(out, cap, "Lock seed 42");
         } else {
             snprintf(out, cap, "Enter custom seed number...");
+        }
+        break;
+    case ROW_BATCH:
+        if (i >= 0 && i < BATCH_COUNT) {
+            if (BATCH_LIST[i] == 1) snprintf(out, cap, "1 image  ·  single");
+            else snprintf(out, cap, "%u images  ·  random seed each", BATCH_LIST[i]);
         }
         break;
     default:
@@ -515,11 +524,13 @@ static void draw_ui(void) {
     {
         char neg_buf[512];
         int smp_v = 0, ready_v = 0;
+        uint32_t batch_v = 1;
         uint64_t seed_v = 0;
         http_srv_lock();
         snprintf(neg_buf, sizeof(neg_buf), "%s", g_job.negative);
         smp_v = g_job.sampler;
         seed_v = g_job.seed;
+        batch_v = g_job.batch_count ? g_job.batch_count : 1u;
         ready_v = g_st.ready;
         http_srv_unlock();
 
@@ -545,6 +556,7 @@ static void draw_ui(void) {
         sv.neg = neg_buf;
         sv.w = w; sv.h = h; sv.steps = steps; sv.cfg = cfg;
         sv.sampler = smp_v; sv.upscale = ups; sv.eco = eco;
+        sv.batch = batch_v;
         sv.seed = seed_v; sv.last_seed = sm_last_seed;
         sv.last_sec = lsec; sv.last_tf = tf;
         sv.preview = preview_rgb; sv.pw = preview_w; sv.ph = preview_h;
@@ -563,7 +575,11 @@ static void on_progress(void* user, float frac, const char* msg) {
     (void)user;
     http_srv_lock();
     g_st.progress = frac;
-    snprintf(g_st.stage, sizeof(g_st.stage), "%s", msg);
+    if (g_st.batch_total > 1) {
+        snprintf(g_st.stage, sizeof(g_st.stage), "[%u/%u] %s", g_st.batch_cur, g_st.batch_total, msg);
+    } else {
+        snprintf(g_st.stage, sizeof(g_st.stage), "%s", msg);
+    }
     http_srv_unlock();
     // Poll Circle button for cancel while generating
     OrbisPadData pd;
@@ -768,6 +784,7 @@ int main(void) {
     g_job.steps = 20;
     g_job.cfg = 7.0f;
     g_job.seed = 0;
+    g_job.batch_count = 1;
     g_job.eco_mode = 2; // Default: Quiet (~18 CUs checkerboard + breathers, cool & safe!)
     snprintf(g_st.stage, sizeof(g_st.stage), "Starting HTTP server & loading SDXL weights...");
 
@@ -1135,6 +1152,11 @@ int main(void) {
                         }
                     }
                     break;
+                case ROW_BATCH:
+                    if (sel >= 0 && sel < BATCH_COUNT) {
+                        http_srv_lock(); g_job.batch_count = BATCH_LIST[sel]; http_srv_unlock();
+                    }
+                    break;
                 }
                 ui_dirty = 1;
             }
@@ -1258,6 +1280,16 @@ int main(void) {
                     else g_job.seed = 0;
                     http_srv_unlock();
                     break;
+                case ROW_BATCH:
+                    http_srv_lock();
+                    {
+                        int nb = (int)(g_job.batch_count ? g_job.batch_count : 1u) + dir;
+                        if (nb < 1) nb = 20;
+                        if (nb > 20) nb = 1;
+                        g_job.batch_count = (uint32_t)nb;
+                    }
+                    http_srv_unlock();
+                    break;
                 }
                 ui_dirty = 1;
             } else if (pressed & ORBIS_PAD_BUTTON_CROSS) {
@@ -1358,6 +1390,21 @@ int main(void) {
                     sm_dd_row = ROW_SEED;
                     sm_dd_n = 3;
                     http_srv_lock(); sm_dd_cur = g_job.seed ? 1 : 0; http_srv_unlock();
+                    sm_dd_sel = sm_dd_cur;
+                    sm_dd_top = 0; sm_dd_clamp();
+                    sm_dd_open = 1;
+                    break;
+                case ROW_BATCH:
+                    sm_dd_row = ROW_BATCH;
+                    sm_dd_n = BATCH_COUNT;
+                    {
+                        uint32_t cur_b = 1;
+                        http_srv_lock(); cur_b = g_job.batch_count ? g_job.batch_count : 1u; http_srv_unlock();
+                        sm_dd_cur = 0;
+                        for (int i = 0; i < BATCH_COUNT; i++) {
+                            if (BATCH_LIST[i] == cur_b) { sm_dd_cur = i; break; }
+                        }
+                    }
                     sm_dd_sel = sm_dd_cur;
                     sm_dd_top = 0; sm_dd_clamp();
                     sm_dd_open = 1;
@@ -1595,94 +1642,121 @@ int main(void) {
             }
             uint32_t rsteps = run_job.steps < 1u ? 20u : (run_job.steps > 64u ? 64u : run_job.steps);
             float rcfg = run_job.cfg <= 0.0f ? 7.0f : run_job.cfg;
-            uint64_t seed = run_job.seed ? run_job.seed : (sceKernelReadTsc() & 0xFFFFFFFFull);
-            sm_last_seed = seed;
-            SdxlParams p = {run_job.prompt, run_job.negative, rw, rh, rsteps, rcfg, seed, run_job.eco_mode, run_job.sampler};
-            uint8_t* rgb = (uint8_t*)malloc((size_t)p.width * p.height * 3);
-            static const char* SMP_LOG2[4] = {"EulerA", "Euler", "LCM", "DPM2MKarras"};
-            glog("gen start %s %ux%u steps=%u cfg=%.1f %s %s seed=%llu",
-                 eng.is_sd15 ? "SD1.5" : "SDXL", p.width, p.height, p.steps, (double)p.cfg_scale,
-                 SMP_LOG2[(p.sampler >= 0 && p.sampler <= 3) ? p.sampler : 0], sdxl_eco_name_ex(p.eco_mode, eng.neo), (unsigned long long)seed);
-            int rc = rgb ? sdxl_generate(&eng, &p, rgb, on_progress, on_cancel, NULL) : -1;
-            uint32_t out_w = p.width, out_h = p.height;
-            if (rc == 0 && run_job.upscale > 0 && eng.has_upscaler) {
-                uint8_t* up_rgb = NULL;
-                uint32_t uw = 0, uh = 0;
-                int ur = sdxl_upscale_rgb(&eng, rgb, p.width, p.height, &up_rgb, &uw, &uh,
-                                          run_job.upscale, p.eco_mode, on_progress, on_cancel, NULL);
-                if (ur == 0 && up_rgb) {
-                    free(rgb);
-                    rgb = up_rgb;
-                    out_w = uw;
-                    out_h = uh;
-                    eng.last_gen_sec += eng.stats.upscale_ms / 1000.0;
-                } else if (ur == 1) {
-                    rc = 1;
-                }
-            }
-            if (rc == 0) {
-                static const char* SMP_META[4] = {"Euler a", "Euler", "LCM", "DPM++ 2M Karras"};
-                const char* smp_str = SMP_META[(p.sampler >= 0 && p.sampler <= 3) ? p.sampler : 0];
-                int did_up = (out_w != p.width || out_h != p.height) ? run_job.upscale : 0;
-                char pmeta[2048];
-                format_a1111_params(pmeta, sizeof(pmeta), p.prompt, p.negative, p.steps, smp_str,
-                                    p.cfg_scale, seed, out_w, out_h, eng.model_name, did_up);
-                size_t png_sz = 0;
-                uint8_t* png = png_encode_rgb_meta(rgb, out_w, out_h, pmeta, &png_sz);
-                // Auto-save every generated image + metadata into persistent Gallery!
-                char saved_id[64] = {0};
-                if (png && png_sz) {
-                    GalleryItem gm;
-                    memset(&gm, 0, sizeof(gm));
-                    snprintf(gm.model, sizeof(gm.model), "%s", eng.model_name);
-                    snprintf(gm.prompt, sizeof(gm.prompt), "%s", p.prompt);
-                    snprintf(gm.negative, sizeof(gm.negative), "%s", p.negative);
-                    snprintf(gm.sampler, sizeof(gm.sampler), "%s", smp_str);
-                    gm.width = out_w; gm.height = out_h; gm.steps = p.steps;
-                    gm.cfg = p.cfg_scale; gm.seed = seed; gm.eco = p.eco_mode;
-                    gm.upscaled = did_up;
-                    gm.sec = eng.last_gen_sec;
-                    if (gallery_save(png, png_sz, &gm, saved_id, sizeof(saved_id)) == 0) {
-                        glog("gallery auto-saved %s (%ux%u)", saved_id, out_w, out_h);
+            uint32_t btotal = run_job.batch_count;
+            if (btotal < 1u) btotal = 1u;
+            if (btotal > 20u) btotal = 20u;
+            for (uint32_t bi = 0; bi < btotal; bi++) {
+                http_srv_lock();
+                int cancelled = g_job.cancel_req;
+                g_st.batch_cur = bi + 1u;
+                g_st.batch_total = btotal;
+                g_st.progress = 0.0f;
+                http_srv_unlock();
+                if (cancelled) break;
+
+                uint64_t seed = (bi == 0 && run_job.seed)
+                    ? run_job.seed
+                    : ((sceKernelReadTsc() ^ ((uint64_t)(bi + 1u) * 2654435761ull)) & 0xFFFFFFFFull);
+                if (seed == 0) seed = 1;
+                sm_last_seed = seed;
+                SdxlParams p = {run_job.prompt, run_job.negative, rw, rh, rsteps, rcfg, seed, run_job.eco_mode, run_job.sampler};
+                uint8_t* rgb = (uint8_t*)malloc((size_t)p.width * p.height * 3);
+                static const char* SMP_LOG2[4] = {"EulerA", "Euler", "LCM", "DPM2MKarras"};
+                glog("gen start [%u/%u] %s %ux%u steps=%u cfg=%.1f %s %s seed=%llu",
+                     bi + 1u, btotal, eng.is_sd15 ? "SD1.5" : "SDXL", p.width, p.height, p.steps, (double)p.cfg_scale,
+                     SMP_LOG2[(p.sampler >= 0 && p.sampler <= 3) ? p.sampler : 0], sdxl_eco_name_ex(p.eco_mode, eng.neo), (unsigned long long)seed);
+                int rc = rgb ? sdxl_generate(&eng, &p, rgb, on_progress, on_cancel, NULL) : -1;
+                uint32_t out_w = p.width, out_h = p.height;
+                if (rc == 0 && run_job.upscale > 0 && eng.has_upscaler) {
+                    uint8_t* up_rgb = NULL;
+                    uint32_t uw = 0, uh = 0;
+                    int ur = sdxl_upscale_rgb(&eng, rgb, p.width, p.height, &up_rgb, &uw, &uh,
+                                              run_job.upscale, p.eco_mode, on_progress, on_cancel, NULL);
+                    if (ur == 0 && up_rgb) {
+                        free(rgb);
+                        rgb = up_rgb;
+                        out_w = uw;
+                        out_h = uh;
+                        eng.last_gen_sec += eng.stats.upscale_ms / 1000.0;
+                    } else if (ur == 1) {
+                        rc = 1;
                     }
                 }
-                free(preview_rgb);
-                preview_rgb = rgb;
-                preview_w = out_w;
-                preview_h = out_h;
-                http_srv_lock();
-                free(g_st.png_data);
-                g_st.png_data = png;
-                g_st.png_size = png_sz;
-                g_st.width = out_w;
-                g_st.height = out_h;
-                g_st.steps = p.steps;
-                g_st.cfg = p.cfg_scale;
-                g_st.seed = seed;
-                g_st.eco_mode = p.eco_mode;
-                g_st.last_sec = eng.last_gen_sec;
-                g_st.unet_gpu_sec = eng.stats.unet_gpu_ms / 1000.0;
-                g_st.vae_sec = eng.stats.vae_ms / 1000.0;
-                g_st.upscale_sec = eng.stats.upscale_ms / 1000.0;
-                g_st.cooldown_sec = eng.stats.cooldown_ms / 1000.0;
-                g_st.eff_tflops = eng.stats.effective_tflops;
-                g_st.temp_peak_c = eng.stats.temp_peak_c;
-                g_st.image_gen_id++;
-                if (saved_id[0]) snprintf(g_st.last_gallery_id, sizeof(g_st.last_gallery_id), "%s", saved_id);
-                snprintf(g_st.stage, sizeof(g_st.stage), "Done %ux%u in %.1fs (%.2f TF | %s)",
-                         out_w, out_h, eng.last_gen_sec, eng.stats.effective_tflops, sdxl_eco_name_ex(p.eco_mode, eng.neo));
-                g_st.busy = 0;
-                http_srv_unlock();
-                glog("gen done %ux%u in %.1fs (%zu bytes PNG)", out_w, out_h, eng.last_gen_sec, png_sz);
-            } else {
-                free(rgb);
-                http_srv_lock();
-                if (rc == 1) snprintf(g_st.stage, sizeof(g_st.stage), "Cancelled");
-                else snprintf(g_st.error, sizeof(g_st.error), "%s", eng.error[0] ? eng.error : "generation error");
-                g_st.busy = 0;
-                http_srv_unlock();
-                glog("gen ended rc=%d (%s)", rc, eng.error);
+                if (rc == 0) {
+                    static const char* SMP_META[4] = {"Euler a", "Euler", "LCM", "DPM++ 2M Karras"};
+                    const char* smp_str = SMP_META[(p.sampler >= 0 && p.sampler <= 3) ? p.sampler : 0];
+                    int did_up = (out_w != p.width || out_h != p.height) ? run_job.upscale : 0;
+                    char pmeta[2048];
+                    format_a1111_params(pmeta, sizeof(pmeta), p.prompt, p.negative, p.steps, smp_str,
+                                        p.cfg_scale, seed, out_w, out_h, eng.model_name, did_up);
+                    size_t png_sz = 0;
+                    uint8_t* png = png_encode_rgb_meta(rgb, out_w, out_h, pmeta, &png_sz);
+                    char saved_id[64] = {0};
+                    if (png && png_sz) {
+                        GalleryItem gm;
+                        memset(&gm, 0, sizeof(gm));
+                        snprintf(gm.model, sizeof(gm.model), "%s", eng.model_name);
+                        snprintf(gm.prompt, sizeof(gm.prompt), "%s", p.prompt);
+                        snprintf(gm.negative, sizeof(gm.negative), "%s", p.negative);
+                        snprintf(gm.sampler, sizeof(gm.sampler), "%s", smp_str);
+                        gm.width = out_w; gm.height = out_h; gm.steps = p.steps;
+                        gm.cfg = p.cfg_scale; gm.seed = seed; gm.eco = p.eco_mode;
+                        gm.upscaled = did_up;
+                        gm.sec = eng.last_gen_sec;
+                        if (gallery_save(png, png_sz, &gm, saved_id, sizeof(saved_id)) == 0) {
+                            glog("gallery auto-saved %s (%ux%u)", saved_id, out_w, out_h);
+                        }
+                    }
+                    free(preview_rgb);
+                    preview_rgb = rgb;
+                    preview_w = out_w;
+                    preview_h = out_h;
+                    http_srv_lock();
+                    free(g_st.png_data);
+                    g_st.png_data = png;
+                    g_st.png_size = png_sz;
+                    g_st.width = out_w;
+                    g_st.height = out_h;
+                    g_st.steps = p.steps;
+                    g_st.cfg = p.cfg_scale;
+                    g_st.seed = seed;
+                    g_st.eco_mode = p.eco_mode;
+                    g_st.last_sec = eng.last_gen_sec;
+                    g_st.unet_gpu_sec = eng.stats.unet_gpu_ms / 1000.0;
+                    g_st.vae_sec = eng.stats.vae_ms / 1000.0;
+                    g_st.upscale_sec = eng.stats.upscale_ms / 1000.0;
+                    g_st.cooldown_sec = eng.stats.cooldown_ms / 1000.0;
+                    g_st.eff_tflops = eng.stats.effective_tflops;
+                    g_st.temp_peak_c = eng.stats.temp_peak_c;
+                    g_st.image_gen_id++;
+                    if (saved_id[0]) snprintf(g_st.last_gallery_id, sizeof(g_st.last_gallery_id), "%s", saved_id);
+                    if (btotal > 1u) {
+                        snprintf(g_st.stage, sizeof(g_st.stage), "Done [%u/%u] %ux%u in %.1fs (%.2f TF | %s)",
+                                 bi + 1u, btotal, out_w, out_h, eng.last_gen_sec, eng.stats.effective_tflops,
+                                 sdxl_eco_name_ex(p.eco_mode, eng.neo));
+                    } else {
+                        snprintf(g_st.stage, sizeof(g_st.stage), "Done %ux%u in %.1fs (%.2f TF | %s)",
+                                 out_w, out_h, eng.last_gen_sec, eng.stats.effective_tflops,
+                                 sdxl_eco_name_ex(p.eco_mode, eng.neo));
+                    }
+                    http_srv_unlock();
+                    glog("gen done [%u/%u] %ux%u in %.1fs (%zu bytes PNG)", bi + 1u, btotal, out_w, out_h, eng.last_gen_sec, png_sz);
+                    draw_ui();
+                } else {
+                    free(rgb);
+                    http_srv_lock();
+                    if (rc == 1) snprintf(g_st.stage, sizeof(g_st.stage), btotal > 1u ? "Batch cancelled at [%u/%u]" : "Cancelled", bi + 1u, btotal);
+                    else snprintf(g_st.error, sizeof(g_st.error), "%s", eng.error[0] ? eng.error : "generation error");
+                    http_srv_unlock();
+                    glog("gen ended rc=%d (%s)", rc, eng.error);
+                    break;
+                }
             }
+            http_srv_lock();
+            g_st.batch_cur = 0;
+            g_st.batch_total = 0;
+            g_st.busy = 0;
+            http_srv_unlock();
             ui_dirty = 1;
         }
 

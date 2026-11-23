@@ -195,6 +195,14 @@ static void apply_job_json(const char* body, DiffJob* j) {
     if (json_get_double(body, "upscale", &v)) j->upscale = (v >= 0 && v <= 3) ? (int)v : 0;
     else if (strstr(body, "\"enable_hr\":true") || strstr(body, "\"enable_hr\": true")) j->upscale = 1;
     else if (strstr(body, "\"enable_hr\":false") || strstr(body, "\"enable_hr\": false")) j->upscale = 0;
+    if (json_get_double(body, "batch_count", &v) || json_get_double(body, "batch", &v) || json_get_double(body, "n_iter", &v)) {
+        int bc = (int)v;
+        if (bc < 1) bc = 1;
+        if (bc > 20) bc = 20;
+        j->batch_count = (uint32_t)bc;
+    } else {
+        j->batch_count = 1;
+    }
 }
 
 static int ci_contains(const char* hay, const char* needle) {
@@ -921,7 +929,7 @@ static void handle_client(int fd) {
                          "\"last_sec\":%.2f,\"unet_gpu_sec\":%.2f,\"vae_sec\":%.2f,\"upscale_sec\":%.2f,\"cooldown_sec\":%.2f,"
                          "\"eff_tflops\":%.3f,\"bench_gemm_tflops\":%.3f,\"bench_attn_ms\":%.2f,"
                          "\"bench_mode_tf\":[%.3f,%.3f,%.3f,%.3f],"
-                         "\"has_image\":%s,\"image_gen_id\":%u,\"last_gallery_id\":\"%s\"}",
+                         "\"has_image\":%s,\"image_gen_id\":%u,\"batch_cur\":%u,\"batch_total\":%u,\"last_gallery_id\":\"%s\"}",
                          g_st->gpu_ready ? "true" : "false", g_st->ready ? "true" : "false", g_st->busy ? "true" : "false",
                          g_st->neo, g_st->is_sd15 ? "sd15" : "sdxl", g_st->has_upscaler ? "true" : "false",
                          g_st->temp_c, g_st->temp_peak_c, g_st->eco_mode,
@@ -935,7 +943,8 @@ static void handle_client(int fd) {
                          g_st->eff_tflops, g_st->bench_gemm_tflops, g_st->bench_attn_ms,
                          g_st->bench_mode_tf[0], g_st->bench_mode_tf[1],
                          g_st->bench_mode_tf[2], g_st->bench_mode_tf[3],
-                         (g_st->png_data && g_st->png_size) ? "true" : "false", g_st->image_gen_id, g_st->last_gallery_id);
+                         (g_st->png_data && g_st->png_size) ? "true" : "false", g_st->image_gen_id,
+                         g_st->batch_cur, g_st->batch_total, g_st->last_gallery_id);
         http_srv_unlock();
         send_resp(fd, 200, "OK", "application/json", out, (size_t)n);
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/image.png") == 0) {
