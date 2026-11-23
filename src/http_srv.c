@@ -39,6 +39,7 @@ typedef struct {
 } SockAddrIn;
 
 static OrbisPthreadMutex srv_mu;
+static OrbisPthreadMutex sync_gen_mu;
 static OrbisPthread srv_th;
 static DiffJob* g_job;
 static DiffStatus* g_st;
@@ -193,36 +194,228 @@ static void apply_job_json(const char* body, DiffJob* j) {
     if (json_get_double(body, "eco", &v)) j->eco_mode = (v >= 0 && v <= 3) ? (int)v : 2;
     if (json_get_double(body, "upscale", &v)) j->upscale = (v >= 0 && v <= 3) ? (int)v : 0;
     else if (strstr(body, "\"enable_hr\":true") || strstr(body, "\"enable_hr\": true")) j->upscale = 1;
+    else if (strstr(body, "\"enable_hr\":false") || strstr(body, "\"enable_hr\": false")) j->upscale = 0;
 }
 
-static int run_sync_generation(const char* body, uint8_t** out_png, size_t* out_sz,
-                               uint32_t* out_id, DiffStatus* snap, char* out_prompt, size_t pr_max,
-                               char* out_neg, size_t ng_max, int* out_sampler) {
-    // Support A1111 override_settings.sd_model_checkpoint auto-switch before generating
-    char req_mdl[64] = {0};
-    if (json_get_str(body, "sd_model_checkpoint", req_mdl, sizeof(req_mdl)) && req_mdl[0]) {
-        int need_sw = 0;
-        http_srv_lock();
-        if (g_st->gpu_ready && !g_st->busy && !g_job->pending && !g_job->switch_req &&
-            strcmp(req_mdl, g_st->model) != 0) {
-            for (int i = 0; i < g_st->num_models; i++) {
-                if (strcmp(g_st->models[i], req_mdl) == 0) {
-                    snprintf(g_job->switch_model, sizeof(g_job->switch_model), "%s", req_mdl);
-                    g_job->switch_req = 1;
-                    need_sw = 1;
+static int ci_contains(const char* hay, const char* needle) {
+    if (!hay || !needle || !needle[0]) return 0;
+    size_t nl = strlen(needle);
+    for (; *hay; hay++) {
+        size_t i = 0;
+        while (i < nl && hay[i] && tolower((unsigned char)hay[i]) == tolower((unsigned char)needle[i])) i++;
+        if (i == nl) return 1;
+    }
+    return 0;
+}
+
+static int ci_eq(const char* a, const char* b) {
+    if (!a || !b) return 0;
+    while (*a && *b) {
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
+        a++; b++;
+    }
+    return *a == 0 && *b == 0;
+}
+
+static void clean_model_name(const char* in, char* out, size_t max) {
+    if (!in || !max) { if (out && max) out[0] = 0; return; }
+    while (*in == ' ' || *in == '\t') in++;
+    snprintf(out, max, "%s", in);
+    // Strip A1111 hash suffix " [abcdef1234]"
+    char* br = strstr(out, " [");
+    if (br) *br = 0;
+    // Strip common extensions if client appended them
+    size_t n = strlen(out);
+    while (n > 0 && (out[n - 1] == ' ' || out[n - 1] == '\t')) out[--n] = 0;
+    static const char* EXTS[] = {".safetensors", ".ckpt", ".psd1"};
+    for (int i = 0; i < 3; i++) {
+        size_t el = strlen(EXTS[i]);
+        if (n > el && ci_eq(out + n - el, EXTS[i])) {
+            out[n - el] = 0;
+            break;
+        }
+    }
+}
+
+static int match_installed_model(const char* req_raw, char* matched, size_t max) {
+    char clean[64] = {0};
+    clean_model_name(req_raw, clean, sizeof(clean));
+    if (!clean[0] || strchr(clean, '/') || strchr(clean, '\\') || strstr(clean, "..")) return 0;
+    for (int i = 0; i < g_st->num_models; i++) {
+        if (strcmp(g_st->models[i], clean) == 0 || ci_eq(g_st->models[i], clean)) {
+            snprintf(matched, max, "%s", g_st->models[i]);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void merge_style_prompt(DiffJob* j, const char* sp, const char* sn) {
+    if (sp && sp[0]) {
+        // Avoid duplicating if the client already expanded the style text into prompt
+        char probe[32];
+        snprintf(probe, sizeof(probe), "%.24s", sp);
+        if (!strstr(j->prompt, probe)) {
+            const char* ph = strstr(sp, "{prompt}");
+            char merged[1024];
+            if (ph) {
+                size_t pre = (size_t)(ph - sp);
+                if (pre > 400) pre = 400;
+                snprintf(merged, sizeof(merged), "%.*s%s%s", (int)pre, sp, j->prompt, ph + 8);
+            } else if (j->prompt[0]) {
+                snprintf(merged, sizeof(merged), "%s, %s", j->prompt, sp);
+            } else {
+                snprintf(merged, sizeof(merged), "%s", sp);
+            }
+            snprintf(j->prompt, sizeof(j->prompt), "%s", merged);
+        }
+    }
+    if (sn && sn[0]) {
+        char probe[32];
+        snprintf(probe, sizeof(probe), "%.24s", sn);
+        if (!strstr(j->negative, probe)) {
+            if (j->negative[0]) {
+                char merged[512];
+                snprintf(merged, sizeof(merged), "%s, %s", j->negative, sn);
+                snprintf(j->negative, sizeof(j->negative), "%s", merged);
+            } else {
+                snprintf(j->negative, sizeof(j->negative), "%s", sn);
+            }
+        }
+    }
+}
+
+static void apply_a1111_styles(const char* body, DiffJob* j) {
+    const char* p = strstr(body, "\"styles\"");
+    if (!p) return;
+    p += 8;
+    while (*p && *p != '[' && *p != '}') p++;
+    if (*p != '[') return;
+    p++;
+    char names[4][64];
+    int n_names = 0;
+    while (*p && *p != ']' && n_names < 4) {
+        while (*p && (*p == ' ' || *p == ',' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+        if (*p != '"') break;
+        p++;
+        size_t k = 0;
+        while (*p && *p != '"' && k + 1 < sizeof(names[0])) {
+            if (*p == '\\' && p[1]) { p++; names[n_names][k++] = *p++; }
+            else names[n_names][k++] = *p++;
+        }
+        names[n_names][k] = 0;
+        if (*p == '"') p++;
+        if (k > 0 && !ci_eq(names[n_names], "None")) n_names++;
+    }
+    if (n_names <= 0) return;
+
+    StyleItem* styles = (StyleItem*)malloc(sizeof(StyleItem) * STYLES_MAX_ITEMS);
+    UserPreset* presets = (UserPreset*)malloc(sizeof(UserPreset) * PRESETS_MAX_ITEMS);
+    int ns = styles ? styles_list(styles, STYLES_MAX_ITEMS) : 0;
+    int np = presets ? presets_list(presets, PRESETS_MAX_ITEMS) : 0;
+    for (int s = 0; s < n_names; s++) {
+        int found = 0;
+        for (int i = 0; i < ns; i++) {
+            if (ci_eq(styles[i].name, names[s]) || ci_eq(styles[i].id, names[s])) {
+                merge_style_prompt(j, styles[i].prompt, styles[i].negative);
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            for (int i = 0; i < np; i++) {
+                if (ci_eq(presets[i].name, names[s]) || ci_eq(presets[i].id, names[s])) {
+                    merge_style_prompt(j, presets[i].prompt, presets[i].negative);
                     break;
                 }
             }
         }
+    }
+    free(styles);
+    free(presets);
+}
+
+static int wait_engine_idle(int max_ticks_200ms) {
+    for (int w = 0; w < max_ticks_200ms; w++) {
+        http_srv_lock();
+        int idle = g_st->gpu_ready && !g_st->busy && !g_job->pending && !g_job->switch_req && !g_job->gal_op;
         http_srv_unlock();
-        if (need_sw) {
-            for (int w = 0; w < 200; w++) {
-                sceKernelUsleep(200000);
-                http_srv_lock();
-                int done = !g_job->switch_req && !g_st->busy;
-                http_srv_unlock();
-                if (done) break;
-            }
+        if (idle) return 1;
+        sceKernelUsleep(200000);
+    }
+    return 0;
+}
+
+static int switch_model_sync(const char* req_raw) {
+    if (!req_raw || !req_raw[0]) return 0;
+    if (!wait_engine_idle(300)) return -1;
+    int need_sw = 0;
+    char target[64] = {0};
+    http_srv_lock();
+    if (match_installed_model(req_raw, target, sizeof(target)) && strcmp(target, g_st->model) != 0) {
+        snprintf(g_job->switch_model, sizeof(g_job->switch_model), "%s", target);
+        g_job->switch_req = 1;
+        need_sw = 1;
+    }
+    http_srv_unlock();
+    if (need_sw) {
+        glog("a1111: switching model to '%s' (waiting for reload)...", target);
+        // Wait up to 60s for switch_req to be picked up & completed
+        for (int w = 0; w < 300; w++) {
+            sceKernelUsleep(200000);
+            http_srv_lock();
+            int done = !g_job->switch_req && !g_st->busy;
+            http_srv_unlock();
+            if (done) break;
+        }
+    }
+    return 0;
+}
+
+static int run_sync_generation(const char* body, uint8_t** out_png, size_t* out_sz,
+                               uint32_t* out_id, DiffStatus* snap, char* out_prompt, size_t pr_max,
+                               char* out_neg, size_t ng_max, int* out_sampler, int a1111_adapt) {
+    // Serialize concurrent A1111 / OpenAI requests in FIFO order instead of failing with 503
+    scePthreadMutexLock(&sync_gen_mu);
+
+    // Wait for any active TV/Web/prior job or model switch to finish (up to 10 min)
+    if (!wait_engine_idle(3000)) {
+        scePthreadMutexUnlock(&sync_gen_mu);
+        return -2;
+    }
+
+    // Support A1111 override_settings.sd_model_checkpoint auto-switch before generating
+    char req_mdl[128] = {0};
+    if (json_get_str(body, "sd_model_checkpoint", req_mdl, sizeof(req_mdl)) && req_mdl[0]) {
+        switch_model_sync(req_mdl);
+    }
+
+    // Snapshot current job defaults + model name, then parse JSON & styles outside srv_mu (disk I/O safe)
+    DiffJob tmp;
+    char active_mdl[64] = {0};
+    http_srv_lock();
+    tmp = *g_job;
+    snprintf(active_mdl, sizeof(active_mdl), "%s", g_st->model);
+    http_srv_unlock();
+
+    apply_job_json(body, &tmp);
+    apply_a1111_styles(body, &tmp);
+    // Protect distilled models from non-distilled A1111 bot defaults (e.g. 24 steps / CFG 5.0 / Euler a on DMD2)
+    if (a1111_adapt && active_mdl[0]) {
+        if (ci_contains(active_mdl, "dmd2") && (tmp.steps > 10 || tmp.cfg > 2.2f)) {
+            uint32_t os = tmp.steps; float oc = tmp.cfg;
+            if (tmp.steps > 10) tmp.steps = 6;
+            if (tmp.cfg > 2.2f) tmp.cfg = 1.4f;
+            tmp.sampler = 2; // LCM
+            glog("a1111: adapted DMD2 '%s' (%u stp / CFG %.1f -> %u stp / CFG %.1f / LCM)",
+                 active_mdl, os, (double)oc, tmp.steps, (double)tmp.cfg);
+        } else if (ci_contains(active_mdl, "8step") && (tmp.steps > 12 || tmp.cfg > 5.0f)) {
+            uint32_t os = tmp.steps; float oc = tmp.cfg;
+            if (tmp.steps > 12) tmp.steps = 8;
+            if (tmp.cfg > 5.0f) tmp.cfg = 3.5f;
+            tmp.sampler = 1; // Euler
+            glog("a1111: adapted 8-step '%s' (%u stp / CFG %.1f -> %u stp / CFG %.1f / Euler)",
+                 active_mdl, os, (double)oc, tmp.steps, (double)tmp.cfg);
         }
     }
 
@@ -231,7 +424,7 @@ static int run_sync_generation(const char* body, uint8_t** out_png, size_t* out_
     int ok = g_st->ready && !g_st->busy && !g_job->pending && !g_job->switch_req && !g_job->gal_op;
     if (ok) {
         prev_id = g_st->image_gen_id;
-        apply_job_json(body, g_job);
+        *g_job = tmp;
         if (out_prompt && pr_max) snprintf(out_prompt, pr_max, "%s", g_job->prompt);
         if (out_neg && ng_max) snprintf(out_neg, ng_max, "%s", g_job->negative);
         if (out_sampler) *out_sampler = g_job->sampler;
@@ -239,7 +432,10 @@ static int run_sync_generation(const char* body, uint8_t** out_png, size_t* out_
         g_job->pending = 1;
     }
     http_srv_unlock();
-    if (!ok) return -2; // busy
+    if (!ok) {
+        scePthreadMutexUnlock(&sync_gen_mu);
+        return -2; // busy / not ready
+    }
 
     for (;;) {
         sceKernelUsleep(200000);
@@ -261,6 +457,7 @@ static int run_sync_generation(const char* body, uint8_t** out_png, size_t* out_
         if (copy) memcpy(copy, g_st->png_data, sz);
     }
     http_srv_unlock();
+    scePthreadMutexUnlock(&sync_gen_mu);
     if (!copy) return -1;
     *out_png = copy;
     *out_sz = sz;
@@ -882,15 +1079,11 @@ static void handle_client(int fd) {
         int n = snprintf(out, sizeof(out), "{\"sd_model_checkpoint\":\"%s\",\"sd_vae\":\"Automatic\"}", mdl_esc);
         send_resp(fd, 200, "OK", "application/json", out, (size_t)n);
     } else if (strcmp(method, "POST") == 0 && strcmp(path, "/sdapi/v1/options") == 0) {
-        char req_m[64] = {0};
-        if (json_get_str(body, "sd_model_checkpoint", req_m, sizeof(req_m)) && req_m[0] &&
-            !strchr(req_m, '/') && !strchr(req_m, '\\') && !strstr(req_m, "..")) {
-            http_srv_lock();
-            if (g_st->gpu_ready && !g_st->busy && !g_job->pending && strcmp(req_m, g_st->model) != 0) {
-                snprintf(g_job->switch_model, sizeof(g_job->switch_model), "%s", req_m);
-                g_job->switch_req = 1;
-            }
-            http_srv_unlock();
+        char req_m[128] = {0};
+        if (json_get_str(body, "sd_model_checkpoint", req_m, sizeof(req_m)) && req_m[0]) {
+            scePthreadMutexLock(&sync_gen_mu);
+            switch_model_sync(req_m);
+            scePthreadMutexUnlock(&sync_gen_mu);
         }
         send_resp(fd, 200, "OK", "application/json", "{}", 2);
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/sdapi/v1/progress") == 0) {
@@ -918,7 +1111,7 @@ static void handle_client(int fd) {
         DiffStatus snap;
         char used_pr[1024] = {0}, used_ng[512] = {0};
         int used_smp = 0;
-        int rc = run_sync_generation(body, &copy, &sz, NULL, &snap, used_pr, sizeof(used_pr), used_ng, sizeof(used_ng), &used_smp);
+        int rc = run_sync_generation(body, &copy, &sz, NULL, &snap, used_pr, sizeof(used_pr), used_ng, sizeof(used_ng), &used_smp, 1);
         if (rc == -2) {
             send_resp(fd, 503, "Service Unavailable", "application/json", "{\"error\":\"busy\"}", 16);
             free(req);
@@ -977,7 +1170,7 @@ static void handle_client(int fd) {
         uint8_t* copy = NULL;
         size_t sz = 0;
         uint32_t new_id = 0;
-        int rc = run_sync_generation(body, &copy, &sz, &new_id, NULL, NULL, 0, NULL, 0, NULL);
+        int rc = run_sync_generation(body, &copy, &sz, &new_id, NULL, NULL, 0, NULL, 0, NULL, 1);
         if (rc == -2) {
             send_resp(fd, 503, "Service Unavailable", "application/json",
                       "{\"error\":{\"message\":\"busy\",\"type\":\"server_error\"}}", 54);
@@ -1052,7 +1245,7 @@ static void* srv_loop(void* arg) {
     a.len = sizeof(a);
     a.family = ORBIS_NET_AF_INET;
     a.port = sceNetHtons(DIFF_HTTP_PORT);
-    if (sceNetBind(l, (const OrbisNetSockaddr*)&a, sizeof(a)) || sceNetListen(l, 8)) {
+    if (sceNetBind(l, (const OrbisNetSockaddr*)&a, sizeof(a)) || sceNetListen(l, 16)) {
         glog("http: bind/listen failed on %d", DIFF_HTTP_PORT);
         sceNetSocketClose(l);
         return NULL;
@@ -1065,7 +1258,7 @@ static void* srv_loop(void* arg) {
         if (c < 0) { sceKernelUsleep(50000); continue; }
         sceNetSetsockopt(c, SOL_SOCKET_PS4, SO_NOSIGPIPE_PS4, &one, sizeof(one));
         http_srv_lock();
-        int can_spawn = (g_active_clients < 8);
+        int can_spawn = (g_active_clients < 16);
         if (can_spawn) g_active_clients++;
         http_srv_unlock();
         if (can_spawn) {
@@ -1092,6 +1285,7 @@ int http_srv_start(DiffJob* shared_job, DiffStatus* shared_status) {
     g_st = shared_status;
     load_web_ui();
     scePthreadMutexInit(&srv_mu, NULL, "gdiff_srv");
+    scePthreadMutexInit(&sync_gen_mu, NULL, "gdiff_sgen");
     if (sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET) < 0) return -1;
     if (sceNetInit() < 0) return -1;
     uint64_t act[20] = {1};
