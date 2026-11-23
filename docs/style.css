@@ -233,7 +233,7 @@ h3 { font-size: 17px; margin: 0 0 6px; color: #82c6ff; }
 .scard.wide img { aspect-ratio: 16 / 9; }
 .scard.sq img { aspect-ratio: 1 / 1; }
 .smeta { padding: 14px; font-size: 13px; flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
-.smeta b { color: #fff; display: block; margin-bottom: 4px; font-size: 14.5px; }
+.smeta > div > b { color: #fff; display: block; margin-bottom: 4px; font-size: 14.5px; }
 .smeta .subline { color: var(--muted); font-size: 12.5px; }
 
 /* Chips */
