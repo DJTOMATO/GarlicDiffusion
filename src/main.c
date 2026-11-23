@@ -192,7 +192,8 @@ static void sm_dd_item_label(void* ctx, int row, int i, char* out, size_t cap) {
         else snprintf(out, cap, "+ Download / Manage Models (Hugging Face)...");
         break;
     case ROW_PRESET:
-        if (i >= 0 && i < g_num_presets) snprintf(out, cap, "%s", g_presets[i].name);
+        if (i == 0) snprintf(out, cap, "+ Save Current Prompt as Preset...");
+        else if (i - 1 >= 0 && i - 1 < g_num_presets) snprintf(out, cap, "%s", g_presets[i - 1].name);
         break;
     case ROW_CHAR:
         if (i == 0) snprintf(out, cap, "Off (No Character Overlay)");
@@ -611,19 +612,35 @@ static int edit_text_osk(const wchar_t* title, char* target, size_t target_sz, i
     http_srv_lock();
     for (int i = 0; target[i] && i < 512; i++) buf[i] = (uint8_t)target[i];
     http_srv_unlock();
+
+    // Wait for Cross/Circle release so the button that opened the OSK doesn't leak into it
+    if (pad_fd >= 0) {
+        for (int w = 0; w < 25; w++) {
+            OrbisPadData pd;
+            if (scePadReadState(pad_fd, &pd) != 0 || !(pd.buttons & (ORBIS_PAD_BUTTON_CROSS | ORBIS_PAD_BUTTON_CIRCLE)))
+                break;
+            sceKernelUsleep(16000);
+        }
+    }
+
     OrbisImeDialogSetting s;
     memset(&s, 0, sizeof(s));
     s.userId = user_id;
     s.type = numeric_only ? ORBIS_TYPE_NUMBER : ORBIS_TYPE_DEFAULT;
-    s.enterLabel = ORBIS_BUTTON_LABEL_SEND;
+    s.enterLabel = ORBIS_BUTTON_LABEL_DEFAULT;
     s.maxTextLength = numeric_only ? 20 : 512;
     s.inputTextBuffer = buf;
     s.posx = SCREEN_W / 2;
     s.posy = SCREEN_H / 2;
     s.horizontalAlignment = ORBIS_H_CENTER;
     s.verticalAlignment = ORBIS_V_CENTER;
+    s.placeholder = numeric_only ? L"Enter number, then press R2 (Done)" : L"Type text, then press R2 (Done)";
     s.title = title;
-    if (sceImeDialogInit(&s, NULL) < 0) return 0;
+    int ir = sceImeDialogInit(&s, NULL);
+    if (ir < 0) {
+        glog("osk: sceImeDialogInit failed 0x%08x", (unsigned)ir);
+        return 0;
+    }
     int frames = 0, running = 0;
     for (;;) {
         OrbisDialogStatus st = sceImeDialogGetStatus();
@@ -636,6 +653,16 @@ static int edit_text_osk(const wchar_t* title, char* target, size_t target_sz, i
     memset(&res, 0, sizeof(res));
     sceImeDialogGetResult(&res);
     sceImeDialogTerm();
+
+    // Drain pad briefly after closing OSK so R2/X/O doesn't trigger Studio actions
+    if (pad_fd >= 0) {
+        for (int w = 0; w < 10; w++) {
+            OrbisPadData pd;
+            if (scePadReadState(pad_fd, &pd) != 0 || !pd.buttons) break;
+            sceKernelUsleep(16000);
+        }
+    }
+
     if (res.endstatus == ORBIS_DIALOG_OK) {
         http_srv_lock();
         int n = 0;
@@ -643,8 +670,10 @@ static int edit_text_osk(const wchar_t* title, char* target, size_t target_sz, i
             target[n++] = (buf[i] < 128) ? (char)buf[i] : ' ';
         target[n] = 0;
         http_srv_unlock();
+        glog("osk: saved %d chars", n);
         return 1;
     }
+    glog("osk: closed endstatus=%d", (int)res.endstatus);
     return 0;
 }
 
@@ -1086,8 +1115,35 @@ int main(void) {
                     }
                     break;
                 case ROW_PRESET:
-                    if (sel >= 0 && sel < g_num_presets) {
-                        preset_idx = sel;
+                    if (sel == 0) {
+                        char pname[64] = "";
+                        if (edit_text_osk(L"Save Preset Name", pname, sizeof(pname), 0) && pname[0]) {
+                            UserPreset np;
+                            memset(&np, 0, sizeof(np));
+                            snprintf(np.name, sizeof(np.name), "%s", pname);
+                            static const char* SMP_N4[4] = {"Euler a", "Euler", "LCM", "DPM++ 2M Karras"};
+                            http_srv_lock();
+                            snprintf(np.model, sizeof(np.model), "%s", g_st.model);
+                            snprintf(np.prompt, sizeof(np.prompt), "%s", g_job.prompt);
+                            snprintf(np.negative, sizeof(np.negative), "%s", g_job.negative);
+                            snprintf(np.sampler, sizeof(np.sampler), "%s", SMP_N4[(g_job.sampler >= 0 && g_job.sampler <= 3) ? g_job.sampler : 0]);
+                            np.width = g_job.width; np.height = g_job.height;
+                            np.steps = g_job.steps; np.cfg = g_job.cfg;
+                            np.upscale = g_job.upscale; np.eco = g_job.eco_mode;
+                            http_srv_unlock();
+                            char sid[64] = {0};
+                            if (presets_save(&np, sid, sizeof(sid)) == 0) {
+                                g_num_presets = presets_list(g_presets, PRESETS_MAX_ITEMS);
+                                for (int k = 0; k < g_num_presets; k++) {
+                                    if (strcmp(g_presets[k].id, sid) == 0) { preset_idx = k; break; }
+                                }
+                                snprintf(toast, sizeof(toast), "Saved preset: %s", pname);
+                            } else {
+                                snprintf(toast, sizeof(toast), "Failed to save preset");
+                            }
+                        }
+                    } else if (sel - 1 >= 0 && sel - 1 < g_num_presets) {
+                        preset_idx = sel - 1;
                         http_srv_lock();
                         snprintf(g_job.prompt, sizeof(g_job.prompt), "%s", g_presets[preset_idx].prompt);
                         if (g_presets[preset_idx].negative[0])
@@ -1312,14 +1368,12 @@ int main(void) {
                     sm_dd_open = 1;
                     break;
                 case ROW_PRESET:
-                    if (g_num_presets > 0) {
-                        sm_dd_row = ROW_PRESET;
-                        sm_dd_n = g_num_presets;
-                        sm_dd_cur = preset_idx;
-                        sm_dd_sel = preset_idx >= 0 ? preset_idx : 0;
-                        sm_dd_top = 0; sm_dd_clamp();
-                        sm_dd_open = 1;
-                    }
+                    sm_dd_row = ROW_PRESET;
+                    sm_dd_n = g_num_presets + 1;
+                    sm_dd_cur = (preset_idx >= 0) ? (preset_idx + 1) : 0;
+                    sm_dd_sel = sm_dd_cur;
+                    sm_dd_top = 0; sm_dd_clamp();
+                    sm_dd_open = 1;
                     break;
                 case ROW_CHAR:
                     sm_dd_row = ROW_CHAR;
