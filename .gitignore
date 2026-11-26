@@ -30,3 +30,5 @@ __pycache__/
 sync_to_git.bat
 build_and_push.bat
 DISCORD_SETUP.md
+pc/run_miku_benchmark.py
+pc/sync_to_git.py
