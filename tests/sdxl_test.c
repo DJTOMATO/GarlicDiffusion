@@ -121,19 +121,19 @@ int main(int argc, char** argv) {
     {
         ModelPreset mp, sp;
         sdxl_load_preset("build/nonexistent_dir", "Hassaku_XL_v31_dmd2", 0, &mp);
-        if (mp.width != 1024 || mp.height != 1344 || mp.steps != 6 || fabsf(mp.cfg - 1.4f) > 0.05f || mp.sampler != 2) {
+        if (mp.width != 1024 || mp.height != 1344 || mp.steps != 4 || fabsf(mp.cfg - 1.0f) > 0.05f || mp.sampler != 2) {
             fprintf(stderr, "FAIL: sdxl_load_preset Illustrious 1024x1344 (got %ux%u %u steps cfg=%.2f smp=%d)\n",
                     mp.width, mp.height, mp.steps, (double)mp.cfg, mp.sampler);
             return 1;
         }
         sdxl_load_preset("build/nonexistent_dir", "Animagine_XL_4_dmd2", 0, &mp);
-        if (mp.width != 1024 || mp.height != 1344 || mp.steps != 5 || fabsf(mp.cfg - 1.1f) > 0.05f || mp.sampler != 2 || strncmp(mp.prompt, "1girl,", 6) != 0) {
+        if (mp.width != 1024 || mp.height != 1344 || mp.steps != 4 || fabsf(mp.cfg - 1.0f) > 0.05f || mp.sampler != 2 || strncmp(mp.prompt, "1girl,", 6) != 0) {
             fprintf(stderr, "FAIL: sdxl_load_preset Animagine_XL_4_dmd2 (got %ux%u %u steps cfg=%.2f smp=%d prompt='%s')\n",
                     mp.width, mp.height, mp.steps, (double)mp.cfg, mp.sampler, mp.prompt);
             return 1;
         }
         sdxl_load_preset("build/nonexistent_dir", "NoobAI_XL_1.1_dmd2", 0, &mp);
-        if (mp.width != 1024 || mp.height != 1344 || mp.steps != 6 || fabsf(mp.cfg - 1.2f) > 0.05f || mp.sampler != 2 || strstr(mp.prompt, "newest") == NULL) {
+        if (mp.width != 1024 || mp.height != 1344 || mp.steps != 4 || fabsf(mp.cfg - 1.0f) > 0.05f || mp.sampler != 2 || strstr(mp.prompt, "newest") == NULL) {
             fprintf(stderr, "FAIL: sdxl_load_preset NoobAI_XL_1.1_dmd2 (got %ux%u %u steps cfg=%.2f smp=%d)\n",
                     mp.width, mp.height, mp.steps, (double)mp.cfg, mp.sampler);
             return 1;

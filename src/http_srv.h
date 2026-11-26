@@ -27,6 +27,7 @@ typedef struct {
     char batch_folder[64];    // optional gallery folder for generated images
     int nsfw_allow;           // 0 = SFW guard ON (default), 1 = NSFW allowed (unrestricted)
     int auto_quality;         // 1 = Auto-Quality & Hand/Eye Shield ON (default)
+    int auto_face_fix;        // 1 = Automatic ADetailer Face Fix (img2img crop) on full-body/SD1.5 shots (default ON)
     int ui_mode;              // -1 = Unset (show 2-choice welcome), 0 = Easy Mode, 1 = Advanced Mode
     int shutdown_after;       // 1 = cleanly power off PS4 after batch finishes
     int pending;
@@ -108,7 +109,7 @@ typedef struct {
     float cur_cfg;
     uint64_t cur_seed;
     int cur_sampler, cur_upscale, cur_eco;
-    int nsfw_allow, auto_quality, ui_mode;
+    int nsfw_allow, auto_quality, auto_face_fix, ui_mode;
     char cur_folder[64];
 } DiffStatus;
 

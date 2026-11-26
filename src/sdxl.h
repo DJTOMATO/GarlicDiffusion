@@ -116,6 +116,7 @@ typedef struct {
 
     // Conditioning & small buffers
     uint64_t ctx_cond, ctx_uncond;
+    uint32_t cur_ctx_len;
     uint64_t pool_cond, pool_uncond;
     uint64_t tmp_cl, tmp_cg;
     uint64_t tok_gpu;

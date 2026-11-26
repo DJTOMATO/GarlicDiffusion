@@ -353,11 +353,17 @@ textarea{min-height:68px;resize:vertical}
     <textarea id="pr" name="positive_prompt" autocomplete="off" oninput="onPromptEdited()">masterpiece, best quality, 1girl, silver hair, blue eyes, glowing sakura petals, night sky, anime style</textarea>
 
     <label style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap">
-      <span>Negative Prompt <span id="ng-tok-badge" class="tok-badge">0 / 75 neg</span></span>
-      <label style="margin:0;display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:#52e3ab;font-size:11px" title="Automatically adds model-family quality tags and hand/finger/eye anatomy protection">
-        <input id="autoq" type="checkbox" checked style="width:auto;margin:0;accent-color:#3ddc97" onchange="pushSettings();updateTokenCounter()">
-        <span>🛡️ Auto-Quality &amp; Hand/Eye Shield</span>
-      </label>
+      <span>Negative Prompt <span id="ng-tok-badge" class="tok-badge">0 / 150 neg</span></span>
+      <span style="display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="margin:0;display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:#52e3ab;font-size:11px" title="Automatically adds model-family quality tags and hand/finger/eye anatomy protection">
+          <input id="autoq" type="checkbox" checked style="width:auto;margin:0;accent-color:#3ddc97" onchange="pushSettings();updateTokenCounter()">
+          <span>🛡️ Auto-Quality</span>
+        </label>
+        <label style="margin:0;display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:#7ec2ff;font-size:11px" title="Automatically detects &amp; refines small anime faces/eyes (ADetailer img2img crop) on full-body &amp; SD 1.5 renders">
+          <input id="autoff" type="checkbox" checked style="width:auto;margin:0;accent-color:#3fa9f5" onchange="pushSettings()">
+          <span>✨ Auto Face Fix</span>
+        </label>
+      </span>
     </label>
     <textarea id="ng" name="negative_prompt" autocomplete="off" style="min-height:54px" oninput="onPromptEdited()">lowres, bad anatomy, bad hands, extra digits, fewer digits, blurry, worst quality, low quality</textarea>
 
@@ -445,7 +451,7 @@ textarea{min-height:68px;resize:vertical}
         <label for="rnd-cb-16"><input id="rnd-cb-16" type="checkbox" class="rnd-cb" data-rname="Outfit" value="16" onchange="onRandOptionChange(this)">Outfit</label>
         <label for="rnd-cb-32"><input id="rnd-cb-32" type="checkbox" class="rnd-cb" data-rname="Details" value="32" onchange="onRandOptionChange(this)">Details</label>
         <label for="rnd-cb-64"><input id="rnd-cb-64" type="checkbox" class="rnd-cb" data-rname="Camera" value="64" onchange="onRandOptionChange(this)">Camera</label>
-        <label for="rnd-cb-128" id="rnd-ecchi-lbl" style="display:none;color:#f9a8d4"><input id="rnd-cb-128" type="checkbox" class="rnd-cb" data-rname="Ecchi 500" value="128" onchange="onRandOptionChange(this)">🌶️ Ecchi 500</label>
+        <label for="rnd-cb-128" id="rnd-ecchi-lbl" style="display:none;color:#f9a8d4"><input id="rnd-cb-128" type="checkbox" class="rnd-cb" data-rname="Ecchi" value="128" onchange="onRandOptionChange(this)">🌶️ Ecchi</label>
         <label for="rnd-cb-256" id="rnd-exp-lbl" style="display:none;color:#fda4af"><input id="rnd-cb-256" type="checkbox" class="rnd-cb" data-rname="Explicit" value="256" onchange="onRandOptionChange(this)">🔥 Explicit</label>
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;align-items:center">
@@ -1547,6 +1553,7 @@ async function pushSettings(){
   const body={
     nsfw_allow:nsfwAllow?1:0,
     auto_quality:document.getElementById('autoq').checked?1:0,
+    auto_face_fix:document.getElementById('autoff').checked?1:0,
     ui_mode:uiMode,
     rand_mask:getRandMask(),
     folder:document.getElementById('bfolder').value||''
@@ -1609,9 +1616,9 @@ function updateTokenCounter(){
     const prLow=(pr.value||'').toLowerCase();
     const shieldAdd=(autoqOn&&prLow.trim()&&!prLow.includes('masterpiece')&&!prLow.includes('best quality')&&!prLow.includes('high score'))?11:0;
     const est=estimateClipTokens(pr.value)+shieldAdd;
-    b.textContent=`~${est} / 75 tok`+(shieldAdd?' (+shield)':'');
-    b.className='tok-badge'+(est>75?' over':(est>66?' warn':''));
-    b.title=est>75?'CLIP encodes 75 positive tokens max (BOS+75+EOS); tags past 75 are truncated! Move key character/pose tags to the front.':'Estimated positive CLIP subword tokens (max 75; negative prompt is encoded separately)';
+    b.textContent=`~${est} / 150 tok`+(shieldAdd?' (+shield)':'');
+    b.className='tok-badge'+(est>150?' over':(est>135?' warn':''));
+    b.title=est>150?'CLIP 2-chunk encodes 150 positive tokens max (2×75); tags past 150 are truncated! Move key character/pose tags to the front.':'Estimated positive CLIP subword tokens (max 150 across 2 chunks; negative prompt is encoded separately)';
   }
   const nb=document.getElementById('ng-tok-badge');
   if(nb){
@@ -1619,9 +1626,9 @@ function updateTokenCounter(){
     const sfwAdd=(!nsfwAllow&&!ngLow.includes('nsfw'))?14:0;
     const shNegAdd=(autoqOn&&(!ngLow.includes('bad hands')||!ngLow.includes('extra digits')))?22:0;
     const nest=estimateClipTokens(ng.value)+sfwAdd+shNegAdd;
-    nb.textContent=`~${nest} / 75 neg`;
-    nb.className='tok-badge'+(nest>75?' over':(nest>66?' warn':''));
-    nb.title=nest>75?'Negative prompt exceeds 75 CLIP tokens (including SFW/Quality Shield); trailing negative tags will be truncated!':'Estimated negative CLIP subword tokens (max 75, encoded separately from positive prompt)';
+    nb.textContent=`~${nest} / 150 neg`;
+    nb.className='tok-badge'+(nest>150?' over':(nest>135?' warn':''));
+    nb.title=nest>150?'Negative prompt exceeds 150 CLIP tokens (including SFW/Quality Shield); trailing negative tags will be truncated!':'Estimated negative CLIP subword tokens (max 150 across 2 chunks, encoded separately from positive prompt)';
   }
 }
 function renderLoraPills(){
@@ -1756,6 +1763,7 @@ function syncSettingsFromStatus(d,forceAll){
   const setIfIdle=(el,val)=>{if(el&&(forceAll||document.activeElement!==el))el.value=val;};
   if(d.nsfw_allow!==undefined&&forceAll){nsfwAllow=!!d.nsfw_allow;applyNsfwUI();}
   if(d.auto_quality!==undefined&&forceAll)document.getElementById('autoq').checked=!!d.auto_quality;
+  if(d.auto_face_fix!==undefined&&forceAll)document.getElementById('autoff').checked=!!d.auto_face_fix;
   if(c.prompt!==undefined)setIfIdle(pr,c.prompt);
   if(c.negative!==undefined)setIfIdle(ng,c.negative);
   if(c.width&&c.height&&(forceAll||document.activeElement!==sz))ensureSizeOption(c.width+'x'+c.height);
@@ -2267,6 +2275,7 @@ async function gen(override){
     folder:document.getElementById('bfolder').value||'',
     nsfw_allow:nsfwAllow?1:0,
     auto_quality:document.getElementById('autoq').checked?1:0,
+    auto_face_fix:document.getElementById('autoff').checked?1:0,
     shutdown_after:!!sdwn.checked,eco:+eco.value,sampler_name:smp.value,upscale:+ups.value
   },override||{});
   const r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

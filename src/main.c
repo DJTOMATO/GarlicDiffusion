@@ -708,7 +708,7 @@ static void sm_dd_item_label(void* ctx, int row, int i, char* out, size_t cap) {
             "Outfit (80 outfits)",
             "Details (60 micro-details)",
             "Camera Framing (35 angles)",
-            "Ecchi 500 Pool (Gravure / Alluring)",
+            "Ecchi Pool (Gravure / Alluring)",
             "Explicit Pool"
         };
         if (i == 0) {
@@ -2290,6 +2290,7 @@ static void* gpu_worker_main(void* arg) {
             g_st.cur_rand_mask = run_job.batch_rand_mask;
             g_st.nsfw_allow = run_job.nsfw_allow;
             g_st.auto_quality = run_job.auto_quality;
+            g_st.auto_face_fix = run_job.auto_face_fix;
             g_st.eta_sec = 0.0f;
             g_st.elapsed_sec = 0.0f;
             g_st.settings_seq++;
@@ -2354,6 +2355,89 @@ static void* gpu_worker_main(void* arg) {
                         eng.last_gen_sec += eng.stats.upscale_ms / 1000.0;
                     } else if (ur == 1) {
                         rc = 1;
+                    }
+                }
+                // Automatic ADetailer Face Fix (img2img crop pass at full output resolution!)
+                // Fixes small full-body faces (8x8 latent SD1.5 -> 64x64 latent, 17x17 SDXL -> 96x96 latent)
+                if (rc == 0 && run_job.auto_face_fix) {
+                    FaceBox faces[2];
+                    int nf = face_detect_anime(rgb, out_w, out_h, faces, 2);
+                    int max_face_w = eng.is_sd15 ? (int)(out_w * 55 / 100) : (int)(out_w * 36 / 100);
+                    if (nf > 0 && faces[0].w < max_face_w) {
+                        if (!sdxl_has_vae_encoder(&eng)) {
+                            on_progress(NULL, 0.96f, "Auto-downloading VAE Encoder for Auto Face Fix...");
+                            vae_enc_ensure_sync(eng.is_sd15);
+                        }
+                        if (sdxl_has_vae_encoder(&eng)) {
+                            FaceBox crop_box;
+                            face_box_expand_square(&faces[0], out_w, out_h, 1.90f, &crop_box);
+                            uint32_t fsz = (eng.is_sd15 || !eng.neo) ? 512u : 768u;
+                            uint8_t* fcrop = face_crop_resize(rgb, out_w, out_h, &crop_box, fsz, fsz);
+                            uint8_t* fref  = fcrop ? (uint8_t*)malloc((size_t)fsz * fsz * 3u) : NULL;
+                            if (fcrop && fref) {
+                                double base_gen_sec = eng.last_gen_sec;
+                                double base_unet_gpu_ms = eng.stats.unet_gpu_ms;
+                                double base_vae_ms = eng.stats.vae_ms;
+                                double base_up_ms = eng.stats.upscale_ms;
+                                double base_cool_ms = eng.stats.cooldown_ms;
+                                double base_tflops = eng.stats.effective_tflops;
+
+                                char fprompt[1280];
+                                snprintf(fprompt, sizeof(fprompt),
+                                         "close-up portrait, masterpiece, best quality, detailed face, detailed anime eyes, symmetric pupils, sparkling catchlights, clean lineart, %s",
+                                         clean_prompt);
+                                SdxlParams fp;
+                                fp.prompt = fprompt;
+                                fp.negative = iter_neg;
+                                fp.width = fsz;
+                                fp.height = fsz;
+                                float fden;
+                                if (eng.is_sd15) {
+                                    fp.steps = (p.sampler == 1 && p.steps <= 10u) ? 10u : 16u;
+                                    fp.cfg_scale = p.cfg_scale;
+                                    fp.sampler = p.sampler;
+                                    fden = 0.40f;
+                                } else if (p.sampler == 2) {
+                                    // DMD2 native 4-step at denoise 0.42 -> runs exact trained timesteps [499, 249] (~12s!)
+                                    fp.steps = 4u;
+                                    fp.cfg_scale = 1.0f;
+                                    fp.sampler = 2;
+                                    fden = 0.42f;
+                                } else {
+                                    fp.steps = (p.steps > 16u) ? 16u : p.steps;
+                                    fp.cfg_scale = p.cfg_scale;
+                                    fp.sampler = p.sampler;
+                                    fden = 0.36f;
+                                }
+                                fp.seed = seed ^ 0xFA5E1234ull;
+                                fp.eco_mode = p.eco_mode;
+                                glog("auto_face_fix: box=(%d,%d,%dx%d) score=%.2f -> %ux%u %ustp cfg=%.1f denoise=%.2f",
+                                     crop_box.x, crop_box.y, crop_box.w, crop_box.h, (double)faces[0].score,
+                                     fsz, fsz, fp.steps, (double)fp.cfg_scale, (double)fden);
+                                on_progress(NULL, 0.96f, "Auto Face Fix (refining eyes & face)...");
+                                int frc = sdxl_img2img(&eng, &fp, fcrop, fden, fref, on_progress, on_cancel, NULL);
+                                if (frc == 0) {
+                                    face_blend_back(rgb, out_w, out_h, fref, fsz, fsz, &crop_box, 0.16f);
+                                    eng.last_gen_sec = base_gen_sec + eng.last_gen_sec;
+                                    eng.stats.unet_gpu_ms = base_unet_gpu_ms + eng.stats.unet_gpu_ms;
+                                    eng.stats.vae_ms = base_vae_ms + eng.stats.vae_ms;
+                                    eng.stats.upscale_ms = base_up_ms;
+                                    eng.stats.cooldown_ms = base_cool_ms + eng.stats.cooldown_ms;
+                                    if (base_tflops > 0.0) eng.stats.effective_tflops = base_tflops;
+                                } else if (frc == 1) {
+                                    rc = 1;
+                                } else {
+                                    eng.last_gen_sec = base_gen_sec;
+                                    eng.stats.unet_gpu_ms = base_unet_gpu_ms;
+                                    eng.stats.vae_ms = base_vae_ms;
+                                    eng.stats.upscale_ms = base_up_ms;
+                                    eng.stats.cooldown_ms = base_cool_ms;
+                                    eng.stats.effective_tflops = base_tflops;
+                                }
+                            }
+                            free(fcrop);
+                            free(fref);
+                        }
                     }
                 }
                 if (rc == 0) {
@@ -2532,11 +2616,13 @@ int main(void) {
     g_job.lora_scale = 0.80f;
     g_job.seed = 0;
     g_job.batch_count = 1;
-    g_job.nsfw_allow = 0;   // Default: SFW Guard ON
-    g_job.auto_quality = 1; // Default: Auto-Quality & Hand/Eye Shield ON
+    g_job.nsfw_allow = 0;    // Default: SFW Guard ON
+    g_job.auto_quality = 1;  // Default: Auto-Quality & Hand/Eye Shield ON
+    g_job.auto_face_fix = 1; // Default: Automatic ADetailer Face Fix ON
     g_job.ui_mode = load_ui_mode_cfg(); // -1 = show 2-choice Welcome Screen, 0 = Easy, 1 = Advanced
     g_st.nsfw_allow = 0;
     g_st.auto_quality = 1;
+    g_st.auto_face_fix = 1;
     g_st.ui_mode = g_job.ui_mode;
     g_st.neo = sceKernelIsNeoMode();
     g_st.busy = 1;

@@ -230,8 +230,14 @@ def main():
     ap.add_argument("--unet-only", action="store_true", help="Only build unet.psd1 (shares CLIP/VAE on PS4)")
     ap.add_argument("--lora", default="", help="Local .safetensors path OR Hugging Face owner/repo/file.safetensors")
     ap.add_argument("--lora-scale", type=float, default=0.8)
+    ap.add_argument("--vae-repo", default="", help="Optional HF repo to source VAE from (e.g. stabilityai/sd-vae-ft-mse for Counterfeit V2.5)")
     ap.add_argument("--preset-desc", default="", help="Optional description for preset.cfg")
     args = ap.parse_args()
+
+    # Counterfeit V2.5 ships with the washed-out SD 1.4/1.5 VAE on HF; automatically use sd-vae-ft-mse unless overridden
+    if args.arch == "sd15" and not args.vae_repo and "counterfeit" in args.name.lower():
+        args.vae_repo = "stabilityai/sd-vae-ft-mse"
+        print("Auto-selecting stabilityai/sd-vae-ft-mse VAE for Counterfeit V2.5 (fixes washed-out colors)", flush=True)
 
     out_dir = ROOT / "diffusion" / "models" / args.name
     cache_dir = ROOT / "diffusion" / "cache" / args.name
@@ -280,8 +286,11 @@ def main():
         if out_p.is_file() and not args.force:
             print(f"skip existing {out_p} ({out_p.stat().st_size / 2**20:.1f} MiB)")
             continue
-        local_st = cache_dir / remote_path.replace("/", "_")
-        url = f"https://huggingface.co/{args.repo}/resolve/main/{remote_path}"
+        is_vae_job = fname in ("vae.psd1", "vae_enc.psd1", "vae_enc_sd15.psd1", "vae_enc_sdxl.psd1")
+        src_repo = args.vae_repo if (is_vae_job and args.vae_repo) else args.repo
+        src_path = f"diffusion_pytorch_model{sfx}" if (is_vae_job and args.vae_repo) else remote_path
+        local_st = cache_dir / src_path.replace("/", "_")
+        url = f"https://huggingface.co/{src_repo}/resolve/main/{src_path}"
         download_file(url, local_st)
         ll = lora_layers if fname == "unet.psd1" else None
         convert_local_safetensors(local_st, out_p, filt, qmode, vae_scale=vae_scale, lora_layers=ll, lora_scale=args.lora_scale)
@@ -314,17 +323,17 @@ def main():
         prompt = "masterpiece, best quality, amazing quality, absurdres, 1girl, solo, silver hair, blue eyes, glowing sakura petals, night sky, anime style"
         neg = "lowres, bad anatomy, bad hands, extra digits, fewer digits, bad feet, bad eyes, text, error, blurry, worst quality, low quality"
         if "dmd" in nl:
-            steps, cfg, smp = 6, 1.4, "LCM"
+            steps, cfg, smp = 4, 1.0, "LCM"
             if "nova" in nl:
-                desc = "SDXL Nova Anime XL v18 + DMD2 · Vibrant 2D/2.5D anime (6 stp, CFG 1.4, ~50s)"
+                desc = "SDXL Nova Anime XL v18 + DMD2 · Vibrant 2D/2.5D anime (4 stp, CFG 1.0, ~50s)"
             elif "hassaku" in nl:
-                desc = "SDXL Hassaku XL Illustrious v3.1 + DMD2 · Crisp anime (6 stp, CFG 1.4, ~50s)"
+                desc = "SDXL Hassaku XL Illustrious v3.1 + DMD2 · Crisp anime (4 stp, CFG 1.0, ~50s)"
             elif "pencil" in nl:
-                desc = "SDXL Illustrious Pencil XL v3.2 + DMD2 · Fine-line artbook (6 stp, CFG 1.4, ~50s)"
+                desc = "SDXL Illustrious Pencil XL v3.2 + DMD2 · Fine-line artbook (4 stp, CFG 1.0, ~50s)"
             elif "walnut" in nl or "plant" in nl:
-                desc = "SDXL Plant Milk Walnut + DMD2 · Painterly anime (6 stp, CFG 1.4, ~50s)"
+                desc = "SDXL Plant Milk Walnut + DMD2 · Painterly anime (4 stp, CFG 1.0, ~50s)"
             else:
-                desc = f"SDXL {args.name} · DMD2 Ultra-Fast (6 steps, CFG 1.4, ~50s)"
+                desc = f"SDXL {args.name} · DMD2 Native 4-Step (4 steps, CFG 1.0, ~50s)"
         elif "8step" in nl or "hyper" in nl:
             steps, cfg, smp, desc = 8, 3.5, "Euler", f"SDXL {args.name} · Hyper-SD 8-step (Euler, CFG 3.5)"
         elif "animagine" in nl:

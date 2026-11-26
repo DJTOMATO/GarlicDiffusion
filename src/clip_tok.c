@@ -246,13 +246,15 @@ static int probe_weight_paren(const uint8_t* open_p, int at_tag_start,
     return 0;
 }
 
-uint32_t clip_tok_encode_weighted(const ClipTok* t, const char* text,
-                                  uint32_t out_ids[CLIP_MAX_LEN], float out_weights[CLIP_MAX_LEN], uint32_t pad_id) {
+uint32_t clip_tok_encode_weighted_chunks(const ClipTok* t, const char* text,
+                                         uint32_t out_ids[CLIP_MAX_CHUNKS][CLIP_MAX_LEN],
+                                         float out_weights[CLIP_MAX_CHUNKS][CLIP_MAX_LEN],
+                                         uint32_t out_eos[CLIP_MAX_CHUNKS], uint32_t pad_id) {
+    const uint32_t max_content = CLIP_MAX_CHUNKS * (CLIP_MAX_LEN - 2u); // 150 content tokens
+    uint32_t flat_ids[CLIP_MAX_CHUNKS * (CLIP_MAX_LEN - 2u)];
+    float flat_w[CLIP_MAX_CHUNKS * (CLIP_MAX_LEN - 2u)];
     uint32_t n = 0;
-    for (uint32_t i = 0; i < CLIP_MAX_LEN; i++) {
-        if (out_weights) out_weights[i] = 1.0f;
-    }
-    out_ids[n++] = CLIP_BOS;
+
     const uint8_t* p = (const uint8_t*)(text ? text : "");
     uint8_t word[256];
 
@@ -266,7 +268,7 @@ uint32_t clip_tok_encode_weighted(const ClipTok* t, const char* text,
     float cur_w = 1.0f;
     int at_tag_start = 1;
 
-    while (*p && n < CLIP_MAX_LEN - 1) {
+    while (*p && n < max_content) {
         while (*p && isspace(*p)) p++;
         if (!*p) break;
 
@@ -292,7 +294,7 @@ uint32_t clip_tok_encode_weighted(const ClipTok* t, const char* text,
         if (*p == '\\' && (p[1] == '(' || p[1] == ')' || p[1] == '[' || p[1] == ']')) {
             p++;
             word[0] = *p++;
-            encode_word(t, word, 1, out_ids, out_weights, cur_w, &n, CLIP_MAX_LEN - 1);
+            encode_word(t, word, 1, flat_ids, flat_w, cur_w, &n, max_content);
             at_tag_start = 0;
             continue;
         }
@@ -355,13 +357,41 @@ uint32_t clip_tok_encode_weighted(const ClipTok* t, const char* text,
                 }
             }
         }
-        encode_word(t, word, wl, out_ids, out_weights, cur_w, &n, CLIP_MAX_LEN - 1);
+        encode_word(t, word, wl, flat_ids, flat_w, cur_w, &n, max_content);
     }
 
-    uint32_t eos_pos = n;
-    out_ids[n++] = CLIP_EOS;
-    while (n < CLIP_MAX_LEN) out_ids[n++] = pad_id;
-    return eos_pos;
+    const uint32_t per_chunk = CLIP_MAX_LEN - 2u; // 75
+    uint32_t n_chunks = (n > per_chunk) ? 2u : 1u;
+    for (uint32_t c = 0; c < n_chunks; c++) {
+        for (uint32_t i = 0; i < CLIP_MAX_LEN; i++) {
+            if (out_weights) out_weights[c][i] = 1.0f;
+        }
+        uint32_t pos = 0;
+        out_ids[c][pos++] = CLIP_BOS;
+        uint32_t start = c * per_chunk;
+        uint32_t take = (n > start) ? (n - start) : 0u;
+        if (take > per_chunk) take = per_chunk;
+        for (uint32_t i = 0; i < take; i++) {
+            out_ids[c][pos] = flat_ids[start + i];
+            if (out_weights) out_weights[c][pos] = flat_w[start + i];
+            pos++;
+        }
+        if (out_eos) out_eos[c] = pos;
+        out_ids[c][pos++] = CLIP_EOS;
+        while (pos < CLIP_MAX_LEN) out_ids[c][pos++] = pad_id;
+    }
+    return n_chunks;
+}
+
+uint32_t clip_tok_encode_weighted(const ClipTok* t, const char* text,
+                                  uint32_t out_ids[CLIP_MAX_LEN], float out_weights[CLIP_MAX_LEN], uint32_t pad_id) {
+    uint32_t c_ids[CLIP_MAX_CHUNKS][CLIP_MAX_LEN];
+    float c_w[CLIP_MAX_CHUNKS][CLIP_MAX_LEN];
+    uint32_t c_eos[CLIP_MAX_CHUNKS] = {0};
+    clip_tok_encode_weighted_chunks(t, text, c_ids, c_w, c_eos, pad_id);
+    memcpy(out_ids, c_ids[0], CLIP_MAX_LEN * sizeof(uint32_t));
+    if (out_weights) memcpy(out_weights, c_w[0], CLIP_MAX_LEN * sizeof(float));
+    return c_eos[0];
 }
 
 // CLIP pre-tokenization: lowercase + contractions + letters + digits + non-space punctuation runs

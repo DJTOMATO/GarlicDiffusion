@@ -4,6 +4,8 @@
 #include <stdint.h>
 
 #define CLIP_MAX_LEN 77
+#define CLIP_MAX_CHUNKS 2
+#define CLIP_CTX_MAX (CLIP_MAX_LEN * CLIP_MAX_CHUNKS)
 #define CLIP_BOS 49406u
 #define CLIP_EOS 49407u
 
@@ -38,5 +40,13 @@ uint32_t clip_tok_encode(const ClipTok* t, const char* text, uint32_t out_ids[CL
 //   Preserves Danbooru character qualifiers like "rem (re:zero)" or "artoria pendragon (fate)".
 uint32_t clip_tok_encode_weighted(const ClipTok* t, const char* text,
                                   uint32_t out_ids[CLIP_MAX_LEN], float out_weights[CLIP_MAX_LEN], uint32_t pad_id);
+
+// Encodes UTF-8 prompt into up to CLIP_MAX_CHUNKS (2) x 77-token chunks (up to 150 content tokens)
+// with A1111 prompt weighting syntax preserved across chunk boundaries.
+// Returns the number of chunks used (1 or 2) and writes each chunk's EOS index to out_eos[c].
+uint32_t clip_tok_encode_weighted_chunks(const ClipTok* t, const char* text,
+                                         uint32_t out_ids[CLIP_MAX_CHUNKS][CLIP_MAX_LEN],
+                                         float out_weights[CLIP_MAX_CHUNKS][CLIP_MAX_LEN],
+                                         uint32_t out_eos[CLIP_MAX_CHUNKS], uint32_t pad_id);
 
 #endif

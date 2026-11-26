@@ -307,6 +307,9 @@ static void apply_job_json(const char* body, DiffJob* j) {
     if (json_get_double(body, "auto_quality", &v)) j->auto_quality = (v != 0) ? 1 : 0;
     else if (strstr(body, "\"auto_quality\":true") || strstr(body, "\"auto_quality\": true")) j->auto_quality = 1;
     else if (strstr(body, "\"auto_quality\":false") || strstr(body, "\"auto_quality\": false")) j->auto_quality = 0;
+    if (json_get_double(body, "auto_face_fix", &v)) j->auto_face_fix = (v != 0) ? 1 : 0;
+    else if (strstr(body, "\"auto_face_fix\":true") || strstr(body, "\"auto_face_fix\": true")) j->auto_face_fix = 1;
+    else if (strstr(body, "\"auto_face_fix\":false") || strstr(body, "\"auto_face_fix\": false")) j->auto_face_fix = 0;
     if (json_get_double(body, "shutdown_after", &v)) j->shutdown_after = (v != 0) ? 1 : 0;
     else if (strstr(body, "\"shutdown_after\":true") || strstr(body, "\"shutdown_after\": true")) j->shutdown_after = 1;
     else if (strstr(body, "\"shutdown_after\":false") || strstr(body, "\"shutdown_after\": false")) j->shutdown_after = 0;
@@ -1480,6 +1483,7 @@ static void handle_client(int fd) {
         int is_switching = g_job->switch_req;
         int nsfw_ok = g_job->nsfw_allow;
         int auto_q = g_job->auto_quality;
+        int auto_ff = g_job->auto_face_fix;
         int ui_m = g_job->ui_mode;
 
         // Expose active in-progress job settings when busy, or live Studio configuration when idle!
@@ -1515,7 +1519,7 @@ static void handle_client(int fd) {
         int n = snprintf(out, 16384,
                          "{\"version\":\"%s\",\"ui_mode\":%d,"
                          "\"gpu_ready\":%s,\"ready\":%s,\"busy\":%s,\"switching\":%s,\"neo\":%d,\"arch\":\"%s\",\"has_upscaler\":%s,"
-                         "\"nsfw_allow\":%s,\"auto_quality\":%s,"
+                         "\"nsfw_allow\":%s,\"auto_quality\":%s,\"auto_face_fix\":%s,"
                          "\"temp_c\":%d,\"temp_peak_c\":%d,\"eco_mode\":%d,"
                          "\"gpu_used_mb\":%u,\"gpu_total_mb\":%u,\"progress\":%.3f,\"eta_sec\":%.1f,\"elapsed_sec\":%.1f,"
                          "\"stage\":\"%s\",\"model\":\"%s\","
@@ -1539,7 +1543,7 @@ static void handle_client(int fd) {
                          g_st->gpu_ready ? "true" : "false", g_st->ready ? "true" : "false", g_st->busy ? "true" : "false",
                          is_switching ? "true" : "false",
                          g_st->neo, g_st->is_sd15 ? "sd15" : "sdxl", g_st->has_upscaler ? "true" : "false",
-                         nsfw_ok ? "true" : "false", auto_q ? "true" : "false",
+                         nsfw_ok ? "true" : "false", auto_q ? "true" : "false", auto_ff ? "true" : "false",
                          g_st->temp_c, g_st->temp_peak_c, g_st->eco_mode,
                          g_st->gpu_used_mb, g_st->gpu_total_mb,
                          (double)g_st->progress, (double)g_st->eta_sec, (double)g_st->elapsed_sec,
@@ -1598,6 +1602,9 @@ static void handle_client(int fd) {
         if (json_get_double(body, "auto_quality", &v)) g_job->auto_quality = (v != 0) ? 1 : 0;
         else if (strstr(body, "\"auto_quality\":true") || strstr(body, "\"auto_quality\": true")) g_job->auto_quality = 1;
         else if (strstr(body, "\"auto_quality\":false") || strstr(body, "\"auto_quality\": false")) g_job->auto_quality = 0;
+        if (json_get_double(body, "auto_face_fix", &v)) g_job->auto_face_fix = (v != 0) ? 1 : 0;
+        else if (strstr(body, "\"auto_face_fix\":true") || strstr(body, "\"auto_face_fix\": true")) g_job->auto_face_fix = 1;
+        else if (strstr(body, "\"auto_face_fix\":false") || strstr(body, "\"auto_face_fix\": false")) g_job->auto_face_fix = 0;
         if (json_get_double(body, "ui_mode", &v)) {
             int nm = (int)v;
             if (nm == 0 || nm == 1) {
@@ -1612,16 +1619,17 @@ static void handle_client(int fd) {
             gallery_clean_folder_name(tmp, g_job->batch_folder, sizeof(g_job->batch_folder));
         g_st->nsfw_allow = g_job->nsfw_allow;
         g_st->auto_quality = g_job->auto_quality;
+        g_st->auto_face_fix = g_job->auto_face_fix;
         g_st->cur_rand_mask = g_job->batch_rand_mask;
         g_st->settings_seq++;
-        int ns = g_job->nsfw_allow, aq = g_job->auto_quality, uim = g_job->ui_mode;
+        int ns = g_job->nsfw_allow, aq = g_job->auto_quality, aff = g_job->auto_face_fix, uim = g_job->ui_mode;
         uint32_t sseq = g_st->settings_seq, rmk = g_job->batch_rand_mask;
         http_srv_unlock();
         if (save_uim == 0 || save_uim == 1) save_ui_mode_file(save_uim);
-        char resp[192];
+        char resp[256];
         int l = snprintf(resp, sizeof(resp),
-                         "{\"ok\":true,\"nsfw_allow\":%s,\"auto_quality\":%s,\"ui_mode\":%d,\"rand_mask\":%u,\"settings_seq\":%u}",
-                         ns ? "true" : "false", aq ? "true" : "false", uim, rmk, sseq);
+                         "{\"ok\":true,\"nsfw_allow\":%s,\"auto_quality\":%s,\"auto_face_fix\":%s,\"ui_mode\":%d,\"rand_mask\":%u,\"settings_seq\":%u}",
+                         ns ? "true" : "false", aq ? "true" : "false", aff ? "true" : "false", uim, rmk, sseq);
         send_resp(fd, 200, "OK", "application/json", resp, (size_t)l);
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/update/status") == 0) {
         AppUpdateStatus upd;

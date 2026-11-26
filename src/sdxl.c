@@ -1184,32 +1184,45 @@ static void apply_clip_token_weights(uint64_t buf_addr, uint32_t C, const float 
 }
 
 static int encode_prompt(SdxlEngine* e, const char* text, int force_zero_empty,
-                         uint64_t ctx_out, uint64_t pooled_out) {
+                         uint64_t ctx_out, uint64_t pooled_out, uint32_t* ctx_len_out) {
     if (e->is_sd15) {
-        // SD 1.5: CLIP-L with Clip Skip 2 (layer 10 + final_layer_norm), empty prompt encoded as BOS/EOS!
-        uint32_t ids_l[CLIP_MAX_LEN];
-        float w_l[CLIP_MAX_LEN];
-        clip_tok_encode_weighted(&e->tok, text ? text : "", ids_l, w_l, CLIP_EOS);
-        if (run_clip(e, &e->clip_l, ids_l, 0, 12, 768, 12, 1 /* quick_gelu */, ctx_out, 0, 1)) return -1;
-        apply_clip_token_weights(ctx_out, 768, w_l);
+        // SD 1.5: CLIP-L with Clip Skip 2 (layer 10 + final_layer_norm), up to 2x77 = 154 tokens!
+        uint32_t ids_l[CLIP_MAX_CHUNKS][CLIP_MAX_LEN];
+        float w_l[CLIP_MAX_CHUNKS][CLIP_MAX_LEN];
+        uint32_t eos_l[CLIP_MAX_CHUNKS] = {0};
+        uint32_t n_chunks = clip_tok_encode_weighted_chunks(&e->tok, text ? text : "", ids_l, w_l, eos_l, CLIP_EOS);
+        for (uint32_t c = 0; c < n_chunks; c++) {
+            uint64_t dst = ctx_out + (uint64_t)c * CLIP_MAX_LEN * 768ull * 4ull;
+            if (run_clip(e, &e->clip_l, ids_l[c], 0, 12, 768, 12, 1 /* quick_gelu */, dst, 0, 1)) return -1;
+            apply_clip_token_weights(dst, 768, w_l[c]);
+        }
+        if (ctx_len_out) *ctx_len_out = n_chunks * CLIP_MAX_LEN;
         return 0;
     }
     if (force_zero_empty && (!text || !text[0])) {
         memset((void*)(uintptr_t)ctx_out, 0, CLIP_MAX_LEN * 2048u * 4u);
         memset((void*)(uintptr_t)pooled_out, 0, 1280u * 4u);
+        if (ctx_len_out) *ctx_len_out = CLIP_MAX_LEN;
         return 0;
     }
-    uint32_t ids_l[CLIP_MAX_LEN], ids_g[CLIP_MAX_LEN];
-    float w_l[CLIP_MAX_LEN], w_g[CLIP_MAX_LEN];
-    clip_tok_encode_weighted(&e->tok, text, ids_l, w_l, CLIP_EOS);
-    uint32_t eos_g = clip_tok_encode_weighted(&e->tok, text, ids_g, w_g, 0);
+    uint32_t ids_l[CLIP_MAX_CHUNKS][CLIP_MAX_LEN], ids_g[CLIP_MAX_CHUNKS][CLIP_MAX_LEN];
+    float w_l[CLIP_MAX_CHUNKS][CLIP_MAX_LEN], w_g[CLIP_MAX_CHUNKS][CLIP_MAX_LEN];
+    uint32_t eos_l[CLIP_MAX_CHUNKS] = {0}, eos_g[CLIP_MAX_CHUNKS] = {0};
+    uint32_t n_chunks = clip_tok_encode_weighted_chunks(&e->tok, text, ids_l, w_l, eos_l, CLIP_EOS);
+    clip_tok_encode_weighted_chunks(&e->tok, text, ids_g, w_g, eos_g, 0);
 
-    if (run_clip(e, &e->clip_l, ids_l, 0, 12, 768, 12, 1 /* quick_gelu */, e->tmp_cl, 0, 0)) return -1;
-    if (run_clip(e, &e->clip_g, ids_g, eos_g, 32, 1280, 20, 2 /* gelu_exact */, e->tmp_cg, pooled_out, 0)) return -1;
-    apply_clip_token_weights(e->tmp_cl, 768, w_l);
-    apply_clip_token_weights(e->tmp_cg, 1280, w_g);
-    op_concat(e, e->tmp_cl, e->tmp_cg, ctx_out, CLIP_MAX_LEN, 768, 1280);
-    return gpu_flush(e);
+    for (uint32_t c = 0; c < n_chunks; c++) {
+        uint64_t dst = ctx_out + (uint64_t)c * CLIP_MAX_LEN * 2048ull * 4ull;
+        if (run_clip(e, &e->clip_l, ids_l[c], 0, 12, 768, 12, 1 /* quick_gelu */, e->tmp_cl, 0, 0)) return -1;
+        if (run_clip(e, &e->clip_g, ids_g[c], eos_g[c], 32, 1280, 20, 2 /* gelu_exact */,
+                     e->tmp_cg, (c == 0) ? pooled_out : 0, 0)) return -1;
+        apply_clip_token_weights(e->tmp_cl, 768, w_l[c]);
+        apply_clip_token_weights(e->tmp_cg, 1280, w_g[c]);
+        op_concat(e, e->tmp_cl, e->tmp_cg, dst, CLIP_MAX_LEN, 768, 1280);
+        if (gpu_flush(e)) return -1;
+    }
+    if (ctx_len_out) *ctx_len_out = n_chunks * CLIP_MAX_LEN;
+    return 0;
 }
 
 // =================================================================================================
@@ -1300,17 +1313,18 @@ static void spatial_transformer(SdxlEngine* e, const SdxlPack* p, const char* pr
         snprintf(b, sizeof(b), "%s.attn1.to_out.0.bias", tb);
         linear_op(e, p, w, b, e->buf_c, h, M, 1);
 
-        // Cross-attention
+        // Cross-attention (supports 1-chunk 77 or 2-chunk 154 token conditioning)
+        uint32_t ctx_len = e->cur_ctx_len ? e->cur_ctx_len : CLIP_MAX_LEN;
         snprintf(nm, sizeof(nm), "%s.norm2", tb);
         ln_op(e, p, nm, h, e->buf_c, M, C, 1e-5f);
         snprintf(w, sizeof(w), "%s.attn2.to_q.weight", tb);
         linear_op(e, p, w, NULL, e->buf_c, e->buf_q, M, 0);
         snprintf(w, sizeof(w), "%s.attn2.to_k.weight", tb);
-        linear_op(e, p, w, NULL, ctx, e->buf_k, CLIP_MAX_LEN, 0);
+        linear_op(e, p, w, NULL, ctx, e->buf_k, ctx_len, 0);
         snprintf(w, sizeof(w), "%s.attn2.to_v.weight", tb);
-        linear_op(e, p, w, NULL, ctx, e->buf_v, CLIP_MAX_LEN, 0);
-        if (hd == 64u) op_attn64(e, e->buf_q, e->buf_k, e->buf_v, e->buf_c, M, CLIP_MAX_LEN, n_heads, scale, 0);
-        else op_attn_hd(e, e->buf_q, e->buf_k, e->buf_v, e->buf_c, M, CLIP_MAX_LEN, n_heads, hd, scale);
+        linear_op(e, p, w, NULL, ctx, e->buf_v, ctx_len, 0);
+        if (hd == 64u) op_attn64(e, e->buf_q, e->buf_k, e->buf_v, e->buf_c, M, ctx_len, n_heads, scale, 0);
+        else op_attn_hd(e, e->buf_q, e->buf_k, e->buf_v, e->buf_c, M, ctx_len, n_heads, hd, scale);
         snprintf(w, sizeof(w), "%s.attn2.to_out.0.weight", tb);
         snprintf(b, sizeof(b), "%s.attn2.to_out.0.bias", tb);
         linear_op(e, p, w, b, e->buf_c, h, M, 1);
@@ -1406,7 +1420,7 @@ static int block_breather(SdxlEngine* e) {
 
     if (gpu_flush(e)) return -1;
     if (e->cancel_fn && e->cancel_fn(e->cancel_user)) return 1;
-    uint32_t us = (e->eco_mode == 1) ? 25000u : (e->eco_mode == 2 ? 80000u : 100000u);
+    uint32_t us = (e->eco_mode == 1) ? 15000u : (e->eco_mode == 2 ? 35000u : 55000u);
     if (e->is_sd15) us >>= 1; // SD 1.5 blocks are ~4x lighter, keep breathers snappy!
     if (!e->neo) us >>= 1;    // Base PS4 (18 CUs, ~110W) runs cooler than Pro (36 CUs, ~160W)
     sceKernelUsleep(us);
@@ -2315,8 +2329,9 @@ int sdxl_init(SdxlEngine* e, const char* assets_dir, const char* model_dir,
     e->buf_v      = gpu_alloc(e, BUF_QKV_BYTES);
     e->buf_im2col = gpu_alloc(e, e->buf_im2col_bytes);
     e->skip_pool  = gpu_alloc(e, e->buf_skips_bytes);
-    e->ctx_cond   = gpu_alloc(e, CLIP_MAX_LEN * 2048ull * 4ull);
-    e->ctx_uncond = gpu_alloc(e, CLIP_MAX_LEN * 2048ull * 4ull);
+    e->ctx_cond   = gpu_alloc(e, CLIP_CTX_MAX * 2048ull * 4ull);
+    e->ctx_uncond = gpu_alloc(e, CLIP_CTX_MAX * 2048ull * 4ull);
+    e->cur_ctx_len = CLIP_MAX_LEN;
     e->pool_cond  = gpu_alloc(e, 1280ull * 4ull);
     e->pool_uncond= gpu_alloc(e, 1280ull * 4ull);
     e->tmp_cl     = gpu_alloc(e, CLIP_MAX_LEN * 768ull * 4ull);
@@ -3637,19 +3652,19 @@ void sdxl_load_preset(const char* model_dir, const char* model_name, int is_sd15
                      "lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad feet, bad eyes, asymmetrical eyes, blurry, worst quality, low quality");
         }
         if (ci_has(model_name, "dmd")) {
+            // Native DMD2 4-step distribution [999, 749, 499, 249] at CFG 1.0:
+            // stays on-manifold without CFG 1.4 eye-melt and runs 3x faster (~50s Quiet)!
+            out->steps = 4; out->cfg = 1.0f; out->sampler = 2; // LCM native 4-step DMD2
             if (ci_has(model_name, "animagine")) {
-                out->steps = 5; out->cfg = 1.1f; out->sampler = 2; // Animagine XL 4.0 DMD2: low overshoot sweet spot
                 snprintf(out->description, sizeof(out->description),
-                         "Animagine XL 4.0 DMD2 · 1024x1344 Best Quality (LCM · 5 stp · CFG 1.1)");
+                         "Animagine XL 4.0 DMD2 · 1024x1344 Native (LCM · 4 stp · CFG 1.0)");
             } else if (ci_has(model_name, "noob")) {
-                out->steps = 6; out->cfg = 1.2f; out->sampler = 2; // NoobAI-XL 1.1 DMD2: crisp contrast without eye burn
                 snprintf(out->description, sizeof(out->description),
-                         "NoobAI-XL 1.1 DMD2 · 1024x1344 Best Quality (LCM · 6 stp · CFG 1.2)");
+                         "NoobAI-XL 1.1 DMD2 · 1024x1344 Native (LCM · 4 stp · CFG 1.0)");
             } else {
-                out->steps = 6; out->cfg = 1.4f; out->sampler = 2; // LCM + CFG 1.4 activates negative hand/eye guard!
                 snprintf(out->description, sizeof(out->description),
-                         is_illus ? "Illustrious DMD2 · 1024x1344 Best Quality (LCM · 6 stp · CFG 1.4)"
-                                  : "SDXL DMD2 · 1024x1344 Best Quality (LCM · 6 stp · CFG 1.4)");
+                         is_illus ? "Illustrious DMD2 · 1024x1344 Native (LCM · 4 stp · CFG 1.0)"
+                                  : "SDXL DMD2 · 1024x1344 Native (LCM · 4 stp · CFG 1.0)");
             }
         } else if (ci_has(model_name, "8step") || ci_has(model_name, "hyper")) {
             out->steps = 8; out->cfg = 3.5f; out->sampler = 1; // Euler
@@ -4020,17 +4035,18 @@ static int sdxl_generate_internal(SdxlEngine* e, const SdxlParams* p, const uint
     e->rt_step_avg_sec = 0.0;
     e->rt_tile_avg_sec = 0.0;
 
+    uint32_t cond_len = CLIP_MAX_LEN, uncond_len = CLIP_MAX_LEN;
     if (progress) progress(user, 0.02f, "Encoding prompt (CLIP-L + OpenCLIP-G)");
     double tc0 = now_sec(e);
-    if (encode_prompt(e, p->prompt, 0, e->ctx_cond, e->pool_cond)) { e->rt_phase = 0; e->cancel_fn = NULL; return -1; }
+    if (encode_prompt(e, p->prompt, 0, e->ctx_cond, e->pool_cond, &cond_len)) { e->rt_phase = 0; e->cancel_fn = NULL; return -1; }
     e->stats.clip_l_ms = (now_sec(e) - tc0) * 1000.0;
     if (cfg > 1.001f) {
         double tc1 = now_sec(e);
-        if (encode_prompt(e, p->negative, 1, e->ctx_uncond, e->pool_uncond)) { e->rt_phase = 0; e->cancel_fn = NULL; return -1; }
+        if (encode_prompt(e, p->negative, 1, e->ctx_uncond, e->pool_uncond, &uncond_len)) { e->rt_phase = 0; e->cancel_fn = NULL; return -1; }
         e->stats.clip_g_ms = (now_sec(e) - tc1) * 1000.0;
     }
     if (cancel && cancel(user)) { e->rt_phase = 0; e->cancel_fn = NULL; return 1; }
-    glog("clip: cond=%.1f ms, uncond=%.1f ms", e->stats.clip_l_ms, e->stats.clip_g_ms);
+    glog("clip: cond=%.1f ms (%u tok), uncond=%.1f ms (%u tok)", e->stats.clip_l_ms, cond_len, e->stats.clip_g_ms, uncond_len);
 
     float timesteps[64], sigmas[65];
     build_sigmas(steps, p->sampler, timesteps, sigmas);
@@ -4113,6 +4129,7 @@ static int sdxl_generate_internal(SdxlEngine* e, const SdxlParams* p, const uint
         for (size_t i = 0; i < lat_n; i++) lin[i] = lat[i] * c_in;
 
         double ts0 = now_sec(e);
+        e->cur_ctx_len = cond_len;
         int ur0 = unet_forward(e, e->lat_in, timesteps[s], e->ctx_cond, e->pool_cond, H, W, e->eps_c);
         if (ur0 != 0) { free(lat); free(noise); free(old_denoised); e->rt_phase = 0; e->cancel_fn = NULL; return ur0; }
         double cond_ms = (now_sec(e) - ts0) * 1000.0;
@@ -4123,6 +4140,7 @@ static int sdxl_generate_internal(SdxlEngine* e, const SdxlParams* p, const uint
         double uncond_ms = 0.0;
         if (cfg > 1.001f) {
             double ts1 = now_sec(e);
+            e->cur_ctx_len = uncond_len;
             int ur1 = unet_forward(e, e->lat_in, timesteps[s], e->ctx_uncond, e->pool_uncond, H, W, e->eps_u);
             if (ur1 != 0) { free(lat); free(noise); free(old_denoised); e->rt_phase = 0; e->cancel_fn = NULL; return ur1; }
             uncond_ms = (now_sec(e) - ts1) * 1000.0;
