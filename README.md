@@ -16,9 +16,9 @@ Every image below was rendered and AI-upscaled **100% locally on a PS4 Pro (FW 1
 | :---: | :---: |
 | ![PS4 Pro WAI v17 16:9 1080p Miku](docs/samples/v17_miku_16x9_1080p.jpg) | ![PS4 Pro MeinaMix 16:9 1080p Miku](docs/samples/meina_miku_16x9_1080p.jpg) |
 
-| WAI-Illustrious v17 DMD2 · `1080×1440` · **98.28s** | MeinaMix V11 8-Step · `1080×1620` · **46.47s** | Anything V5 · `1080×1620` · **88.37s** | DreamShaper 8 · `1080×1620` · **88.33s** |
-| :---: | :---: | :---: | :---: |
-| ![WAI v17 Miku Alpine Meadow](docs/samples/v17_miku_fb_meadow_8stp.jpg) | ![MeinaMix Miku 1080p](docs/samples/meina_miku_remake_a.jpg) | ![Anything V5 Sakura Miku](docs/samples/anything_miku_fullbody.jpg) | ![DreamShaper 8 Library Miku](docs/samples/miku_dreamshaper8_2d_1080p.jpg) |
+| WAI-Illustrious v17 DMD2 · `1080×1440` · **98.28s** | MeinaMix V11 8-Step · `1080×1620` · **46.47s** | DreamShaper 8 · `1080×1620` · **88.33s** |
+| :---: | :---: | :---: |
+| ![WAI v17 Miku Alpine Meadow](docs/samples/v17_miku_fb_meadow_8stp.jpg) | ![MeinaMix Miku 1080p](docs/samples/meina_miku_remake_a.jpg) | ![DreamShaper 8 Library Miku](docs/samples/miku_dreamshaper8_2d_1080p.jpg) |
 
 > Browse all **40+ generated samples** across characters and landscapes on the [**Main Showcase**](https://djtomato.github.io/GarlicDiffusion/), [**Scenic Gallery**](https://djtomato.github.io/GarlicDiffusion/scenic.html), and [**Quality Tier Comparison**](https://djtomato.github.io/GarlicDiffusion/benchmarks.html).
 
@@ -61,7 +61,7 @@ Control everything with a DualShock 4 directly on your TV, or open **`http://<PS
 | **🖥️ 16:9 Full HD** | `896×512` / `1024×576 → 1920×1080` | 8 / 6 steps + **1080p AI Up** | **55.96s** (`9.36s` Upscale) | **50.94s** (`12.04s` Upscale) | Widescreen desktop & TV wallpapers |
 | **✨ Crisp 1080p HD** | `512×768 → 1080×1620` / `768×1024 → 1080×1440` | 8 / 6 steps + **1080p AI Up** | **46.47s** (`8.19s` Upscale) | **67.59s** (`16.84s` Upscale) | Flagship 1080p portrait quality |
 | **💎 Ultra Detail** | `512×768` (12 stp) / `1024×1024 → 1080×1080` (8 stp) | 12 / 8 steps + **1080p AI Up** | **60.08s** (`34.11s` UNet) | **102.37s** (`50.06s` UNet) | Maximum fine detail & linework |
-| **🐢 Standard 20-Step** | `512×768 → 1080p` / `768×1024` (Non-DMD2) | 20 steps · CFG 7.0 · `Euler a` | **87.17s** (`Anything V5` / `DreamShaper 8`) | **227.98s** (Non-DMD2 baseline) | Shows why DMD2 6-step is **4.5× faster** |
+| **🐢 Standard 20-Step** | `512×768 → 1080p` / `768×1024` (Non-DMD2) | 20 steps · CFG 7.0 · `Euler a` | **87.19s** (`DreamShaper 8`) | **227.98s** (Non-DMD2 baseline) | Shows why DMD2 6-step is **4.5× faster** |
 
 ### 2. Full Model × Resolution × Framing × Power Mode Matrix
 
@@ -81,12 +81,11 @@ Control everything with a DualShock 4 directly on your TV, or open **`http://<PS
 | **MeinaMix V11 8-Step** | SD 1.5 | Half Body | `512×768 → 1080×1620` | 8 stp · CFG 3.5 · `Euler` | **Silent (14 CU)** | 35.68s | 0.58 TF | 16.69s | **9.36s** | 7.15s | **67.20s** | 1,713 MiB |
 | **WAI-Illustrious v17 / v14 DMD2** | SDXL | Half / Full Body | `768×1024 → 1080×1440` | 6 stp · CFG 1.0 · `LCM` | Quiet (20 CU) | 26.60s | 1.11 TF | 19.15s | **16.84s** | 10.96s | **67.59s** | 4,208 MiB |
 | **WAI-Illustrious v14 DMD2** | SDXL | **16:9 Full HD** | `1024×576 → 1920×1080` | 6 stp · CFG 1.0 · `LCM` | **Silent (14 CU)** | 31.30s | 0.70 TF | 21.64s | **14.28s** | 11.40s | **73.38s** | 4,208 MiB |
-| **DreamShaper 8 / Anything V5** | SD 1.5 | Half / Full Body | `512×768 → 1080×1620` | 20 stp · CFG 7.0 · `Euler a` | Quiet (20 CU) | 56.85s | 0.91 TF | 11.02s | **8.19s** | 11.48s | **87.17s** | 1,713 MiB |
+| **DreamShaper 8** | SD 1.5 | Half / Full Body | `512×768 → 1080×1620` | 20 stp · CFG 7.0 · `Euler a` | Quiet (20 CU) | 56.85s | 0.91 TF | 11.02s | **8.19s** | 11.48s | **87.19s** | 1,713 MiB |
 | **WAI-Illustrious v17 DMD2** | SDXL | Tall Full Body | `832×1216 → 1080×1578` | 6 stp · CFG 1.0 · `LCM` | Quiet (20 CU) | 36.51s | 1.07 TF | 22.99s | **23.51s** | 13.28s | **88.11s** | 4,208 MiB |
 | **WAI-Illustrious v17 DMD2** | SDXL | Half Body | `768×1024 → 1080×1440` | 6 stp · CFG 1.0 · `LCM` | **Silent (14 CU)** | 42.52s | 0.70 TF | 28.84s | **19.99s** | 13.70s | **97.60s** | 4,208 MiB |
 | **WAI-Illustrious v17 DMD2** | SDXL | Ultra 1MP + Up | `1024×1024 → 1080×1080` | 8 stp · CFG 1.0 · `LCM` | Quiet (20 CU) | 50.06s | 1.08 TF | 23.95s | **21.64s** | 14.24s | **102.37s** | 4,208 MiB |
-| **Anything V5** | SD 1.5 | Half Body High | `512×768 → 1080×1620` | 25 stp · CFG 7.0 · `Euler a` | Quiet (20 CU) | 71.06s | 0.91 TF | 11.02s | **8.19s** | 13.88s | **104.13s** | 1,713 MiB |
-| **DreamShaper 8 / Anything V5** | SD 1.5 | **16:9 Full HD** | `896×512 → 1890×1080` | 20 stp · CFG 7.0 · `Euler a` | Quiet (20 CU) | 70.85s | 0.88 TF | 13.77s | **9.36s** | 11.80s | **105.03s** | 1,713 MiB |
+| **DreamShaper 8** | SD 1.5 | **16:9 Full HD** | `896×512 → 1890×1080` | 20 stp · CFG 7.0 · `Euler a` | Quiet (20 CU) | 70.85s | 0.88 TF | 13.77s | **9.36s** | 11.80s | **105.03s** | 1,713 MiB |
 | **DreamShaper 8** | SD 1.5 | Ultra 30-Step | `512×768 → 1080×1620` | 30 stp · CFG 7.0 · `Euler a` | Quiet (20 CU) | 85.27s | 0.91 TF | 11.02s | **8.19s** | 16.28s | **121.32s** | 1,713 MiB |
 | **waiNSFWIllustrious_v140** | SDXL | Non-DMD2 Base | `768×1024` (Native) | 20 stp · CFG 7.0 · `Euler a` | Quiet (20 CU) | 177.30s | 1.11 TF | 19.16s | — | 30.40s | **227.98s** | 4,208 MiB |
 | **Base PS4 / PS4 Slim (18 CU)** | SD 1.5 / SDXL | All | `512×768` / `768×1024` | 8 / 6 steps | Balanced (14 CU) | *TBD* | *TBD* | *TBD* | *TBD* | *TBD* | *[Submit Issue!](.github/ISSUE_TEMPLATE/benchmark_report.md)* | 1.54 / 4.04 GiB |
@@ -112,7 +111,7 @@ Control everything with a DualShock 4 directly on your TV, or open **`http://<PS
 1. Download **`Garlic-Diffusion.pkg`** (~7.0 MiB) from [**GitHub Releases**](https://github.com/DJTOMATO/GarlicDiffusion/releases/latest) and install it via *GoldHEN → Package Installer*.
 2. Launch **GarlicDiffusion** from the PS4 home screen.
 3. **Download a model in 1 click right inside the app**:
-   - Press **`[OPTIONS]`** on your DualShock 4 (or select **`Model → + Download / Manage Models`** with **`✕`**, or open `http://<PS4_IP>:8081` → **Models** tab) and download any model from [`DJTomato/ps4-diffusion-models`](https://huggingface.co/DJTomato/ps4-diffusion-models) (`MeinaMix_V11_8step`, `WAI_Illustrious_v17_dmd2`, `waiNSFWIllustrious_v140_dmd2`, `DreamShaper_8`, `Anything_V5`).
+   - Press **`[OPTIONS]`** on your DualShock 4 (or select **`Model → + Download / Manage Models`** with **`✕`**, or open `http://<PS4_IP>:8081` → **Models** tab) and download any model from [`DJTomato/ps4-diffusion-models`](https://huggingface.co/DJTomato/ps4-diffusion-models) (`WAI_Illustrious_v17_dmd2`, `Nova_Anime_XL_v18_dmd2`, `Hassaku_XL_v31_dmd2`, `Prefect_Illustrious_XL_v2_dmd2`, `MeinaMix_V11_8step`, `DreamShaper_8`).
 
 ---
 
@@ -187,7 +186,7 @@ This project is respectfully inspired by and builds upon **[Garlic LLM](https://
 | **Stable Diffusion XL 1.0 & SD 1.5** | Stability AI / RunwayML | CreativeML Open RAIL++-M / RAIL-M |
 | **WAI-Illustrious-SDXL (v1.4 / v1.7)** | WAI / OnomaAI Illustrious | Fair AI Public License 1.0-SD |
 | **DMD2 & Hyper-SD Distillation LoRAs** | Tianwei Yin et al. (MIT) / ByteDance | MIT / CreativeML Open RAIL++-M |
-| **MeinaMix V11 / DreamShaper 8 / Anything V5** | Meina / Lykon / Community | CreativeML Open RAIL-M |
+| **MeinaMix V11 / DreamShaper 8 / GhostMix v2.0** | Meina / Lykon / Community | CreativeML Open RAIL-M |
 | **Real-ESRGAN AnimeVideo v3 (`SRVGGNetCompact`)** | Xintao Wang et al. | BSD-3-Clause |
 | **OpenOrbis PS4 Toolchain** | OpenOrbis Team | GNU GPLv3 |
 | **Selawik UI Font** | Microsoft Corporation | SIL Open Font License 1.1 |

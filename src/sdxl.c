@@ -1875,12 +1875,12 @@ static int vae_encode_tiled(SdxlEngine* e, const uint8_t* rgb_in, uint32_t img_h
     int rc = 0;
     for (uint32_t ty0 = 0; rc == 0 && ty0 < LH; ty0 += STRIDE) {
         uint32_t th = (LH - ty0 < TILE) ? (LH - ty0) : TILE;
-        uint32_t y_off = (ty0 + th == LH && LH > TILE) ? (LH - TILE) : ty0;
-        if (y_off + th > LH) th = LH - y_off;
+        uint32_t y_off = ty0;
+        if (ty0 > 0 && th < TILE && LH >= TILE) { y_off = LH - TILE; th = TILE; }
         for (uint32_t tx0 = 0; rc == 0 && tx0 < LW; tx0 += STRIDE) {
             uint32_t tw = (LW - tx0 < TILE) ? (LW - tx0) : TILE;
-            uint32_t x_off = (tx0 + tw == LW && LW > TILE) ? (LW - TILE) : tx0;
-            if (x_off + tw > LW) tw = LW - x_off;
+            uint32_t x_off = tx0;
+            if (tx0 > 0 && tw < TILE && LW >= TILE) { x_off = LW - TILE; tw = TILE; }
 
             uint32_t ph = th * 8u, pw = tw * 8u;
             for (uint32_t py = 0; py < ph; py++) {
@@ -3609,18 +3609,12 @@ void sdxl_load_preset(const char* model_dir, const char* model_name, int is_sd15
         if (ci_has(model_name, "8step") || ci_has(model_name, "hyper")) {
             out->steps = 8; out->cfg = 3.5f; out->sampler = 1; // Euler
             snprintf(out->description, sizeof(out->description), "SD 1.5 Fast 8-step (Euler · CFG 3.5 · +1080p)");
-        } else if (ci_has(model_name, "counterfeit")) {
-            out->steps = 20; out->cfg = 6.5f; out->sampler = 3; // DPM++ 2M Karras
-            snprintf(out->description, sizeof(out->description), "SD 1.5 Counterfeit V2.5 · DPM++ 2M Karras · CFG 6.5");
         } else if (ci_has(model_name, "ghostmix")) {
             out->steps = 20; out->cfg = 6.5f; out->sampler = 3; // DPM++ 2M Karras
             snprintf(out->description, sizeof(out->description), "SD 1.5 GhostMix v2.0 · DPM++ 2M Karras · CFG 6.5");
         } else if (ci_has(model_name, "dreamshaper")) {
             out->steps = 20; out->cfg = 6.5f; out->sampler = 3; // DPM++ 2M Karras
             snprintf(out->description, sizeof(out->description), "SD 1.5 DreamShaper 8 · DPM++ 2M Karras · CFG 6.5");
-        } else if (ci_has(model_name, "anything")) {
-            out->steps = 20; out->cfg = 7.0f; out->sampler = 3; // DPM++ 2M Karras
-            snprintf(out->description, sizeof(out->description), "SD 1.5 Anything V5 · DPM++ 2M Karras · CFG 7.0");
         } else {
             out->steps = 20; out->cfg = 6.5f; out->sampler = 3; // DPM++ 2M Karras (MeinaMix V11 etc.)
             snprintf(out->description, sizeof(out->description), "SD 1.5 MeinaMix V11 · DPM++ 2M Karras · CFG 6.5");
@@ -3631,7 +3625,8 @@ void sdxl_load_preset(const char* model_dir, const char* model_name, int is_sd15
         int is_illus = ci_has(model_name, "illustrious") || ci_has(model_name, "wai") ||
                        ci_has(model_name, "hassaku") || ci_has(model_name, "nova") ||
                        ci_has(model_name, "pencil") || ci_has(model_name, "walnut") ||
-                       ci_has(model_name, "plant") || ci_has(model_name, "noob") ||
+                       ci_has(model_name, "plant") || ci_has(model_name, "prefect") ||
+                       ci_has(model_name, "obsession") || ci_has(model_name, "noob") ||
                        ci_has(model_name, "animagine");
         out->width = 1024; out->height = 1344;
         out->upscale = 0;
@@ -3652,19 +3647,23 @@ void sdxl_load_preset(const char* model_dir, const char* model_name, int is_sd15
                      "lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad feet, bad eyes, asymmetrical eyes, blurry, worst quality, low quality");
         }
         if (ci_has(model_name, "dmd")) {
-            // Native DMD2 4-step distribution [999, 749, 499, 249] at CFG 1.0:
-            // stays on-manifold without CFG 1.4 eye-melt and runs 3x faster (~50s Quiet)!
-            out->steps = 4; out->cfg = 1.0f; out->sampler = 2; // LCM native 4-step DMD2
             if (ci_has(model_name, "animagine")) {
+                // Animagine XL 4.0 DMD2 needs active CFG guidance (1.4) + 6 steps to avoid flat/grey contrast
+                out->steps = 6; out->cfg = 1.4f; out->sampler = 2;
                 snprintf(out->description, sizeof(out->description),
-                         "Animagine XL 4.0 DMD2 · 1024x1344 Native (LCM · 4 stp · CFG 1.0)");
-            } else if (ci_has(model_name, "noob")) {
-                snprintf(out->description, sizeof(out->description),
-                         "NoobAI-XL 1.1 DMD2 · 1024x1344 Native (LCM · 4 stp · CFG 1.0)");
+                         "Animagine XL 4.0 DMD2 · 1024x1344 Native (LCM · 6 stp · CFG 1.4)");
             } else {
-                snprintf(out->description, sizeof(out->description),
-                         is_illus ? "Illustrious DMD2 · 1024x1344 Native (LCM · 4 stp · CFG 1.0)"
-                                  : "SDXL DMD2 · 1024x1344 Native (LCM · 4 stp · CFG 1.0)");
+                // Native DMD2 4-step distribution [999, 749, 499, 249] at CFG 1.0:
+                // stays on-manifold without CFG 1.4 eye-melt and runs 3x faster (~50s Quiet)!
+                out->steps = 4; out->cfg = 1.0f; out->sampler = 2; // LCM native 4-step DMD2
+                if (ci_has(model_name, "noob")) {
+                    snprintf(out->description, sizeof(out->description),
+                             "NoobAI-XL 1.1 DMD2 · 1024x1344 Native (LCM · 4 stp · CFG 1.0)");
+                } else {
+                    snprintf(out->description, sizeof(out->description),
+                             is_illus ? "Illustrious DMD2 · 1024x1344 Native (LCM · 4 stp · CFG 1.0)"
+                                      : "SDXL DMD2 · 1024x1344 Native (LCM · 4 stp · CFG 1.0)");
+                }
             }
         } else if (ci_has(model_name, "8step") || ci_has(model_name, "hyper")) {
             out->steps = 8; out->cfg = 3.5f; out->sampler = 1; // Euler

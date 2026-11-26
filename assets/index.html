@@ -626,7 +626,7 @@ textarea{min-height:68px;resize:vertical}
         <h2 style="margin:0;color:#6ef3bd">⭐ New Here? Quick Starter Model &amp; LoRA Guide</h2>
         <div style="font-size:12px;color:#d6e4fb;margin-top:4px">
           <b>PS4 Pro:</b> Start with <code>WAI_Illustrious_v17_dmd2</code> or <code>Hassaku_XL_v31_dmd2</code> (~50s SDXL) + <code>Perfect Anime Eyes</code> LoRA.<br>
-          <b>Base PS4 (or Ultra-Fast ~25s renders):</b> Start with <code>MeinaMix_V11_8step</code> or <code>Counterfeit_V25</code> (1.2 GB SD 1.5 + Auto 1080p HD).
+          <b>Base PS4 (or Ultra-Fast ~25s renders):</b> Start with <code>MeinaMix_V11_8step</code> or <code>DreamShaper_8</code> (1.2 GB SD 1.5 + Auto 1080p HD).
         </div>
       </div>
       <button class="btn ok sm" onclick="openStarterModal()">📦 Open Guided Starter Picker</button>
@@ -766,8 +766,8 @@ textarea{min-height:68px;resize:vertical}
         <thead><tr><th>Component</th><th>License</th></tr></thead>
         <tbody>
           <tr><td><b>GarlicDiffusion</b> &amp; <a href="https://garlicllm.dev" target="_blank" rel="noopener" style="color:var(--accent-hi)">Garlic LLM</a> (Leonardo Alegría)</td><td>GNU GPLv3</td></tr>
-          <tr><td><b>SDXL &amp; Illustrious Checkpoints</b> (WAI, Hassaku, Nova, Pencil, NoobAI, Animagine)</td><td>Fair AI 1.0-SD</td></tr>
-          <tr><td><b>SD 1.5 Checkpoints</b> (MeinaMix, Counterfeit, GhostMix, DreamShaper, Anything)</td><td>Open RAIL-M</td></tr>
+          <tr><td><b>SDXL &amp; Illustrious Checkpoints</b> (WAI, Hassaku, Nova, Prefect, Obsession, Pencil, NoobAI, Animagine)</td><td>Fair AI 1.0-SD</td></tr>
+          <tr><td><b>SD 1.5 Checkpoints</b> (MeinaMix, GhostMix, DreamShaper)</td><td>Open RAIL-M</td></tr>
           <tr><td><b>DMD2, Hyper-SD &amp; Real-ESRGAN AnimeVideo v3</b></td><td>MIT / BSD-3-Clause</td></tr>
           <tr><td><b>OpenOrbis PS4 Toolchain &amp; Selawik Font</b></td><td>GPLv3 / SIL OFL 1.1</td></tr>
         </tbody>
@@ -1144,12 +1144,12 @@ const STARTER_MODELS=[
   {id:'WAI_Illustrious_v17_dmd2',title:'WAI-Illustrious v17 DMD2',arch:'sdxl',mb:3716,tag:'👑 #1 Pick for PS4 Pro',pro:true,desc:'Fast 6-step modern Illustrious SDXL (~50s on PS4 Pro). Crisp eyes, hair & lighting.'},
   {id:'Hassaku_XL_v31_dmd2',title:'Hassaku XL v3.1 DMD2',arch:'sdxl',mb:3716,tag:'🎨 Clean Hands & Anime (PS4 Pro)',pro:true,desc:'Broadcast-clean anime lineart & expressive poses in 6 fast steps (~50s Pro).'},
   {id:'MeinaMix_V11_8step',title:'MeinaMix V11 (8-Step Fast)',arch:'sd15',mb:1220,tag:'⚡ #1 Pick for Base PS4 & Speed',pro:false,desc:'Only 1.2 GB! Renders in ~25s + automatic 1080p Real-ESRGAN HD upscale.'},
-  {id:'Counterfeit_V25',title:'Counterfeit V2.5 Pastel',arch:'sd15',mb:1220,tag:'🌸 Artbook Style (Base & Pro)',pro:false,desc:'Beloved Pixiv pastel illustration checkpoint (1.2 GB) + automatic 1080p upscale.'}
+  {id:'Nova_Anime_XL_v18_dmd2',title:'Nova Anime XL v18 DMD2',arch:'sdxl',mb:3716,tag:'✨ Jewel Eyes & 2.5D (PS4 Pro)',pro:true,desc:'Vibrant Illustrious-family 2D/2.5D anime in 6 fast steps (~50s Pro).'}
 ];
 const STARTER_LORAS=[
   {id:'eyes-for-illustrious',file:'eyes-for-illustrious.safetensors',title:'Perfect Anime Eyes XL',arch:'SDXL',mb:218,w:0.75,desc:'Boosts iris catchlights, eyelashes & pupil symmetry on SDXL models.'},
   {id:'better-hands-xl',file:'better-hands-xl.safetensors',title:'Better Hands Helper XL',arch:'SDXL',mb:110,w:0.65,desc:'Improves finger separation & natural hand gestures on SDXL models.'},
-  {id:'add-detail-sd15',file:'add_detail_sd15.safetensors',title:'Detail Tweaker (SD 1.5)',arch:'SD 1.5',mb:36,w:0.75,desc:'Tiny 36 MB detail & sharpness booster for MeinaMix & Counterfeit.'}
+  {id:'add-detail-sd15',file:'add_detail_sd15.safetensors',title:'Detail Tweaker (SD 1.5)',arch:'SD 1.5',mb:36,w:0.75,desc:'Tiny 36 MB detail & sharpness booster for MeinaMix & DreamShaper.'}
 ];
 async function openStarterModal(){
   document.getElementById('starter-modal').classList.add('open');
@@ -1166,7 +1166,7 @@ function renderStarterModal(){
   const sub=document.getElementById('st-mgr-sub');
   if(sub)sub.textContent=neo
     ? 'Detected PS4 Pro: SDXL DMD2 (3.7 GB) & fast SD 1.5 (1.2 GB) checkpoints both run great!'
-    : 'Detected Base PS4: We recommend 1.2 GB SD 1.5 checkpoints (MeinaMix 8-Step or Counterfeit) for fast, cool 1080p renders!';
+    : 'Detected Base PS4: We recommend 1.2 GB SD 1.5 checkpoints (MeinaMix 8-Step or DreamShaper 8) for fast, cool 1080p renders!';
   const instMap=new Map(((mdlMgrData&&mdlMgrData.installed)||[]).map(x=>[x.name,x]));
   const dl=(mdlMgrData&&mdlMgrData.download)||{};
   const ordered=[...STARTER_MODELS].sort((a,b)=>(neo?(b.pro-a.pro):(a.pro-b.pro)));

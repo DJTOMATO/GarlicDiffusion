@@ -139,14 +139,31 @@ int face_detect_anime(const uint8_t* rgb, uint32_t img_w, uint32_t img_h,
                 float eye_detail = fminf(l_edge, r_edge);
                 if (eye_detail < 0.055f) continue;
 
-                // Slight vertical prior: anime faces are usually in the upper 65% of full/upper-body shots
+                // Strong vertical prior: in portrait/full-body anime shots, faces are in the upper 40%
+                // (prevents false positives on skirts/thighs around y=45%..65%)
                 float cy_norm = ((float)y + 0.5f * sz) / (float)dh;
-                float pos_prior = (cy_norm < 0.58f) ? 1.15f : (cy_norm < 0.78f ? 0.92f : 0.70f);
+                float pos_prior;
+                if (dh > dw) {
+                    pos_prior = (cy_norm < 0.36f) ? 1.30f :
+                                (cy_norm < 0.48f ? 0.92f :
+                                (cy_norm < 0.65f ? 0.52f : 0.35f));
+                } else {
+                    pos_prior = (cy_norm < 0.48f) ? 1.20f : (cy_norm < 0.72f ? 0.82f : 0.55f);
+                }
                 float crown_bonus = fmaxf(0.0f, skin_core - top_skin);
+
+                // Reject wide lower-body skin continuations (thighs under a skirt keep high skin density below chin)
+                float below_pen = 1.0f;
+                int by0 = y + sz, by1 = y + sz + sz * 22 / 100;
+                if (by1 <= (int)dh && by1 > by0) {
+                    float ba = (float)((cx1 - cx0) * (by1 - by0));
+                    float below_skin = box_sum(ii_skin, st, cx0, by0, cx1, by1) / ba;
+                    if (below_skin > 0.68f && cy_norm > 0.38f) below_pen = 0.60f;
+                }
 
                 float score = (skin_core * 1.35f + ch_skin * 0.65f + eye_detail * 2.6f
                                + fmaxf(0.0f, eye_contrast) * 2.4f + crown_bonus * 0.95f)
-                              * (0.55f + 0.45f * eye_sym) * pos_prior;
+                              * (0.55f + 0.45f * eye_sym) * pos_prior * below_pen;
                 // Mild preference against tiny noisy boxes
                 score *= (0.85f + 0.15f * sqrtf(area / (float)(dw * dh)));
 

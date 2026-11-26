@@ -324,7 +324,7 @@ static int is_starter_model_id(const char* id, int neo, const char** badge_out) 
             if (badge_out) *badge_out = "#1 STARTER FOR BASE PS4 · ";
             return 2;
         }
-        if (strcmp(id, "Counterfeit_V25") == 0 || strcmp(id, "GhostMix_V2") == 0) {
+        if (strcmp(id, "DreamShaper_8") == 0 || strcmp(id, "GhostMix_V2") == 0) {
             if (badge_out) *badge_out = "RECOMMENDED STARTER · ";
             return 1;
         }

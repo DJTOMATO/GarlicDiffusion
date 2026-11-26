@@ -63,6 +63,24 @@
     "repo": "DJTomato/ps4-diffusion-models"
   },
   {
+    "id": "Prefect_Illustrious_XL_v2_dmd2",
+    "title": "Prefect Illustrious XL v2 DMD2 (Fast SDXL)",
+    "arch": "sdxl",
+    "size_mb": 3716,
+    "desc": "Razor-sharp modern Illustrious anime · Crisp eyes, anatomy & cel lighting · 6 steps (~50s Pro)",
+    "files": "clip_g.psd1,clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "Obsession_Illustrious_v4_dmd2",
+    "title": "Obsession Illustrious v4 DMD2 (Fast SDXL)",
+    "arch": "sdxl",
+    "size_mb": 3716,
+    "desc": "Lush glossy anime lighting & expressive jewel eyes · Illustrious DMD2 · 6 steps (~50s Pro)",
+    "files": "clip_g.psd1,clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
     "id": "waiNSFWIllustrious_v140_dmd2",
     "title": "WAI-Illustrious v14 DMD2 (Fast SDXL)",
     "arch": "sdxl",
@@ -117,15 +135,6 @@
     "repo": "DJTomato/ps4-diffusion-models"
   },
   {
-    "id": "Counterfeit_V25",
-    "title": "Counterfeit V2.5 (Pastel Anime SD 1.5)",
-    "arch": "sd15",
-    "size_mb": 1220,
-    "desc": "Iconic Pixiv pastel illustration · Clean hands & bare feet · Auto 1080p RealESRGAN",
-    "files": "clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
-    "repo": "DJTomato/ps4-diffusion-models"
-  },
-  {
     "id": "GhostMix_V2",
     "title": "GhostMix v2.0 (2.5D Fantasy/Sci-Fi SD 1.5)",
     "arch": "sd15",
@@ -149,15 +158,6 @@
     "arch": "sd15",
     "size_mb": 1220,
     "desc": "Versatile 2.5D fantasy/illustration · 1.5 GiB VRAM · Base PS4 ready",
-    "files": "clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
-    "repo": "DJTomato/ps4-diffusion-models"
-  },
-  {
-    "id": "Anything_V5",
-    "title": "Anything V5 (Cel-Shaded SD 1.5)",
-    "arch": "sd15",
-    "size_mb": 1220,
-    "desc": "Crisp cel-shaded anime · 1.5 GiB VRAM · Auto 1080p RealESRGAN",
     "files": "clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
     "repo": "DJTomato/ps4-diffusion-models"
   }

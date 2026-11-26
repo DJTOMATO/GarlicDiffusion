@@ -230,14 +230,9 @@ def main():
     ap.add_argument("--unet-only", action="store_true", help="Only build unet.psd1 (shares CLIP/VAE on PS4)")
     ap.add_argument("--lora", default="", help="Local .safetensors path OR Hugging Face owner/repo/file.safetensors")
     ap.add_argument("--lora-scale", type=float, default=0.8)
-    ap.add_argument("--vae-repo", default="", help="Optional HF repo to source VAE from (e.g. stabilityai/sd-vae-ft-mse for Counterfeit V2.5)")
+    ap.add_argument("--vae-repo", default="", help="Optional HF repo to source VAE from (e.g. stabilityai/sd-vae-ft-mse)")
     ap.add_argument("--preset-desc", default="", help="Optional description for preset.cfg")
     args = ap.parse_args()
-
-    # Counterfeit V2.5 ships with the washed-out SD 1.4/1.5 VAE on HF; automatically use sd-vae-ft-mse unless overridden
-    if args.arch == "sd15" and not args.vae_repo and "counterfeit" in args.name.lower():
-        args.vae_repo = "stabilityai/sd-vae-ft-mse"
-        print("Auto-selecting stabilityai/sd-vae-ft-mse VAE for Counterfeit V2.5 (fixes washed-out colors)", flush=True)
 
     out_dir = ROOT / "diffusion" / "models" / args.name
     cache_dir = ROOT / "diffusion" / "cache" / args.name
@@ -308,14 +303,10 @@ def main():
         neg = "(worst quality, low quality:1.4), lowres, bad anatomy, bad hands, extra digits, fewer digits, bad feet, bad eyes, blurry, text, watermark"
         if "8step" in nl or "hyper" in nl:
             steps, cfg, smp, desc = 8, 3.5, "Euler", "SD 1.5 Fast 8-step (Hyper-SD15 · ~10s + 1080p)"
-        elif "counterfeit" in nl:
-            steps, cfg, smp, desc = 20, 7.0, "DPM++ 2M Karras", "SD 1.5 Counterfeit V2.5 · Pastel Pixiv anime (+ 1080p)"
         elif "ghostmix" in nl:
             steps, cfg, smp, desc = 20, 7.0, "DPM++ 2M Karras", "SD 1.5 GhostMix v2.0 · 2.5D fantasy/sci-fi anime (+ 1080p)"
         elif "dreamshaper" in nl:
             steps, cfg, smp, desc = 20, 7.0, "Euler a", "SD 1.5 DreamShaper 8 · 2.5D fantasy/anime (~20s + 1080p)"
-        elif "anything" in nl:
-            steps, cfg, smp, desc = 20, 7.0, "Euler a", "SD 1.5 Anything V5 · Crisp cel-shaded anime (~20s + 1080p)"
         else:
             steps, cfg, smp, desc = 20, 7.0, "Euler a", "SD 1.5 MeinaMix V11 · Glossy classic anime (~20s + 1080p)"
     else:
@@ -332,6 +323,10 @@ def main():
                 desc = "SDXL Illustrious Pencil XL v3.2 + DMD2 · Fine-line artbook (4 stp, CFG 1.0, ~50s)"
             elif "walnut" in nl or "plant" in nl:
                 desc = "SDXL Plant Milk Walnut + DMD2 · Painterly anime (4 stp, CFG 1.0, ~50s)"
+            elif "prefect" in nl:
+                desc = "SDXL Prefect Illustrious XL v2 + DMD2 · Razor-sharp modern anime (4 stp, CFG 1.0, ~50s)"
+            elif "obsession" in nl:
+                desc = "SDXL Obsession Illustrious v4 + DMD2 · Lush glossy anime (4 stp, CFG 1.0, ~50s)"
             else:
                 desc = f"SDXL {args.name} · DMD2 Native 4-Step (4 steps, CFG 1.0, ~50s)"
         elif "8step" in nl or "hyper" in nl:

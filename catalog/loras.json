@@ -215,7 +215,7 @@
     "size_mb": 36,
     "default_weight": 0.75,
     "trigger": "",
-    "desc": "Classic SD 1.5 detail & sharpness enhancer for Counterfeit, GhostMix, MeinaMix & Anything V5",
+    "desc": "Classic SD 1.5 detail & sharpness enhancer for MeinaMix, GhostMix & DreamShaper",
     "filename": "add_detail_sd15.safetensors",
     "url": "https://huggingface.co/OedoSoldier/detail-tweaker-lora/resolve/main/add_detail.safetensors"
   },
