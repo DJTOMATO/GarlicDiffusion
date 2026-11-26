@@ -91,6 +91,7 @@ typedef struct {
     int best_gemm; // 0 = 64x64, 1 = 128x64, 2 = 128x128
     const SdxlKernel *k_im2col, *k_gn, *k_ln, *k_add_temb, *k_concat;
     const SdxlKernel *k_up2x, *k_geglu, *k_act, *k_clip_emb, *k_attn64, *k_attn40, *k_attn80, *k_attn160, *k_attn512, *k_prelu;
+    const SdxlKernel *k_lora_q8, *k_lora_f32;
 
     // Architecture flag: 0 = SDXL (CLIP-L + OpenCLIP-G + 2.6B UNet), 1 = SD 1.5 (CLIP-L + 860M UNet)
     int is_sd15;
@@ -122,8 +123,19 @@ typedef struct {
     uint64_t lat_in, eps_u, eps_c;
 
     double last_gen_sec;
+    // Live runtime telemetry for real-time ETA calculation
+    uint32_t rt_phase;        // 0=idle, 1=clip, 2=unet, 3=vae, 4=upscale, 5=load
+    uint32_t rt_step_done;
+    uint32_t rt_steps_total;
+    uint32_t rt_tiles_done;
+    uint32_t rt_tiles_total;
+    double   rt_step_avg_sec;
+    double   rt_tile_avg_sec;
+
     SdxlStats stats;
     char model_name[64];
+    char model_dir[256];
+    char applied_lora_spec[384];
     char error[256];
 } SdxlEngine;
 
@@ -154,6 +166,12 @@ typedef struct {
 const char* sdxl_eco_name(int eco_mode);
 const char* sdxl_eco_name_ex(int eco_mode, int neo);
 void sdxl_load_preset(const char* model_dir, const char* model_name, int is_sd15, ModelPreset* out);
+void sdxl_load_speed_preset(const char* model_name, int is_sd15, ModelPreset* out);
+void sdxl_clean_prompt_dupes(const char* src, char* dst, size_t dst_max);
+void sdxl_expand_wildcards(const char* src, uint64_t seed, int nsfw_allow, uint32_t rand_mask,
+                           char* dst, size_t dst_max);
+void sdxl_apply_quality_shield(const char* model_name, int is_sd15, int auto_quality, int nsfw_allow,
+                               char* prompt, size_t pr_max, char* negative, size_t ng_max);
 int sdxl_read_temp_c(int* cpu_c, int* soc_c);
 int sdxl_check_pack(const char* path, uint64_t* actual_out, uint64_t* expected_out);
 int sdxl_init(SdxlEngine* e, const char* assets_dir, const char* model_dir,
@@ -163,8 +181,22 @@ int sdxl_reload_model(SdxlEngine* e, const char* model_dir,
                       SdxlProgressFn progress, void* user);
 void sdxl_free(SdxlEngine* e);
 
+// Synchronize active Kohya/Diffusers .safetensors LoRAs in `loras_dir` with `lora_spec`
+// (comma-separated "file_or_stem:weight", or "" for none). Reloads clean base UNet/CLIP weights
+// automatically when changing/clearing previously fused LoRAs; 0-cost no-op when unchanged.
+int sdxl_sync_loras(SdxlEngine* e, const char* loras_dir, const char* lora_spec,
+                    SdxlProgressFn progress, void* user);
+
+// Extract `<lora:name:weight>` tags from `raw_prompt` into `clean_prompt` (stripped for CLIP)
+// and merge with optional `ui_lora` + `ui_strength` into canonical `out_spec` ("name:0.80,...").
+void sdxl_extract_loras(const char* raw_prompt, const char* ui_lora, float ui_strength,
+                        char* clean_prompt, size_t clean_max, char* out_spec, size_t spec_max);
+
 int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
                   SdxlProgressFn progress, SdxlCancelFn cancel, void* user);
+int sdxl_img2img(SdxlEngine* e, const SdxlParams* p, const uint8_t* init_rgb, float denoise,
+                 uint8_t* rgb_out, SdxlProgressFn progress, SdxlCancelFn cancel, void* user);
+int sdxl_has_vae_encoder(const SdxlEngine* e);
 int sdxl_upscale_rgb(SdxlEngine* e, const uint8_t* src_rgb, uint32_t src_w, uint32_t src_h,
                      uint8_t** dst_rgb_out, uint32_t* dst_w_out, uint32_t* dst_h_out,
                      int upscale_mode, int eco_mode,

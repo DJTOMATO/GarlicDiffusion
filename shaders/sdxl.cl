@@ -952,3 +952,75 @@ void prelu_inplace(global float* x, global const float* w, uint HW, uint C) {
         if (v < 0.0f) x[i] = v * w[(uint)(i % C)];
     }
 }
+
+// 18. In-place Q8_0 LoRA weight fusion on GPU: W_new[r,c] = W_old[r,c] + mult * sum_k Up[r,k] * Down[k,c]
+// Each 256-thread workgroup processes 8 Q8_0 blocks of 32 columns (total_blocks = rows * (cols / 32)).
+kernel __attribute__((reqd_work_group_size(256, 1, 1)))
+void lora_fuse_q8(global schar* Wq, global half_t* Wsc,
+                  global const float* Up, global const float* Down,
+                  uint rows, uint cols, uint rank, float mult) {
+    local float lmax[256];
+    uint tid = LID;
+    uint sub = tid >> 5;
+    uint lane = tid & 31u;
+    uint k_blocks = cols >> 5;
+    ulong blk_idx = (ulong)GID * 8u + sub;
+    ulong total_blocks = (ulong)rows * k_blocks;
+    float w_new = 0.0f;
+    uint row = 0, col = 0;
+    int active = (blk_idx < total_blocks);
+    if (active) {
+        row = (uint)(blk_idx / k_blocks);
+        uint kb = (uint)(blk_idx % k_blocks);
+        col = (kb << 5) + lane;
+        ulong woff = (ulong)row * cols + col;
+        float w_old = (float)Wq[woff] * (float)Wsc[blk_idx];
+        float delta = 0.0f;
+        ulong uoff = (ulong)row * rank;
+        for (uint r = 0; r < rank; r++) {
+            delta += Up[uoff + r] * Down[(ulong)r * cols + col];
+        }
+        w_new = w_old + mult * delta;
+    }
+    lmax[tid] = active ? __builtin_fabsf(w_new) : 0.0f;
+    BARRIER();
+    if (lane < 16u) lmax[tid] = __builtin_fmaxf(lmax[tid], lmax[tid + 16u]);
+    BARRIER();
+    if (lane < 8u)  lmax[tid] = __builtin_fmaxf(lmax[tid], lmax[tid + 8u]);
+    BARRIER();
+    if (lane < 4u)  lmax[tid] = __builtin_fmaxf(lmax[tid], lmax[tid + 4u]);
+    BARRIER();
+    if (lane < 2u)  lmax[tid] = __builtin_fmaxf(lmax[tid], lmax[tid + 2u]);
+    BARRIER();
+    if (lane == 0u && active) {
+        float mx = __builtin_fmaxf(lmax[tid], lmax[tid + 1u]);
+        Wsc[blk_idx] = (half_t)(mx / 127.0f);
+    }
+    BARRIER();
+    if (active) {
+        float sc = (float)Wsc[blk_idx];
+        float inv = (sc > 0.0f) ? (1.0f / sc) : 0.0f;
+        float qf = __builtin_rint(w_new * inv);
+        if (qf < -127.0f) qf = -127.0f;
+        if (qf >  127.0f) qf =  127.0f;
+        Wq[(ulong)row * cols + col] = (schar)((int)qf);
+    }
+}
+
+// 19. In-place F32 LoRA weight fusion on GPU (for conv_in, conv_out, or small F32 weights)
+kernel __attribute__((reqd_work_group_size(256, 1, 1)))
+void lora_fuse_f32(global float* W, global const float* Up, global const float* Down,
+                   uint rows, uint cols, uint rank, float mult) {
+    ulong idx = (ulong)GID * 256u + LID;
+    ulong total = (ulong)rows * cols;
+    if (idx < total) {
+        uint row = (uint)(idx / cols);
+        uint col = (uint)(idx % cols);
+        float delta = 0.0f;
+        ulong uoff = (ulong)row * rank;
+        for (uint r = 0; r < rank; r++) {
+            delta += Up[uoff + r] * Down[(ulong)r * cols + col];
+        }
+        W[idx] += mult * delta;
+    }
+}

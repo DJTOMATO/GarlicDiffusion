@@ -2,6 +2,7 @@
 // Builds for PS4 / PS4 Pro GCN GPU (default) or Windows/Host CPU verification (-DSDXL_CPU).
 
 #include "sdxl.h"
+#include "randomizer_pools.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -44,10 +45,10 @@ int sceKernelGetSocSensorTemperature(int sensor, int* temp);
 #define ALIGN_2MB (2ull << 20)
 #endif
 
-#define BUF_MAIN_BYTES (80ull << 20)
+#define BUF_MAIN_BYTES (88ull << 20)
 #define BUF_QKV_BYTES  (16ull << 20)
 #define BUF_IM2COL_BYTES (64ull << 20)
-#define BUF_SKIPS_BYTES (128ull << 20)
+#define BUF_SKIPS_BYTES (144ull << 20)
 
 #ifndef SDXL_CPU
 void glog(const char* fmt, ...);
@@ -524,6 +525,8 @@ static int load_kernels(SdxlEngine* e, const char* path) {
     e->k_attn160   = find_k(e, "attn_d160");
     e->k_attn512   = find_k(e, "attn_d512");
     e->k_prelu     = find_k(e, "prelu_inplace");
+    e->k_lora_q8   = find_k(e, "lora_fuse_q8");
+    e->k_lora_f32  = find_k(e, "lora_fuse_f32");
     return e->error[0] ? -1 : 0;
 }
 
@@ -622,6 +625,31 @@ static void op_prelu(SdxlEngine* e, uint64_t x, uint64_t w, uint32_t HW, uint32_
     uint64_t total = (uint64_t)HW * C;
     dispatch(e, e->k_prelu, args_v(e, "ppuu", x, w, HW, C), (uint32_t)((total + 255ull) / 256ull), 256);
 }
+static void op_lora_fuse_q8(SdxlEngine* e, uint64_t Wq, uint64_t Wsc, uint64_t Up, uint64_t Down,
+                            uint32_t rows, uint32_t cols, uint32_t rank, float mult) {
+    uint64_t total_blocks = (uint64_t)rows * (cols >> 5);
+    uint32_t groups = (uint32_t)((total_blocks + 7ull) >> 3);
+    dispatch(e, e->k_lora_q8, args_v(e, "ppppuuuf", Wq, Wsc, Up, Down, rows, cols, rank, (double)mult), groups, 256);
+}
+static void op_lora_fuse_f32(SdxlEngine* e, uint64_t W, uint64_t Up, uint64_t Down,
+                             uint32_t rows, uint32_t cols, uint32_t rank, float mult) {
+    uint64_t total = (uint64_t)rows * cols;
+    uint32_t groups = (uint32_t)((total + 255ull) >> 8);
+    dispatch(e, e->k_lora_f32, args_v(e, "pppuuuf", W, Up, Down, rows, cols, rank, (double)mult), groups, 256);
+}
+
+static float host_fp16_to_f32(uint16_t h) {
+    uint32_t s = (uint32_t)(h & 0x8000u) << 16;
+    uint32_t ex = (h >> 10) & 31u;
+    uint32_t m = h & 0x3FFu;
+    if (ex == 0) {
+        if (m == 0) { float z = 0.0f; return s ? -z : z; }
+        float v = ldexpf((float)m, -24);
+        return s ? -v : v;
+    }
+    uint32_t f = (ex == 31) ? (s | 0x7F800000u | (m << 13)) : (s | ((ex + 112u) << 23) | (m << 13));
+    float r; memcpy(&r, &f, 4); return r;
+}
 
 #else // ---- HOST CPU REFERENCE BACKEND (Windows testing) ------------------------------------------
 
@@ -644,6 +672,23 @@ static float fp16_to_f32(uint16_t h) {
     float r;
     memcpy(&r, &f, 4);
     return r;
+}
+
+static float host_fp16_to_f32(uint16_t h) { return fp16_to_f32(h); }
+
+static uint16_t f32_to_fp16(float v) {
+    uint32_t u;
+    memcpy(&u, &v, 4);
+    uint32_t sign = (u >> 16) & 0x8000u;
+    int32_t exp = (int32_t)((u >> 23) & 0xFFu) - 127 + 15;
+    uint32_t mant = u & 0x7FFFFFu;
+    if (exp <= 0) {
+        if (exp < -10) return (uint16_t)sign;
+        mant = (mant | 0x800000u) >> (1 - exp);
+        return (uint16_t)(sign | ((mant + 0x1000u) >> 13));
+    }
+    if (exp >= 31) return (uint16_t)(sign | 0x7C00u);
+    return (uint16_t)(sign | ((uint32_t)exp << 10) | ((mant + 0x1000u) >> 13));
 }
 
 static inline float cpu_silu(float x) { return x / (1.0f + expf(-x)); }
@@ -714,6 +759,59 @@ static void op_gemm_f32(SdxlEngine* e, uint64_t A, uint64_t W, uint64_t bias, ui
             for (uint32_t k = 0; k < K; k++) acc += ar[k] * wr[k];
             if (pB) acc += pB[n];
             cr[n] = add_res ? (cr[n] + acc) : acc;
+        }
+    }
+}
+static void op_lora_fuse_q8(SdxlEngine* e, uint64_t Wq, uint64_t Wsc, uint64_t Up, uint64_t Down,
+                            uint32_t rows, uint32_t cols, uint32_t rank, float mult) {
+    (void)e;
+    int8_t* pW = (int8_t*)(uintptr_t)Wq;
+    uint16_t* pS = (uint16_t*)(uintptr_t)Wsc;
+    const float* pU = (const float*)(uintptr_t)Up;
+    const float* pD = (const float*)(uintptr_t)Down;
+    uint32_t nb = cols >> 5;
+    for (uint32_t row = 0; row < rows; row++) {
+        const float* ur = pU + (size_t)row * rank;
+        for (uint32_t kb = 0; kb < nb; kb++) {
+            uint64_t bidx = (uint64_t)row * nb + kb;
+            float sc_old = fp16_to_f32(pS[bidx]);
+            float vals[32];
+            float mx = 0.0f;
+            for (uint32_t lane = 0; lane < 32; lane++) {
+                uint32_t col = (kb << 5) + lane;
+                float w_old = (float)pW[(size_t)row * cols + col] * sc_old;
+                float delta = 0.0f;
+                for (uint32_t r = 0; r < rank; r++) delta += ur[r] * pD[(size_t)r * cols + col];
+                float wn = w_old + mult * delta;
+                vals[lane] = wn;
+                float aw = fabsf(wn);
+                if (aw > mx) mx = aw;
+            }
+            uint16_t sc_h = f32_to_fp16(mx / 127.0f);
+            pS[bidx] = sc_h;
+            float sc_new = fp16_to_f32(sc_h);
+            float inv = sc_new > 0.0f ? (1.0f / sc_new) : 0.0f;
+            for (uint32_t lane = 0; lane < 32; lane++) {
+                float qf = rintf(vals[lane] * inv);
+                if (qf < -127.0f) qf = -127.0f;
+                if (qf >  127.0f) qf =  127.0f;
+                pW[(size_t)row * cols + (kb << 5) + lane] = (int8_t)((int)qf);
+            }
+        }
+    }
+}
+static void op_lora_fuse_f32(SdxlEngine* e, uint64_t W, uint64_t Up, uint64_t Down,
+                             uint32_t rows, uint32_t cols, uint32_t rank, float mult) {
+    (void)e;
+    float* pW = (float*)(uintptr_t)W;
+    const float* pU = (const float*)(uintptr_t)Up;
+    const float* pD = (const float*)(uintptr_t)Down;
+    for (uint32_t row = 0; row < rows; row++) {
+        const float* ur = pU + (size_t)row * rank;
+        for (uint32_t col = 0; col < cols; col++) {
+            float delta = 0.0f;
+            for (uint32_t r = 0; r < rank; r++) delta += ur[r] * pD[(size_t)r * cols + col];
+            pW[(size_t)row * cols + col] += mult * delta;
         }
     }
 }
@@ -1241,6 +1339,10 @@ static void spatial_transformer(SdxlEngine* e, const SdxlPack* p, const char* pr
 
 static void push_skip(SdxlEngine* e, uint64_t src, uint32_t HW, uint32_t C, uint64_t* skip_off) {
     uint64_t sz = ((uint64_t)HW * C * 4ull + 255ull) & ~255ull;
+    if (*skip_off + sz > e->buf_skips_bytes) {
+        fail(e, "skip_pool overflow (%llu > %llu)", (unsigned long long)(*skip_off + sz), (unsigned long long)e->buf_skips_bytes);
+        return;
+    }
     uint64_t dst = e->skip_pool + *skip_off;
     *skip_off += sz;
     op_copy(e, src, dst, HW * C);
@@ -1592,7 +1694,186 @@ static int vae_decode_tile(SdxlEngine* e, uint64_t lat_tile, uint32_t th, uint32
     return gpu_flush(e);
 }
 
-static int vae_decode_tiled(SdxlEngine* e, const float* lat, uint32_t img_h, uint32_t img_w, uint8_t* rgb_out) {
+// =================================================================================================
+// OPTIONAL TILED SDXL/SD1.5 VAE ENCODER (for on-demand Img2Img / Gallery "Fix Face")
+// Uses encoder.* + quant_conv.* either bundled in vae.psd1 or loaded transiently from vae_enc.psd1
+// =================================================================================================
+
+static int file_can_open(const char* path);
+
+static int find_vae_encoder_path(const SdxlEngine* e, char* out, size_t max) {
+    char cand[4][320];
+    int n = 0;
+    if (e->model_dir[0]) {
+        snprintf(cand[n++], sizeof(cand[0]), "%s/vae_enc.psd1", e->model_dir);
+    }
+    const char* arch_fn = e->is_sd15 ? "vae_enc_sd15.psd1" : "vae_enc_sdxl.psd1";
+    snprintf(cand[n++], sizeof(cand[0]), "/data/garlic-diffusion/%s", arch_fn);
+    snprintf(cand[n++], sizeof(cand[0]), "/data/garlic-diffusion/models/%s", arch_fn);
+    snprintf(cand[n++], sizeof(cand[0]), "/app0/assets/%s", arch_fn);
+    for (int i = 0; i < n; i++) {
+        if (file_can_open(cand[i])) {
+            if (out && max) snprintf(out, max, "%s", cand[i]);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int sdxl_has_vae_encoder(const SdxlEngine* e) {
+    if (!e) return 0;
+    if (e->vae.t && pack_find(&e->vae, "encoder.conv_in.weight") != NULL) return 1;
+    return find_vae_encoder_path(e, NULL, 0);
+}
+
+static int vae_encode_tile(SdxlEngine* e, const SdxlPack* p, uint64_t rgb_in, uint32_t img_h, uint32_t img_w, uint64_t lat_out) {
+    uint32_t H = img_h, W = img_w;
+    conv3x3_op(e, p, "encoder.conv_in.weight", "encoder.conv_in.bias", rgb_in, e->buf_a, H, W, 3, 128, 1);
+
+    static const uint32_t dn_ch[4] = {128, 256, 512, 512};
+    uint32_t cur_c = 128;
+    for (int d = 0; d < 4; d++) {
+        uint32_t out_c = dn_ch[d];
+        for (int r = 0; r < 2; r++) {
+            char rn[96];
+            snprintf(rn, sizeof(rn), "encoder.down_blocks.%d.resnets.%d", d, r);
+            resnet_2d(e, p, rn, e->buf_a, e->buf_b, H, W, cur_c, out_c, 0, 1e-6f);
+            op_copy(e, e->buf_b, e->buf_a, H * W * out_c);
+            cur_c = out_c;
+        }
+        if (d < 3) {
+            char dw[96], db[96];
+            snprintf(dw, sizeof(dw), "encoder.down_blocks.%d.downsamplers.0.conv.weight", d);
+            snprintf(db, sizeof(db), "encoder.down_blocks.%d.downsamplers.0.conv.bias", d);
+            conv3x3_op(e, p, dw, db, e->buf_a, e->buf_b, H, W, cur_c, cur_c, 2);
+            H /= 2; W /= 2;
+            op_copy(e, e->buf_b, e->buf_a, H * W * cur_c);
+        }
+        if (gpu_flush(e)) return -1;
+    }
+
+    resnet_2d(e, p, "encoder.mid_block.resnets.0", e->buf_a, e->buf_b, H, W, 512, 512, 0, 1e-6f);
+    gn_op(e, p, "encoder.mid_block.attentions.0.group_norm", e->buf_b, e->buf_c, H * W, 512, 32, 1e-6f, 0);
+    linear_op(e, p, "encoder.mid_block.attentions.0.to_q.weight", "encoder.mid_block.attentions.0.to_q.bias", e->buf_c, e->buf_q, H * W, 0);
+    linear_op(e, p, "encoder.mid_block.attentions.0.to_k.weight", "encoder.mid_block.attentions.0.to_k.bias", e->buf_c, e->buf_k, H * W, 0);
+    linear_op(e, p, "encoder.mid_block.attentions.0.to_v.weight", "encoder.mid_block.attentions.0.to_v.bias", e->buf_c, e->buf_v, H * W, 0);
+    op_attn512(e, e->buf_q, e->buf_k, e->buf_v, e->buf_c, H * W, 1.0f / sqrtf(512.0f));
+    linear_op(e, p, "encoder.mid_block.attentions.0.to_out.0.weight", "encoder.mid_block.attentions.0.to_out.0.bias",
+              e->buf_c, e->buf_b, H * W, 1);
+    resnet_2d(e, p, "encoder.mid_block.resnets.1", e->buf_b, e->buf_a, H, W, 512, 512, 0, 1e-6f);
+    gn_op(e, p, "encoder.conv_norm_out", e->buf_a, e->buf_b, H * W, 512, 32, 1e-6f, 1);
+    conv3x3_op(e, p, "encoder.conv_out.weight", "encoder.conv_out.bias", e->buf_b, e->buf_a, H, W, 512, 8, 1);
+    linear_op(e, p, "quant_conv.weight", "quant_conv.bias", e->buf_a, lat_out, H * W, 0);
+    return gpu_flush(e);
+}
+
+static int vae_encode_tiled(SdxlEngine* e, const uint8_t* rgb_in, uint32_t img_h, uint32_t img_w, float* lat_out,
+                            SdxlProgressFn progress, void* user) {
+    const SdxlPack* enc_pack = NULL;
+    SdxlPack tmp_pack;
+    memset(&tmp_pack, 0, sizeof(tmp_pack));
+    uint64_t saved_next = e->next;
+    int loaded_tmp = 0;
+
+    if (e->vae.t && pack_find(&e->vae, "encoder.conv_in.weight") != NULL) {
+        enc_pack = &e->vae;
+    } else {
+        char ep[320] = {0};
+        if (!find_vae_encoder_path(e, ep, sizeof(ep))) {
+            fail(e, "VAE encoder not bundled (place vae_enc_sdxl.psd1 / vae_enc_sd15.psd1 in /data/garlic-diffusion/ or re-convert with --with-vae-encoder)");
+            return -2;
+        }
+        if (progress) progress(user, 0.03f, "Loading optional VAE encoder...");
+        if (pack_load(e, &tmp_pack, ep, NULL, NULL, 0, 0, NULL) != 0) {
+            e->next = saved_next;
+            free(tmp_pack.t);
+            fail(e, "Not enough free GPU RAM for transient VAE encoder");
+            return -1;
+        }
+        enc_pack = &tmp_pack;
+        loaded_tmp = 1;
+    }
+
+    uint32_t LH = img_h / 8u, LW = img_w / 8u;
+    float vae_scale = (e->vae.vae_scale > 0.0f) ? e->vae.vae_scale : (e->is_sd15 ? 0.18215f : 0.13025f);
+    float* acc = (float*)calloc((size_t)LH * LW * 4u, sizeof(float));
+    float* wgt = (float*)calloc((size_t)LH * LW, sizeof(float));
+    if (!acc || !wgt) {
+        free(acc); free(wgt);
+        if (loaded_tmp) { e->next = saved_next; free(tmp_pack.t); }
+        fail(e, "oom vae enc acc");
+        return -1;
+    }
+
+    const uint32_t TILE = e->vae_tile ? e->vae_tile : 32u;
+    const uint32_t OV = (TILE >= 32u) ? 8u : 6u;
+    const uint32_t STRIDE = TILE - OV;
+    float* rgb_tile = (float*)(uintptr_t)e->buf_q; // up to 256*256*3*4 = 768 KiB
+    uint64_t lat8_gpu = e->lat_in;                 // up to 32*32*8*4 = 32 KiB
+    const float* lat8 = (const float*)(uintptr_t)lat8_gpu;
+
+    int rc = 0;
+    for (uint32_t ty0 = 0; rc == 0 && ty0 < LH; ty0 += STRIDE) {
+        uint32_t th = (LH - ty0 < TILE) ? (LH - ty0) : TILE;
+        uint32_t y_off = (ty0 + th == LH && LH > TILE) ? (LH - TILE) : ty0;
+        if (y_off + th > LH) th = LH - y_off;
+        for (uint32_t tx0 = 0; rc == 0 && tx0 < LW; tx0 += STRIDE) {
+            uint32_t tw = (LW - tx0 < TILE) ? (LW - tx0) : TILE;
+            uint32_t x_off = (tx0 + tw == LW && LW > TILE) ? (LW - TILE) : tx0;
+            if (x_off + tw > LW) tw = LW - x_off;
+
+            uint32_t ph = th * 8u, pw = tw * 8u;
+            for (uint32_t py = 0; py < ph; py++) {
+                const uint8_t* src = rgb_in + ((size_t)(y_off * 8u + py) * img_w + x_off * 8u) * 3u;
+                float* dst = rgb_tile + (size_t)py * pw * 3u;
+                for (uint32_t px = 0; px < pw * 3u; px++) {
+                    dst[px] = (float)src[px] / 127.5f - 1.0f;
+                }
+            }
+            if (vae_encode_tile(e, enc_pack, e->buf_q, ph, pw, lat8_gpu) != 0) { rc = -1; break; }
+
+            for (uint32_t ly = 0; ly < th; ly++) {
+                float wy = 1.0f;
+                if (y_off > 0 && ly < OV) wy = (float)(ly + 1u) / (float)(OV + 1u);
+                if (y_off + th < LH && ly >= th - OV) {
+                    float w2 = (float)(th - ly) / (float)(OV + 1u);
+                    if (w2 < wy) wy = w2;
+                }
+                for (uint32_t lx = 0; lx < tw; lx++) {
+                    float wx = 1.0f;
+                    if (x_off > 0 && lx < OV) wx = (float)(lx + 1u) / (float)(OV + 1u);
+                    if (x_off + tw < LW && lx >= tw - OV) {
+                        float w2 = (float)(tw - lx) / (float)(OV + 1u);
+                        if (w2 < wx) wx = w2;
+                    }
+                    float w = wx * wy;
+                    size_t si = ((size_t)ly * tw + lx) * 8u;
+                    size_t di = ((size_t)(y_off + ly) * LW + (x_off + lx));
+                    for (int c = 0; c < 4; c++) acc[di * 4u + c] += lat8[si + c] * w;
+                    wgt[di] += w;
+                }
+            }
+            if (x_off + tw >= LW) break;
+        }
+        if (y_off + th >= LH) break;
+    }
+
+    if (rc == 0) {
+        for (size_t i = 0; i < (size_t)LH * LW; i++) {
+            float inv = wgt[i] > 1e-6f ? (vae_scale / wgt[i]) : vae_scale;
+            for (int c = 0; c < 4; c++) lat_out[i * 4u + c] = acc[i * 4u + c] * inv;
+        }
+    }
+    free(acc); free(wgt);
+    if (loaded_tmp) {
+        e->next = saved_next;
+        free(tmp_pack.t);
+    }
+    return rc;
+}
+
+static int vae_decode_tiled(SdxlEngine* e, const float* lat, uint32_t img_h, uint32_t img_w, uint8_t* rgb_out,
+                            SdxlProgressFn progress, void* user) {
     uint32_t LH = img_h / 8u, LW = img_w / 8u;
     float inv_scale = 1.0f / (e->vae.vae_scale > 0.0f ? e->vae.vae_scale : 0.13025f);
     float* acc = (float*)calloc((size_t)img_h * img_w * 3, sizeof(float));
@@ -1607,6 +1888,20 @@ static int vae_decode_tiled(SdxlEngine* e, const float* lat, uint32_t img_h, uin
     uint64_t rgb_gpu = e->buf_q;
     rgb_tile = (float*)(uintptr_t)rgb_gpu;
 
+    int total_vt = 0, done_vt = 0;
+    for (uint32_t ty0 = 0; ty0 < LH; ty0 += STRIDE) {
+        uint32_t th = (LH - ty0 < TILE) ? (LH - ty0) : TILE;
+        if (ty0 > 0 && th < TILE && LH >= TILE) { ty0 = LH - TILE; th = TILE; }
+        for (uint32_t tx0 = 0; tx0 < LW; tx0 += STRIDE) {
+            uint32_t tw = (LW - tx0 < TILE) ? (LW - tx0) : TILE;
+            if (tx0 > 0 && tw < TILE && LW >= TILE) { tx0 = LW - TILE; tw = TILE; }
+            total_vt++;
+            if (tx0 + tw >= LW) break;
+        }
+        if (ty0 + th >= LH) break;
+    }
+    double vt0 = now_sec(e);
+
     for (uint32_t ty0 = 0; ty0 < LH; ty0 += STRIDE) {
         uint32_t th = (LH - ty0 < TILE) ? (LH - ty0) : TILE;
         if (ty0 > 0 && th < TILE && LH >= TILE) { ty0 = LH - TILE; th = TILE; }
@@ -1618,6 +1913,15 @@ static int vae_decode_tiled(SdxlEngine* e, const float* lat, uint32_t img_h, uin
                 free(acc); free(wgt);
                 return 1;
             }
+            e->rt_phase = 3;
+            e->rt_tiles_done = (uint32_t)done_vt;
+            e->rt_tiles_total = (uint32_t)(total_vt > 0 ? total_vt : 1);
+            e->rt_tile_avg_sec = (done_vt > 0) ? ((now_sec(e) - vt0) / (double)done_vt) : 0.0;
+            if (progress) {
+                char vmsg[96];
+                snprintf(vmsg, sizeof(vmsg), "Decoding VAE (%d/%d tiles)", done_vt + 1, total_vt);
+                progress(user, 0.90f + 0.08f * ((float)done_vt / (float)(total_vt ? total_vt : 1)), vmsg);
+            }
             for (uint32_t y = 0; y < th; y++) {
                 const float* src = lat + ((size_t)(ty0 + y) * LW + tx0) * 4;
                 float* dst = lat_tile + (size_t)y * tw * 4;
@@ -1628,6 +1932,7 @@ static int vae_decode_tiled(SdxlEngine* e, const float* lat, uint32_t img_h, uin
                 return -1;
             }
             e->stats.vae_tiles++;
+            done_vt++;
             int vbr = block_breather(e);
             if (vbr != 0) { free(acc); free(wgt); return vbr; }
             uint32_t ph = th * 8u, pw = tw * 8u;
@@ -1789,6 +2094,8 @@ int sdxl_init(SdxlEngine* e, const char* assets_dir, const char* model_dir,
     if (model_dir && model_dir[0]) {
         const char* slash = strrchr(model_dir, '/');
         snprintf(e->model_name, sizeof(e->model_name), "%s", slash ? slash + 1 : model_dir);
+    snprintf(e->model_dir, sizeof(e->model_dir), "%s", model_dir);
+    e->applied_lora_spec[0] = 0;
     }
 
     char path[256];
@@ -1975,9 +2282,10 @@ int sdxl_init(SdxlEngine* e, const char* assets_dir, const char* model_dir,
     e->tproj      = gpu_alloc(e, 1280ull * 4ull);
     e->add_in     = gpu_alloc(e, 2816ull * 4ull);
     e->aug_emb    = gpu_alloc(e, 1280ull * 4ull);
-    e->lat_in     = gpu_alloc(e, 128ull * 128ull * 4ull * 4ull);
-    e->eps_u      = gpu_alloc(e, 128ull * 128ull * 4ull * 4ull);
-    e->eps_c      = gpu_alloc(e, 128ull * 128ull * 4ull * 4ull);
+    uint64_t lat_cap = compact_mem ? 16384ull : 24576ull; // >= 21,504 latents for 1024x1344 / 1344x1024 on PS4 Pro Neo!
+    e->lat_in     = gpu_alloc(e, lat_cap * 4ull * 4ull);
+    e->eps_u      = gpu_alloc(e, lat_cap * 4ull * 4ull);
+    e->eps_c      = gpu_alloc(e, lat_cap * 4ull * 4ull);
     if (!e->eps_c) { fail(e, "not enough GPU memory for scratch"); return -1; }
 
     // Load optional built-in RealESRGAN Anime v3 upscaler (2.4 MiB) before marking scratch_bytes
@@ -2170,6 +2478,8 @@ int sdxl_reload_model(SdxlEngine* e, const char* model_dir,
     if (bsl && (!slash || bsl > slash)) slash = bsl;
 #endif
     snprintf(e->model_name, sizeof(e->model_name), "%s", slash ? slash + 1 : model_dir);
+    snprintf(e->model_dir, sizeof(e->model_dir), "%s", model_dir);
+    e->applied_lora_spec[0] = 0;
 
     // Log any shared pack resolutions once during real load
     resolve_pack_path(model_dir, "clip_l.psd1", p_cl, sizeof(p_cl), 1, next_sd15, 1);
@@ -2223,7 +2533,601 @@ void sdxl_free(SdxlEngine* e) {
     memset(e, 0, sizeof(*e));
 }
 
-// ---- Automatic Per-Model Preset Detection + preset.cfg Loader -----------------------------------
+// =================================================================================================
+// NATIVE .SAFETENSORS LORA ENGINE (Kohya & Diffusers · UNet + CLIP-L + OpenCLIP-G · PS4 GPU Fusion)
+// =================================================================================================
+
+typedef struct {
+    char name[192];
+    uint8_t dtype;      // 0=F32, 1=F16, 2=BF16, 3=F8_E4M3
+    uint8_t ndim;
+    uint32_t shape[4];
+    uint64_t off_a, off_b;
+} StEntry;
+
+static int cmp_st_entry(const void* a, const void* b) {
+    return strcmp(((const StEntry*)a)->name, ((const StEntry*)b)->name);
+}
+
+static const StEntry* find_st_entry(const StEntry* arr, int n, const char* name) {
+    int lo = 0, hi = n - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) >> 1;
+        int c = strcmp(arr[mid].name, name);
+        if (c == 0) return &arr[mid];
+        if (c < 0) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return NULL;
+}
+
+static float fp8_e4m3_to_f32(uint8_t b) {
+    uint32_t s = (uint32_t)(b & 0x80u) << 24;
+    uint32_t e = (b >> 3) & 0x0Fu;
+    uint32_t m = b & 0x07u;
+    if (e == 0) {
+        if (m == 0) { float z = 0.0f; return s ? -z : z; }
+        float v = ldexpf((float)m, -9);
+        return s ? -v : v;
+    }
+    if (e == 15 && m == 7) return 0.0f; // NaN -> 0
+    uint32_t f = s | ((e + 120u) << 23) | (m << 20);
+    float r; memcpy(&r, &f, 4); return r;
+}
+
+static int st_parse_header(const char* json, size_t jlen, StEntry** out_entries, int* out_n) {
+    int cap = 512, cnt = 0;
+    StEntry* list = (StEntry*)malloc((size_t)cap * sizeof(StEntry));
+    if (!list) return -1;
+
+    const char* p = json;
+    const char* end = json + jlen;
+    while (p < end && *p != '{') p++;
+    if (p < end) p++;
+
+    while (p < end) {
+        while (p < end && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' || *p == ',')) p++;
+        if (p >= end || *p == '}') break;
+        if (*p != '"') break;
+        p++;
+        char key[192];
+        size_t kl = 0;
+        while (p < end && *p != '"') {
+            if (*p == '\\' && p + 1 < end) p++;
+            if (kl + 1 < sizeof(key)) key[kl++] = *p;
+            p++;
+        }
+        key[kl] = 0;
+        if (p < end && *p == '"') p++;
+        while (p < end && (*p == ' ' || *p == ':' || *p == '\t' || *p == '\r' || *p == '\n')) p++;
+        if (p >= end || *p != '{') break;
+
+        // Find matching '}' for this tensor object (skipping nested strings/brackets)
+        const char* obj_start = p;
+        int depth = 0, in_str = 0;
+        while (p < end) {
+            if (in_str) {
+                if (*p == '\\' && p + 1 < end) p++;
+                else if (*p == '"') in_str = 0;
+            } else {
+                if (*p == '"') in_str = 1;
+                else if (*p == '{') depth++;
+                else if (*p == '}') { depth--; if (depth == 0) { p++; break; } }
+            }
+            p++;
+        }
+        const char* obj_end = p;
+        if (strcmp(key, "__metadata__") == 0) continue;
+
+        StEntry e;
+        memset(&e, 0, sizeof(e));
+        snprintf(e.name, sizeof(e.name), "%s", key);
+        e.dtype = 255;
+
+        // Parse dtype
+        const char* dp = strstr(obj_start, "\"dtype\"");
+        if (dp && dp < obj_end) {
+            dp += 7;
+            while (dp < obj_end && *dp != '"') dp++;
+            if (dp < obj_end) {
+                dp++;
+                if (strncmp(dp, "F32", 3) == 0) e.dtype = 0;
+                else if (strncmp(dp, "F16", 3) == 0) e.dtype = 1;
+                else if (strncmp(dp, "BF16", 4) == 0) e.dtype = 2;
+                else if (strncmp(dp, "F8_E4M3", 7) == 0) e.dtype = 3;
+                else if (strncmp(dp, "I64", 3) == 0) e.dtype = 4;
+                else if (strncmp(dp, "I32", 3) == 0) e.dtype = 5;
+            }
+        }
+        // Parse shape
+        const char* sp = strstr(obj_start, "\"shape\"");
+        if (sp && sp < obj_end) {
+            sp += 7;
+            while (sp < obj_end && *sp != '[') sp++;
+            if (sp < obj_end) {
+                sp++;
+                while (sp < obj_end && *sp != ']' && e.ndim < 4) {
+                    while (sp < obj_end && (*sp == ' ' || *sp == ',' || *sp == '\n' || *sp == '\r' || *sp == '\t')) sp++;
+                    if (sp >= obj_end || *sp == ']') break;
+                    e.shape[e.ndim++] = (uint32_t)strtoul(sp, (char**)&sp, 10);
+                }
+            }
+        }
+        // Parse data_offsets
+        const char* op = strstr(obj_start, "\"data_offsets\"");
+        if (op && op < obj_end) {
+            op += 14;
+            while (op < obj_end && *op != '[') op++;
+            if (op < obj_end) {
+                op++;
+                e.off_a = strtoull(op, (char**)&op, 10);
+                while (op < obj_end && (*op == ' ' || *op == ',' || *op == '\n' || *op == '\r' || *op == '\t')) op++;
+                e.off_b = strtoull(op, (char**)&op, 10);
+            }
+        }
+        if (e.dtype != 255 && e.off_b >= e.off_a) {
+            if (cnt >= cap) {
+                cap *= 2;
+                StEntry* nl = (StEntry*)realloc(list, (size_t)cap * sizeof(StEntry));
+                if (!nl) { free(list); return -1; }
+                list = nl;
+            }
+            list[cnt++] = e;
+        }
+    }
+    if (cnt > 1) qsort(list, (size_t)cnt, sizeof(StEntry), cmp_st_entry);
+    *out_entries = list;
+    *out_n = cnt;
+    return 0;
+}
+
+static int st_read_f32(int fd, uint64_t data_base, const StEntry* e, float* dst, size_t expected_elems) {
+    uint64_t raw_bytes = e->off_b - e->off_a;
+    size_t bpe = (e->dtype == 0 || e->dtype == 5) ? 4 : ((e->dtype == 4) ? 8 : ((e->dtype == 3) ? 1 : 2));
+    if (raw_bytes != expected_elems * bpe) return -1;
+    if (lseek(fd, (off_t)(data_base + e->off_a), SEEK_SET) < 0) return -1;
+    if (e->dtype == 0) {
+        return read_exact_fd(fd, dst, raw_bytes);
+    }
+    uint8_t* tmp = (uint8_t*)malloc((size_t)raw_bytes);
+    if (!tmp) return -1;
+    if (read_exact_fd(fd, tmp, (size_t)raw_bytes) != 0) { free(tmp); return -1; }
+    if (e->dtype == 1) {
+        const uint16_t* h = (const uint16_t*)tmp;
+        for (size_t i = 0; i < expected_elems; i++) dst[i] = host_fp16_to_f32(h[i]);
+    } else if (e->dtype == 2) {
+        const uint16_t* bf = (const uint16_t*)tmp;
+        for (size_t i = 0; i < expected_elems; i++) {
+            uint32_t u = ((uint32_t)bf[i]) << 16;
+            float f; memcpy(&f, &u, 4); dst[i] = f;
+        }
+    } else if (e->dtype == 4) {
+        const int64_t* iv = (const int64_t*)tmp;
+        for (size_t i = 0; i < expected_elems; i++) dst[i] = (float)iv[i];
+    } else if (e->dtype == 5) {
+        const int32_t* iv = (const int32_t*)tmp;
+        for (size_t i = 0; i < expected_elems; i++) dst[i] = (float)iv[i];
+    } else {
+        for (size_t i = 0; i < expected_elems; i++) dst[i] = fp8_e4m3_to_f32(tmp[i]);
+    }
+    free(tmp);
+    return 0;
+}
+
+static const StEntry* find_lora_pair(const StEntry* st, int n_st, const char* prefix,
+                                     const StEntry** out_up, const StEntry** out_alpha) {
+    char k_down[192], k_up[192], k_alpha[192];
+    static const char* const DOWN_SFX[] = { ".lora_down.weight", ".lora.down.weight", ".lora_A.weight", "_lora.down.weight" };
+    static const char* const UP_SFX[]   = { ".lora_up.weight",   ".lora.up.weight",   ".lora_B.weight", "_lora.up.weight" };
+    for (int s = 0; s < 4; s++) {
+        snprintf(k_down, sizeof(k_down), "%s%s", prefix, DOWN_SFX[s]);
+        const StEntry* d = find_st_entry(st, n_st, k_down);
+        if (d) {
+            snprintf(k_up, sizeof(k_up), "%s%s", prefix, UP_SFX[s]);
+            const StEntry* u = find_st_entry(st, n_st, k_up);
+            if (u) {
+                snprintf(k_alpha, sizeof(k_alpha), "%s.alpha", prefix);
+                *out_up = u;
+                *out_alpha = find_st_entry(st, n_st, k_alpha);
+                return d;
+            }
+        }
+    }
+    return NULL;
+}
+
+static int fuse_lora_pack(SdxlEngine* e, SdxlPack* pack, int fd, uint64_t data_base,
+                          const StEntry* st, int n_st, const char* const* pfx_list, int n_pfx, float scale) {
+    if (!pack->t || pack->n == 0) return 0;
+    int fused = 0;
+    float* gpu_up = (float*)(uintptr_t)e->buf_a;
+    float* gpu_dn = (float*)(uintptr_t)e->buf_b;
+    size_t max_floats = (size_t)(e->buf_main_bytes / sizeof(float));
+
+    for (uint32_t ti = 0; ti < pack->n; ti++) {
+        const SdxlTensor* t = &pack->t[ti];
+        if (t->cols == 0 || (t->fmt != 0 && t->fmt != 2)) continue;
+        size_t nl = strlen(t->name);
+        if (nl <= 7 || strcmp(t->name + nl - 7, ".weight") != 0) continue;
+
+        char under[128], raw_stem[128];
+        size_t sl = nl - 7;
+        if (sl >= sizeof(under)) continue;
+        memcpy(raw_stem, t->name, sl);
+        raw_stem[sl] = 0;
+        for (size_t i = 0; i < sl; i++) under[i] = (raw_stem[i] == '.') ? '_' : raw_stem[i];
+        under[sl] = 0;
+
+        const StEntry *ed = NULL, *eu = NULL, *ea = NULL;
+        for (int pi = 0; pi < n_pfx && !ed; pi++) {
+            char cand[192];
+            int use_dots = (strchr(pfx_list[pi], '.') != NULL);
+            snprintf(cand, sizeof(cand), "%s%s", pfx_list[pi], use_dots ? raw_stem : under);
+            ed = find_lora_pair(st, n_st, cand, &eu, &ea);
+        }
+        if (!ed || !eu || ed->ndim < 2 || eu->ndim < 2) continue;
+
+        uint32_t rank = ed->shape[0];
+        if (rank == 0 || rank > 512 || eu->shape[1] != rank || eu->shape[0] != t->rows) continue;
+
+        float alpha = (float)rank;
+        if (ea) {
+            float av = 0.0f;
+            if (st_read_f32(fd, data_base, ea, &av, 1) == 0 && av > 0.0f) alpha = av;
+        }
+        float mult = scale * (alpha / (float)rank);
+        if (fabsf(mult) < 1e-7f) continue;
+
+        uint32_t eff_rank = rank;
+        size_t dn_elems = (size_t)ed->shape[0] * ed->shape[1];
+        for (int d = 2; d < ed->ndim; d++) dn_elems *= ed->shape[d];
+        size_t up_elems = (size_t)eu->shape[0] * eu->shape[1];
+        for (int d = 2; d < eu->ndim; d++) up_elems *= eu->shape[d];
+
+        int is_conv_down3 = (ed->ndim == 4 && (ed->shape[2] > 1 || ed->shape[3] > 1) &&
+                             (eu->ndim == 2 || (eu->shape[2] == 1 && eu->shape[3] == 1)));
+        int is_conv_up3   = (eu->ndim == 4 && (eu->shape[2] > 1 || eu->shape[3] > 1) &&
+                             (ed->ndim == 2 || (ed->shape[2] == 1 && ed->shape[3] == 1)));
+
+        if (!is_conv_down3 && !is_conv_up3) {
+            // Standard Linear [rank, cols] or 1x1 Conv2d [rank, cols, 1, 1]
+            if (dn_elems != (size_t)rank * t->cols || up_elems != (size_t)t->rows * rank) continue;
+            if (up_elems > max_floats || dn_elems > max_floats) continue;
+            if (st_read_f32(fd, data_base, eu, gpu_up, up_elems) != 0) continue;
+            if (st_read_f32(fd, data_base, ed, gpu_dn, dn_elems) != 0) continue;
+        } else if (is_conv_down3) {
+            // Conv2d down: [rank, cin, kh, kw] -> transpose to [rank, kh, kw, cin] matching PSD1 NHWC im2col layout!
+            uint32_t cin = ed->shape[1], kh = ed->shape[2], kw = ed->shape[3];
+            if ((uint64_t)cin * kh * kw != t->cols || up_elems != (size_t)t->rows * rank) continue;
+            if (up_elems > max_floats || dn_elems > max_floats) continue;
+            float* raw_dn = (float*)malloc(dn_elems * sizeof(float));
+            if (!raw_dn) continue;
+            if (st_read_f32(fd, data_base, eu, gpu_up, up_elems) != 0 ||
+                st_read_f32(fd, data_base, ed, raw_dn, dn_elems) != 0) {
+                free(raw_dn);
+                continue;
+            }
+            size_t hw = (size_t)kh * kw;
+            for (uint32_t r = 0; r < rank; r++) {
+                const float* sr = raw_dn + (size_t)r * cin * hw;
+                float* dr = gpu_dn + (size_t)r * hw * cin;
+                for (uint32_t c = 0; c < cin; c++)
+                    for (size_t p = 0; p < hw; p++)
+                        dr[p * cin + c] = sr[(size_t)c * hw + p];
+            }
+            free(raw_dn);
+        } else {
+            // Conv2d up: [rows, rank, kh, kw], down: [rank, cin, 1, 1] -> expand to eff_rank = kh*kw*rank
+            uint32_t cin = ed->shape[1], kh = eu->shape[2], kw = eu->shape[3];
+            uint32_t hw = kh * kw;
+            eff_rank = rank * hw;
+            if ((uint64_t)cin * hw != t->cols) continue;
+            if ((size_t)t->rows * eff_rank > max_floats || (size_t)eff_rank * t->cols > max_floats) continue;
+            float* raw_up = (float*)malloc(up_elems * sizeof(float));
+            float* raw_dn = (float*)malloc(dn_elems * sizeof(float));
+            if (!raw_up || !raw_dn) { free(raw_up); free(raw_dn); continue; }
+            if (st_read_f32(fd, data_base, eu, raw_up, up_elems) != 0 ||
+                st_read_f32(fd, data_base, ed, raw_dn, dn_elems) != 0) {
+                free(raw_up); free(raw_dn); continue;
+            }
+            // raw_up is [rows, rank, hw] -> reorder to [rows, hw, rank] = [rows, eff_rank]
+            for (uint32_t o = 0; o < t->rows; o++) {
+                for (uint32_t p = 0; p < hw; p++)
+                    for (uint32_t r = 0; r < rank; r++)
+                        gpu_up[(size_t)o * eff_rank + (size_t)p * rank + r] = raw_up[((size_t)o * rank + r) * hw + p];
+            }
+            memset(gpu_dn, 0, (size_t)eff_rank * t->cols * sizeof(float));
+            for (uint32_t p = 0; p < hw; p++) {
+                for (uint32_t r = 0; r < rank; r++) {
+                    memcpy(gpu_dn + ((size_t)p * rank + r) * t->cols + (size_t)p * cin,
+                           raw_dn + (size_t)r * cin, (size_t)cin * sizeof(float));
+                }
+            }
+            free(raw_up);
+            free(raw_dn);
+        }
+
+        // Synchronously fuse this tensor on PS4 GPU before overwriting buf_a/buf_b with next layer!
+        if (t->fmt == 2) {
+            op_lora_fuse_q8(e, t_addr(pack, t), t_scales(pack, t), e->buf_a, e->buf_b, t->rows, t->cols, eff_rank, mult);
+        } else {
+            op_lora_fuse_f32(e, t_addr(pack, t), e->buf_a, e->buf_b, t->rows, t->cols, eff_rank, mult);
+        }
+        if (gpu_flush(e) != 0) return -1;
+        fused++;
+    }
+    return fused;
+}
+
+static int reload_pack_inplace(SdxlEngine* e, SdxlPack* p, const char* path) {
+    if (!p->t || !p->gpu_base || !p->data_size) return -1;
+#ifdef _WIN32
+    int fd = open(path, O_RDONLY | O_BINARY);
+#else
+    int fd = open(path, O_RDONLY);
+#endif
+    if (fd < 0) { fail(e, "cannot reopen %s", path); return -1; }
+    uint64_t header_end = 24ull + (uint64_t)p->n * sizeof(SdxlTensor);
+    uint64_t data_start = (header_end + 255ull) & ~255ull;
+    if (lseek(fd, (off_t)data_start, SEEK_SET) < 0) { close(fd); return -1; }
+    int rc = read_exact_fd(fd, (void*)(uintptr_t)p->gpu_base, (size_t)p->data_size);
+    close(fd);
+    return rc;
+}
+
+static int apply_single_lora_file(SdxlEngine* e, const char* path, float scale) {
+#ifdef _WIN32
+    int fd = open(path, O_RDONLY | O_BINARY);
+#else
+    int fd = open(path, O_RDONLY);
+#endif
+    if (fd < 0) {
+        glog("LoRA skipped (file not installed): %s", path);
+        return 1; // Soft-skip missing optional LoRA so presets never break
+    }
+    uint64_t hlen = 0;
+    if (read_exact_fd(fd, &hlen, 8) != 0 || hlen == 0 || hlen > (16ull << 20)) {
+        close(fd);
+        fail(e, "Invalid .safetensors header in %s", path);
+        return -1;
+    }
+    char* jbuf = (char*)malloc((size_t)hlen + 1);
+    if (!jbuf || read_exact_fd(fd, jbuf, (size_t)hlen) != 0) {
+        free(jbuf); close(fd);
+        fail(e, "Failed reading LoRA header: %s", path);
+        return -1;
+    }
+    jbuf[hlen] = 0;
+    StEntry* st = NULL;
+    int n_st = 0;
+    int prc = st_parse_header(jbuf, (size_t)hlen, &st, &n_st);
+    free(jbuf);
+    if (prc != 0 || !st || n_st == 0) {
+        free(st); close(fd);
+        fail(e, "No supported tensors in LoRA: %s", path);
+        return -1;
+    }
+
+    // Strict architecture compatibility check BEFORE fusing any layer!
+    // Prevents SD 1.5 LoRAs from partially fusing into SDXL CLIP-L / early ResNets (and vice versa).
+    int has_sdxl_marker = 0, has_sd15_marker = 0;
+    for (int i = 0; i < n_st; i++) {
+        const char* k = st[i].name;
+        if (strstr(k, "lora_te2_") || strstr(k, "text_encoder_2") || strstr(k, "down_blocks_2_attentions")) {
+            has_sdxl_marker = 1;
+            break;
+        }
+        if (st[i].ndim >= 2 && (strstr(k, "attn2_to_k.lora_down") || strstr(k, "attn2.to_k.lora_A"))) {
+            if (st[i].shape[1] == 2048) has_sdxl_marker = 1;
+            else if (st[i].shape[1] == 768) has_sd15_marker = 1;
+        }
+    }
+    if ((e->is_sd15 && has_sdxl_marker) || (!e->is_sd15 && has_sd15_marker && !has_sdxl_marker)) {
+        glog("LoRA blocked (incompatible arch %s for active %s model): '%s'",
+             has_sdxl_marker ? "SDXL" : "SD1.5", e->is_sd15 ? "SD1.5" : "SDXL", path);
+        free(st);
+        close(fd);
+        return 1; // Safely skip incompatible LoRA without corrupting weights!
+    }
+
+    uint64_t data_base = 8ull + hlen;
+    double t0 = now_sec(e);
+    int prev_eco = e->eco_mode;
+    gpu_begin(e);
+
+    static const char* const UNET_PFX[] = { "lora_unet_", "unet.", "unet_" };
+    static const char* const CL_SD15[]  = { "lora_te_", "lora_te1_", "text_encoder." };
+    static const char* const CL_SDXL[]  = { "lora_te1_", "lora_te_", "text_encoder." };
+    static const char* const CG_SDXL[]  = { "lora_te2_", "text_encoder_2." };
+
+    int fu = fuse_lora_pack(e, &e->unet, fd, data_base, st, n_st, UNET_PFX, 3, scale);
+    int fl = (fu >= 0) ? fuse_lora_pack(e, &e->clip_l, fd, data_base, st, n_st, e->is_sd15 ? CL_SD15 : CL_SDXL, 3, scale) : -1;
+    int fg = (fl >= 0 && !e->is_sd15) ? fuse_lora_pack(e, &e->clip_g, fd, data_base, st, n_st, CG_SDXL, 2, scale) : 0;
+
+    e->eco_mode = prev_eco;
+    free(st);
+    close(fd);
+    if (fu < 0 || fl < 0 || fg < 0) return -1;
+    int tot = fu + fl + fg;
+    if (tot == 0) {
+        glog("LoRA skipped (0 matching %s layers): '%s'", e->is_sd15 ? "SD1.5" : "SDXL", path);
+        return 1; // Soft-skip SD1.5 <-> SDXL cross-arch LoRA tags cleanly
+    }
+    glog("LoRA fused '%s' (scale=%.2f): %d layers (UNet=%d, CLIP-L=%d, CLIP-G=%d) in %.2fs",
+         path, (double)scale, tot, fu, fl, fg, now_sec(e) - t0);
+    return 0;
+}
+
+static void clean_lora_stem(const char* raw, char* out, size_t max) {
+    while (*raw == ' ' || *raw == '\t') raw++;
+    snprintf(out, max, "%s", raw);
+    size_t n = strlen(out);
+    while (n > 0 && (out[n - 1] == ' ' || out[n - 1] == '\t')) out[--n] = 0;
+    if (n > 12 && strcmp(out + n - 12, ".safetensors") == 0) out[n - 12] = 0;
+}
+
+void sdxl_extract_loras(const char* raw_prompt, const char* ui_lora, float ui_strength,
+                        char* clean_prompt, size_t clean_max, char* out_spec, size_t spec_max) {
+    char names[6][80];
+    float weights[6];
+    int nl = 0;
+
+    if (ui_lora && ui_lora[0] && fabsf(ui_strength) > 1e-4f) {
+        char st[80];
+        clean_lora_stem(ui_lora, st, sizeof(st));
+        if (st[0] && strcmp(st, "none") != 0 && strcmp(st, "Off") != 0 &&
+            !strchr(st, '/') && !strchr(st, '\\') && !strstr(st, "..")) {
+            snprintf(names[nl], sizeof(names[0]), "%s", st);
+            weights[nl] = ui_strength;
+            nl++;
+        }
+    }
+
+    size_t co = 0;
+    const char* p = raw_prompt ? raw_prompt : "";
+    while (*p) {
+        if ((strncmp(p, "<lora:", 6) == 0 || strncmp(p, "<LORA:", 6) == 0)) {
+            const char* gt = strchr(p + 6, '>');
+            if (gt && (size_t)(gt - (p + 6)) < 120u) {
+                char inner[128];
+                size_t il = (size_t)(gt - (p + 6));
+                memcpy(inner, p + 6, il);
+                inner[il] = 0;
+                char* col = strchr(inner, ':');
+                float w = 0.80f;
+                if (col) {
+                    *col = 0;
+                    char* col2 = strchr(col + 1, ':');
+                    if (col2) *col2 = 0;
+                    w = (float)atof(col + 1);
+                }
+                char st[80];
+                clean_lora_stem(inner, st, sizeof(st));
+                if (st[0] && fabsf(w) > 1e-4f && !strchr(st, '/') && !strchr(st, '\\') && !strstr(st, "..")) {
+                    int dup = -1;
+                    for (int i = 0; i < nl; i++) {
+                        if (strcmp(names[i], st) == 0) { dup = i; break; }
+                    }
+                    if (dup >= 0) weights[dup] = w; // Prompt tag overrides UI slider if same LoRA
+                    else if (nl < 6) {
+                        snprintf(names[nl], sizeof(names[0]), "%s", st);
+                        weights[nl] = w;
+                        nl++;
+                    }
+                }
+                p = gt + 1;
+                while (*p == ' ' || *p == ',') p++;
+                continue;
+            }
+        }
+        if (clean_prompt && co + 1 < clean_max) clean_prompt[co++] = *p;
+        p++;
+    }
+    if (clean_prompt && clean_max) {
+        while (co > 0 && (clean_prompt[co - 1] == ' ' || clean_prompt[co - 1] == ',')) co--;
+        clean_prompt[co] = 0;
+    }
+    if (out_spec && spec_max) {
+        size_t so = 0;
+        out_spec[0] = 0;
+        for (int i = 0; i < nl && so + 96 < spec_max; i++) {
+            so += (size_t)snprintf(out_spec + so, spec_max - so, "%s%s:%.2f", i ? "," : "", names[i], (double)weights[i]);
+        }
+    }
+}
+
+int sdxl_sync_loras(SdxlEngine* e, const char* loras_dir, const char* lora_spec,
+                    SdxlProgressFn progress, void* user) {
+    const char* want = lora_spec ? lora_spec : "";
+    if (strcmp(e->applied_lora_spec, want) == 0) return 0; // Already fused at exact weights!
+
+    // If a previous LoRA was fused into UNet/CLIP weights, restore pristine base weights first
+    if (e->applied_lora_spec[0] != 0) {
+        if (!e->model_dir[0]) { fail(e, "cannot un-apply LoRA without model_dir"); return -1; }
+        if (progress) progress(user, 0.01f, "Restoring base weights for new LoRA...");
+        char p_unet[320], p_cl[320], p_cg[320] = {0};
+        if (resolve_pack_path(e->model_dir, "unet.psd1", p_unet, sizeof(p_unet), 0, 0, 0) != 0 ||
+            resolve_pack_path(e->model_dir, "clip_l.psd1", p_cl, sizeof(p_cl), 1, e->is_sd15, 0) != 0 ||
+            (!e->is_sd15 && resolve_pack_path(e->model_dir, "clip_g.psd1", p_cg, sizeof(p_cg), 1, 0, 0) != 0)) {
+            fail(e, "missing base model files in %s", e->model_dir);
+            return -1;
+        }
+        if (reload_pack_inplace(e, &e->unet, p_unet) != 0 ||
+            reload_pack_inplace(e, &e->clip_l, p_cl) != 0 ||
+            (!e->is_sd15 && reload_pack_inplace(e, &e->clip_g, p_cg) != 0)) {
+            return -1;
+        }
+        e->applied_lora_spec[0] = 0;
+        glog("restored clean base weights for %s", e->model_name);
+    }
+
+    if (!want[0]) return 0;
+
+    // Parse comma-separated "stem:weight" items and fuse each on GPU
+    char buf[384], actual_spec[384] = {0};
+    size_t ao = 0;
+    snprintf(buf, sizeof(buf), "%s", want);
+    char* cur = buf;
+    while (*cur) {
+        char* comma = strchr(cur, ',');
+        if (comma) *comma = 0;
+        char* col = strchr(cur, ':');
+        float w = 0.80f;
+        if (col) { *col = 0; w = (float)atof(col + 1); }
+        if (cur[0] && fabsf(w) > 1e-4f) {
+            char msg[160], fpath[360];
+            snprintf(msg, sizeof(msg), "Fusing LoRA %s (%.2f)...", cur, (double)w);
+            if (progress) progress(user, 0.02f, msg);
+            snprintf(fpath, sizeof(fpath), "%s/%s.safetensors", (loras_dir && loras_dir[0]) ? loras_dir : "/data/garlic-diffusion/loras", cur);
+            if (!file_can_open(fpath)) {
+                // Case-insensitive filename match inside loras_dir so `<lora:Hifumi:0.8>` matches cleanly!
+                const char* ldir = (loras_dir && loras_dir[0]) ? loras_dir : "/data/garlic-diffusion/loras";
+                DIR* d = opendir(ldir);
+                if (d) {
+                    struct dirent* ent;
+                    while ((ent = readdir(d)) != NULL) {
+                        size_t fl = strlen(ent->d_name);
+                        if (fl <= 12 || strcmp(ent->d_name + fl - 12, ".safetensors") != 0) continue;
+                        char stem[80];
+                        clean_lora_stem(ent->d_name, stem, sizeof(stem));
+                        size_t sl = strlen(stem), ql = strlen(cur);
+                        int match = (sl == ql);
+                        for (size_t k = 0; match && k < sl; k++) {
+                            char a = stem[k], b = cur[k];
+                            if (a >= 'A' && a <= 'Z') a += 32;
+                            if (b >= 'A' && b <= 'Z') b += 32;
+                            if (a != b) match = 0;
+                        }
+                        if (match) {
+                            snprintf(fpath, sizeof(fpath), "%s/%s", ldir, ent->d_name);
+                            break;
+                        }
+                    }
+                    closedir(d);
+                }
+            }
+            int arc = apply_single_lora_file(e, fpath, w);
+            if (arc < 0) {
+                // Restore clean weights if a stacked LoRA failed mid-way
+                e->applied_lora_spec[0] = '!'; e->applied_lora_spec[1] = 0;
+                char err_keep[256];
+                snprintf(err_keep, sizeof(err_keep), "%s", e->error);
+                sdxl_sync_loras(e, loras_dir, "", NULL, NULL);
+                snprintf(e->error, sizeof(e->error), "%s", err_keep);
+                return -1;
+            }
+            if (arc == 0 && ao + 96 < sizeof(actual_spec)) {
+                ao += (size_t)snprintf(actual_spec + ao, sizeof(actual_spec) - ao, "%s%s:%.2f", ao ? "," : "", cur, (double)w);
+            }
+        }
+        if (!comma) break;
+        cur = comma + 1;
+    }
+    snprintf(e->applied_lora_spec, sizeof(e->applied_lora_spec), "%s", actual_spec);
+    return 0;
+}
+
+// ---- Prompt Deduplicator, 1050-Word Wildcard Randomizer & Anti-Deformity Shield ----------------
 static int ci_has(const char* hay, const char* needle) {
     size_t nl = strlen(needle);
     for (; *hay; hay++) {
@@ -2240,58 +3144,487 @@ static int ci_has(const char* hay, const char* needle) {
     return 0;
 }
 
+static uint64_t splitmix64_next(uint64_t* st) {
+    uint64_t z = (*st += 0x9E3779B97F4A7C15ull);
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    return z ^ (z >> 31);
+}
+
+static void canonical_tag_key(const char* raw, char* key, size_t max) {
+    while (*raw == ' ' || *raw == '\t' || *raw == '\r' || *raw == '\n') raw++;
+    size_t len = strlen(raw);
+    while (len > 0 && (raw[len - 1] == ' ' || raw[len - 1] == '\t' || raw[len - 1] == '\r' || raw[len - 1] == '\n')) len--;
+
+    // Canonicalize <lora:stem:weight> by stem so duplicate LoRA tags collapse cleanly
+    if (len > 7 && (strncmp(raw, "<lora:", 6) == 0 || strncmp(raw, "<LORA:", 6) == 0) && raw[len - 1] == '>') {
+        size_t k = 0;
+        const char* s = raw + 6;
+        const char* e = raw + len - 1;
+        key[k++] = '<';
+        while (s < e && *s != ':' && k + 2 < max) {
+            char c = *s++;
+            if (c >= 'A' && c <= 'Z') c += 32;
+            key[k++] = c;
+        }
+        if (k > 13 && strncmp(key + k - 12, ".safetensors", 12) == 0) k -= 12;
+        key[k++] = '>';
+        key[k] = 0;
+        return;
+    }
+
+    // Strip outer (tag:1.2) wrapper so "(bad hands:1.3)" and "bad hands" share canonical key "bad hands"
+    if (len >= 2 && raw[0] == '(' && raw[len - 1] == ')') {
+        raw++;
+        len -= 2;
+        const char* col = NULL;
+        for (size_t i = len; i > 0; i--) {
+            if (raw[i - 1] == ':') { col = raw + i - 1; break; }
+            if (!((raw[i - 1] >= '0' && raw[i - 1] <= '9') || raw[i - 1] == '.' || raw[i - 1] == '-' || raw[i - 1] == ' ')) break;
+        }
+        if (col && col > raw) len = (size_t)(col - raw);
+    }
+
+    size_t k = 0;
+    int prev_sp = 1;
+    for (size_t i = 0; i < len && k + 1 < max; i++) {
+        char c = raw[i];
+        if (c == ' ' || c == '\t' || c == '_') {
+            if (!prev_sp) { key[k++] = ' '; prev_sp = 1; }
+        } else {
+            if (c >= 'A' && c <= 'Z') c += 32;
+            key[k++] = c;
+            prev_sp = 0;
+        }
+    }
+    while (k > 0 && key[k - 1] == ' ') k--;
+    key[k] = 0;
+}
+
+void sdxl_clean_prompt_dupes(const char* src, char* dst, size_t dst_max) {
+    if (!dst || !dst_max) return;
+    dst[0] = 0;
+    if (!src || !src[0]) return;
+
+    char keys[192][80];
+    char toks[192][160];
+    int n_toks = 0;
+
+    // Pre-split any adjacent "<lora:...>" glued without commas into separate logical items
+    char norm[2048];
+    size_t no = 0;
+    for (const char* p = src; *p && no + 3 < sizeof(norm); p++) {
+        if ((strncmp(p, "<lora:", 6) == 0 || strncmp(p, "<LORA:", 6) == 0) && no > 0 && norm[no - 1] != ',') {
+            norm[no++] = ',';
+        }
+        norm[no++] = *p;
+        if (*p == '>' && p[1] && p[1] != ',') {
+            norm[no++] = ',';
+        }
+    }
+    norm[no] = 0;
+
+    const char* p = norm;
+    while (*p && n_toks < 192) {
+        while (*p == ' ' || *p == '\t' || *p == ',' || *p == '\r' || *p == '\n') p++;
+        if (!*p) break;
+        int paren = 0, angle = 0;
+        const char* st = p;
+        while (*p) {
+            if (*p == '(') paren++;
+            else if (*p == ')' && paren > 0) paren--;
+            else if (*p == '<') angle++;
+            else if (*p == '>' && angle > 0) angle--;
+            else if (*p == ',' && paren == 0 && angle == 0) break;
+            p++;
+        }
+        size_t tl = (size_t)(p - st);
+        while (tl > 0 && (st[tl - 1] == ' ' || st[tl - 1] == '\t' || st[tl - 1] == '\r' || st[tl - 1] == '\n')) tl--;
+        if (tl == 0) continue;
+        if (tl >= sizeof(toks[0])) tl = sizeof(toks[0]) - 1;
+        char cand[160], ckey[80];
+        memcpy(cand, st, tl);
+        cand[tl] = 0;
+        canonical_tag_key(cand, ckey, sizeof(ckey));
+        if (!ckey[0]) continue;
+
+        int dup = -1;
+        for (int i = 0; i < n_toks; i++) {
+            if (strcmp(keys[i], ckey) == 0) { dup = i; break; }
+        }
+        if (dup >= 0) {
+            // If new token has explicit weight "(...:1.3)" and old didn't, upgrade in place
+            if (cand[0] == '(' && toks[dup][0] != '(') {
+                snprintf(toks[dup], sizeof(toks[0]), "%s", cand);
+            }
+            continue;
+        }
+        snprintf(keys[n_toks], sizeof(keys[0]), "%s", ckey);
+        snprintf(toks[n_toks], sizeof(toks[0]), "%s", cand);
+        n_toks++;
+    }
+
+    size_t out_pos = 0;
+    for (int i = 0; i < n_toks && out_pos + 4 < dst_max; i++) {
+        size_t need = strlen(toks[i]) + (i ? 2u : 0u);
+        if (out_pos + need + 1 >= dst_max) break;
+        if (i) { dst[out_pos++] = ','; dst[out_pos++] = ' '; }
+        memcpy(dst + out_pos, toks[i], strlen(toks[i]));
+        out_pos += strlen(toks[i]);
+    }
+    dst[out_pos] = 0;
+}
+
+static const char* pick_pool(const char* const* arr, int n, uint64_t* rng) {
+    if (!arr || n <= 0) return "";
+    return arr[(size_t)(splitmix64_next(rng) % (uint64_t)n)];
+}
+
+static const char* pick_salted_pool(const char* const* arr, int n, uint64_t base_rng, uint64_t salt) {
+    uint64_t sr = base_rng ^ (salt * 0x9E3779B97F4A7C15ull);
+    (void)splitmix64_next(&sr);
+    return pick_pool(arr, n, &sr);
+}
+
+static const char* pick_sfw_any(uint64_t* rng) {
+    int tot = RND_POSE_N + RND_CAMERA_N + RND_EXPR_N + RND_SCENE_N + RND_LIGHT_N + RND_OUTFIT_N + RND_DETAIL_N;
+    int idx = (int)(splitmix64_next(rng) % (uint64_t)tot);
+    if (idx < RND_POSE_N) return RND_POSE[idx];
+    idx -= RND_POSE_N;
+    if (idx < RND_CAMERA_N) return RND_CAMERA[idx];
+    idx -= RND_CAMERA_N;
+    if (idx < RND_EXPR_N) return RND_EXPR[idx];
+    idx -= RND_EXPR_N;
+    if (idx < RND_SCENE_N) return RND_SCENE[idx];
+    idx -= RND_SCENE_N;
+    if (idx < RND_LIGHT_N) return RND_LIGHT[idx];
+    idx -= RND_LIGHT_N;
+    if (idx < RND_OUTFIT_N) return RND_OUTFIT[idx];
+    idx -= RND_OUTFIT_N;
+    return RND_DETAIL[idx];
+}
+
+static const char* pick_ecchi_any(uint64_t* rng, int allow_explicit) {
+    int pose_n = allow_explicit ? RND_ECCHI_POSE_N : (RND_ECCHI_POSE_N - 10);
+    int expr_n = allow_explicit ? RND_ECCHI_EXPR_N : (RND_ECCHI_EXPR_N - 18);
+    int outf_n = allow_explicit ? RND_ECCHI_OUTFIT_N : (RND_ECCHI_OUTFIT_N - 30);
+    int acc_n  = allow_explicit ? RND_ECCHI_ACCENT_N : (RND_ECCHI_ACCENT_N - 15);
+    int tot = pose_n + expr_n + outf_n + RND_ECCHI_SCENE_N + acc_n;
+    int idx = (int)(splitmix64_next(rng) % (uint64_t)tot);
+    if (idx < pose_n) return RND_ECCHI_POSE[idx];
+    idx -= pose_n;
+    if (idx < expr_n) return RND_ECCHI_EXPR[idx];
+    idx -= expr_n;
+    if (idx < outf_n) return RND_ECCHI_OUTFIT[idx];
+    idx -= outf_n;
+    if (idx < RND_ECCHI_SCENE_N) return RND_ECCHI_SCENE[idx];
+    idx -= RND_ECCHI_SCENE_N;
+    return RND_ECCHI_ACCENT[idx];
+}
+
+void sdxl_expand_wildcards(const char* src, uint64_t seed, int nsfw_allow, uint32_t rand_mask,
+                           char* dst, size_t dst_max) {
+    if (!dst || !dst_max) return;
+    gd_init_randomizer_pools();
+    dst[0] = 0;
+    uint64_t rng = seed ? seed : 0xCAFEBABE12345678ull;
+    (void)splitmix64_next(&rng);
+
+    char work[2048];
+    snprintf(work, sizeof(work), "%s", src ? src : "");
+
+    // Pass 1: Expand inline {choiceA|choiceB|choiceC} groups (supports nesting up to 4 levels)
+    for (int pass = 0; pass < 4; pass++) {
+        char* lb = NULL;
+        char* rb = NULL;
+        for (char* p = work; *p; p++) {
+            if (*p == '{') lb = p;
+            else if (*p == '}' && lb) { rb = p; break; }
+        }
+        if (!lb || !rb) break;
+        const char* opts[64];
+        size_t lens[64];
+        int n_opt = 0;
+        const char* cur = lb + 1;
+        for (const char* q = cur; q <= rb && n_opt < 64; q++) {
+            if (*q == '|' || q == rb) {
+                opts[n_opt] = cur;
+                lens[n_opt] = (size_t)(q - cur);
+                n_opt++;
+                cur = q + 1;
+            }
+        }
+        int pick = n_opt > 0 ? (int)(splitmix64_next(&rng) % (uint64_t)n_opt) : 0;
+        char next_buf[2048];
+        size_t pre = (size_t)(lb - work);
+        size_t mid = n_opt > 0 ? lens[pick] : 0;
+        snprintf(next_buf, sizeof(next_buf), "%.*s%.*s%s",
+                 (int)pre, work, (int)mid, n_opt > 0 ? opts[pick] : "", rb + 1);
+        snprintf(work, sizeof(work), "%s", next_buf);
+    }
+
+    // Pass 2: Expand __pool__ wildcard tokens inside prompt text
+    struct { const char* tok; int id; } map[] = {
+        { "__pose__", 1 }, { "__camera__", 2 }, { "__expr__", 3 }, { "__scene__", 4 },
+        { "__light__", 5 }, { "__outfit__", 6 }, { "__detail__", 7 }, { "__random__", 8 },
+        { "__ecchi__", 9 }, { "__ecchi_pose__", 10 }, { "__ecchi_expr__", 11 },
+        { "__ecchi_outfit__", 12 }, { "__ecchi_scene__", 13 }, { "__ecchi_accent__", 14 },
+        { "__explicit__", 15 }
+    };
+    for (int guard = 0; guard < 24; guard++) {
+        int hit = 0;
+        for (size_t m = 0; m < sizeof(map) / sizeof(map[0]); m++) {
+            char* pos = strstr(work, map[m].tok);
+            if (!pos) continue;
+            hit = 1;
+            const char* rep = "";
+            int allow_exp = nsfw_allow && ((rand_mask & RAND_EXPLICIT) != 0 || map[m].id == 15);
+            uint64_t wrng = rng ^ ((uint64_t)(map[m].id * 131u + guard * 17u) * 0x9E3779B97F4A7C15ull);
+            (void)splitmix64_next(&wrng);
+            (void)splitmix64_next(&rng);
+            switch (map[m].id) {
+            case 1: rep = pick_pool(RND_POSE, RND_POSE_N, &wrng); break;
+            case 2: rep = pick_pool(RND_CAMERA, RND_CAMERA_N, &wrng); break;
+            case 3: rep = pick_pool(RND_EXPR, RND_EXPR_N, &wrng); break;
+            case 4: rep = pick_pool(RND_SCENE, RND_SCENE_N, &wrng); break;
+            case 5: rep = pick_pool(RND_LIGHT, RND_LIGHT_N, &wrng); break;
+            case 6: rep = pick_pool(RND_OUTFIT, RND_OUTFIT_N, &wrng); break;
+            case 7: rep = pick_pool(RND_DETAIL, RND_DETAIL_N, &wrng); break;
+            case 8: rep = pick_sfw_any(&wrng); break;
+            case 9: rep = nsfw_allow ? pick_ecchi_any(&wrng, allow_exp) : pick_sfw_any(&wrng); break;
+            case 10: rep = nsfw_allow ? pick_pool(RND_ECCHI_POSE, allow_exp ? RND_ECCHI_POSE_N : (RND_ECCHI_POSE_N - 10), &wrng) : pick_pool(RND_POSE, RND_POSE_N, &wrng); break;
+            case 11: rep = nsfw_allow ? pick_pool(RND_ECCHI_EXPR, allow_exp ? RND_ECCHI_EXPR_N : (RND_ECCHI_EXPR_N - 18), &wrng) : pick_pool(RND_EXPR, RND_EXPR_N, &wrng); break;
+            case 12: rep = nsfw_allow ? pick_pool(RND_ECCHI_OUTFIT, allow_exp ? RND_ECCHI_OUTFIT_N : (RND_ECCHI_OUTFIT_N - 30), &wrng) : pick_pool(RND_OUTFIT, RND_OUTFIT_N, &wrng); break;
+            case 13: rep = nsfw_allow ? pick_pool(RND_ECCHI_SCENE, RND_ECCHI_SCENE_N, &wrng) : pick_pool(RND_SCENE, RND_SCENE_N, &wrng); break;
+            case 14: rep = nsfw_allow ? pick_pool(RND_ECCHI_ACCENT, allow_exp ? RND_ECCHI_ACCENT_N : (RND_ECCHI_ACCENT_N - 15), &wrng) : pick_pool(RND_DETAIL, RND_DETAIL_N, &wrng); break;
+            case 15: rep = nsfw_allow ? pick_pool(RND_ECCHI_OUTFIT + (RND_ECCHI_OUTFIT_N - 30), 30, &wrng) : ""; break;
+            }
+            char next_buf[2048];
+            size_t pre = (size_t)(pos - work);
+            size_t tl = strlen(map[m].tok);
+            snprintf(next_buf, sizeof(next_buf), "%.*s%s%s", (int)pre, work, rep, pos + tl);
+            snprintf(work, sizeof(work), "%s", next_buf);
+            break;
+        }
+        if (!hit) break;
+    }
+
+    // Pass 3: Append 1-click Batch Randomizer checkboxes (rand_mask) — each pool uses an independent salted stream!
+    size_t wl = strlen(work);
+    #define APPEND_RND(s) do { \
+        const char* _s = (s); \
+        if (_s && _s[0] && wl + strlen(_s) + 4 < sizeof(work)) { \
+            wl += (size_t)snprintf(work + wl, sizeof(work) - wl, "%s%s", wl ? ", " : "", _s); \
+        } \
+    } while (0)
+    #define PICK_SALTED(arr, cnt, salt) pick_salted_pool((arr), (cnt), rng, (uint64_t)(salt))
+
+    if (rand_mask & RAND_CAMERA) APPEND_RND(PICK_SALTED(RND_CAMERA, RND_CAMERA_N, 0x101u));
+    if (rand_mask & RAND_POSE)   APPEND_RND(PICK_SALTED(RND_POSE,   RND_POSE_N,   0x202u));
+    if (rand_mask & RAND_EXPR)   APPEND_RND(PICK_SALTED(RND_EXPR,   RND_EXPR_N,   0x303u));
+    if (rand_mask & RAND_OUTFIT) APPEND_RND(PICK_SALTED(RND_OUTFIT, RND_OUTFIT_N, 0x404u));
+    if (rand_mask & RAND_SCENE)  APPEND_RND(PICK_SALTED(RND_SCENE,  RND_SCENE_N,  0x505u));
+    if (rand_mask & RAND_LIGHT)  APPEND_RND(PICK_SALTED(RND_LIGHT,  RND_LIGHT_N,  0x606u));
+    if (rand_mask & RAND_DETAIL) APPEND_RND(PICK_SALTED(RND_DETAIL, RND_DETAIL_N, 0x707u));
+
+    if (nsfw_allow && (rand_mask & RAND_ECCHI)) {
+        int exp_ok = (rand_mask & RAND_EXPLICIT) != 0;
+        uint32_t sfw_sub = rand_mask & (RAND_POSE | RAND_EXPR | RAND_OUTFIT | RAND_SCENE);
+        if (!sfw_sub) {
+            APPEND_RND(PICK_SALTED(RND_ECCHI_POSE, exp_ok ? RND_ECCHI_POSE_N : (RND_ECCHI_POSE_N - 10), 0x801u));
+            APPEND_RND(PICK_SALTED(RND_ECCHI_EXPR, exp_ok ? RND_ECCHI_EXPR_N : (RND_ECCHI_EXPR_N - 18), 0x802u));
+            APPEND_RND(PICK_SALTED(RND_ECCHI_OUTFIT, exp_ok ? RND_ECCHI_OUTFIT_N : (RND_ECCHI_OUTFIT_N - 30), 0x803u));
+            APPEND_RND(PICK_SALTED(RND_ECCHI_SCENE, RND_ECCHI_SCENE_N, 0x804u));
+        } else {
+            uint64_t er = rng ^ 0x8055AA3399CC1177ull;
+            (void)splitmix64_next(&er);
+            APPEND_RND(pick_ecchi_any(&er, exp_ok));
+        }
+        APPEND_RND(PICK_SALTED(RND_ECCHI_ACCENT, exp_ok ? RND_ECCHI_ACCENT_N : (RND_ECCHI_ACCENT_N - 15), 0x806u));
+    }
+    if (nsfw_allow && (rand_mask & RAND_EXPLICIT)) {
+        APPEND_RND(PICK_SALTED(RND_ECCHI_OUTFIT + (RND_ECCHI_OUTFIT_N - 30), 30, 0x901u));
+        APPEND_RND(PICK_SALTED(RND_ECCHI_ACCENT + (RND_ECCHI_ACCENT_N - 15), 15, 0x902u));
+    }
+    #undef PICK_SALTED
+    #undef APPEND_RND
+
+    sdxl_clean_prompt_dupes(work, dst, dst_max);
+}
+
+void sdxl_apply_quality_shield(const char* model_name, int is_sd15, int auto_quality, int nsfw_allow,
+                               char* prompt, size_t pr_max, char* negative, size_t ng_max) {
+    const char* m = model_name ? model_name : "";
+    char pbuf[2048] = {0}, nbuf[1024] = {0};
+    snprintf(pbuf, sizeof(pbuf), "%s", prompt ? prompt : "");
+    snprintf(nbuf, sizeof(nbuf), "%s", negative ? negative : "");
+
+    if (auto_quality) {
+        int has_q = ci_has(pbuf, "masterpiece") || ci_has(pbuf, "best quality") || ci_has(pbuf, "high score");
+        if (!has_q && pbuf[0]) {
+            char merged[2048];
+            if (!is_sd15 && ci_has(m, "animagine")) {
+                // Animagine XL 4.0 expects character + framing FIRST and quality tags at the END
+                snprintf(merged, sizeof(merged), "%s, masterpiece, high score, great score, absurdres", pbuf);
+            } else if (!is_sd15 && ci_has(m, "noob")) {
+                snprintf(merged, sizeof(merged), "masterpiece, best quality, newest, absurdres, highres, %s", pbuf);
+            } else if (!is_sd15) {
+                snprintf(merged, sizeof(merged), "masterpiece, best quality, amazing quality, very aesthetic, absurdres, %s", pbuf);
+            } else if (ci_has(m, "dreamshaper") && (ci_has(pbuf, "1girl") || ci_has(pbuf, "1boy") || ci_has(pbuf, "miku"))) {
+                snprintf(merged, sizeof(merged), "masterpiece, best quality, 2d anime illustration, cel shaded anime, %s", pbuf);
+            } else {
+                snprintf(merged, sizeof(merged), "masterpiece, best quality, highres, %s", pbuf);
+            }
+            snprintf(pbuf, sizeof(pbuf), "%s", merged);
+        }
+        // Ensure anti-deformity hand/finger/eye negative shield
+        const char* shield = is_sd15
+            ? "(worst quality, low quality:1.4), lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad eyes, asymmetrical eyes, blurry, watermark"
+            : (ci_has(m, "animagine")
+                ? "lowres, bad anatomy, bad hands, extra digits, fewer digits, missing fingers, bad eyes, worst quality, low quality, low score, bad score, average score, blurry"
+                : (ci_has(m, "noob")
+                    ? "worst quality, old, early, low quality, lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad eyes, asymmetrical eyes, blurry"
+                    : "lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad feet, bad eyes, asymmetrical eyes, blurry, worst quality, low quality"));
+        if (!ci_has(nbuf, "bad hands") || !ci_has(nbuf, "extra digits")) {
+            char mn[1024];
+            snprintf(mn, sizeof(mn), "%s%s%s", nbuf, nbuf[0] ? ", " : "", shield);
+            snprintf(nbuf, sizeof(nbuf), "%s", mn);
+        }
+    }
+
+    if (!nsfw_allow) {
+        char mn[1024];
+        snprintf(mn, sizeof(mn), "%s%s%s", nbuf, nbuf[0] ? ", " : "",
+                 "nsfw, rating: questionable, rating: explicit, nude, naked, nipples, explicit");
+        snprintf(nbuf, sizeof(nbuf), "%s", mn);
+    }
+
+    if (prompt && pr_max) sdxl_clean_prompt_dupes(pbuf, prompt, pr_max);
+    if (negative && ng_max) sdxl_clean_prompt_dupes(nbuf, negative, ng_max);
+}
+
+void sdxl_load_speed_preset(const char* model_name, int is_sd15, ModelPreset* out) {
+    memset(out, 0, sizeof(*out));
+    const char* m = model_name ? model_name : "";
+    if (is_sd15) {
+        out->width = 512; out->height = 768; out->upscale = 0;
+        if (ci_has(m, "8step") || ci_has(m, "hyper")) {
+            out->steps = 6; out->cfg = 3.2f; out->sampler = 1; // Euler (~18s!)
+            snprintf(out->description, sizeof(out->description), "Speed Mode · SD1.5 6-Step Euler (~18s)");
+        } else {
+            out->steps = 12; out->cfg = 6.0f; out->sampler = 3; // DPM++ 2M Karras (~32s!)
+            snprintf(out->description, sizeof(out->description), "Speed Mode · SD1.5 12-Step DPM++ (~32s)");
+        }
+    } else {
+        out->width = 768; out->height = 1024; out->upscale = 0;
+        if (ci_has(m, "dmd")) {
+            if (ci_has(m, "animagine")) {
+                out->steps = 4; out->cfg = 1.0f; out->sampler = 2; // Animagine XL 4.0 DMD2 Speed (~31s!)
+                snprintf(out->description, sizeof(out->description), "Speed Mode · Animagine DMD2 4-Step CFG 1.0 (~31s)");
+            } else {
+                out->steps = 5; out->cfg = 1.0f; out->sampler = 2; // LCM single-pass (~38s!)
+                snprintf(out->description, sizeof(out->description), "Speed Mode · DMD2 5-Step CFG 1.0 (~38s)");
+            }
+        } else if (ci_has(m, "8step") || ci_has(m, "hyper")) {
+            out->steps = 6; out->cfg = 3.0f; out->sampler = 1; // Euler
+            snprintf(out->description, sizeof(out->description), "Speed Mode · Hyper-SDXL 6-Step Euler");
+        } else {
+            out->steps = 12; out->cfg = 5.5f; out->sampler = 3; // DPM++ 2M Karras
+            snprintf(out->description, sizeof(out->description), "Speed Mode · SDXL 12-Step DPM++ Karras");
+        }
+    }
+}
+
 void sdxl_load_preset(const char* model_dir, const char* model_name, int is_sd15, ModelPreset* out) {
     memset(out, 0, sizeof(*out));
-    // Smart built-in defaults based on architecture & checkpoint family
+    // Authoritative Anti-Deformity Best-Quality Defaults per Architecture & Checkpoint Family
     if (is_sd15) {
         out->width = 512; out->height = 768;
         out->upscale = 1; // Auto-upscale SD 1.5 -> crisp 1080p!
         snprintf(out->prompt, sizeof(out->prompt),
-                 "masterpiece, best quality, 1girl, silver hair, blue eyes, glowing sakura petals, night sky, anime style");
+                 "masterpiece, best quality, highres, 1girl, solo, silver hair, blue eyes, glowing sakura petals, night sky, anime style");
         snprintf(out->negative, sizeof(out->negative),
-                 "(worst quality, low quality:1.4), lowres, bad anatomy, bad hands, blurry, text, watermark");
+                 "(worst quality, low quality:1.4), lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad eyes, blurry, text, watermark");
         if (ci_has(model_name, "8step") || ci_has(model_name, "hyper")) {
             out->steps = 8; out->cfg = 3.5f; out->sampler = 1; // Euler
-            snprintf(out->description, sizeof(out->description), "SD 1.5 Fast 8-step (Hyper-SD15 · ~10s + 1080p)");
+            snprintf(out->description, sizeof(out->description), "SD 1.5 Fast 8-step (Euler · CFG 3.5 · +1080p)");
+        } else if (ci_has(model_name, "counterfeit")) {
+            out->steps = 20; out->cfg = 6.5f; out->sampler = 3; // DPM++ 2M Karras
+            snprintf(out->description, sizeof(out->description), "SD 1.5 Counterfeit V2.5 · DPM++ 2M Karras · CFG 6.5");
+        } else if (ci_has(model_name, "ghostmix")) {
+            out->steps = 20; out->cfg = 6.5f; out->sampler = 3; // DPM++ 2M Karras
+            snprintf(out->description, sizeof(out->description), "SD 1.5 GhostMix v2.0 · DPM++ 2M Karras · CFG 6.5");
         } else if (ci_has(model_name, "dreamshaper")) {
-            out->steps = 20; out->cfg = 7.0f; out->sampler = 0;
-            snprintf(out->description, sizeof(out->description), "SD 1.5 DreamShaper 8 · 2.5D fantasy/anime (~20s)");
+            out->steps = 20; out->cfg = 6.5f; out->sampler = 3; // DPM++ 2M Karras
+            snprintf(out->description, sizeof(out->description), "SD 1.5 DreamShaper 8 · DPM++ 2M Karras · CFG 6.5");
         } else if (ci_has(model_name, "anything")) {
-            out->steps = 20; out->cfg = 7.0f; out->sampler = 0;
-            snprintf(out->description, sizeof(out->description), "SD 1.5 Anything V5 · Crisp cel-shaded anime (~20s)");
+            out->steps = 20; out->cfg = 7.0f; out->sampler = 3; // DPM++ 2M Karras
+            snprintf(out->description, sizeof(out->description), "SD 1.5 Anything V5 · DPM++ 2M Karras · CFG 7.0");
         } else {
-            out->steps = 20; out->cfg = 7.0f; out->sampler = 0;
-            snprintf(out->description, sizeof(out->description), "SD 1.5 Anime (~20s · 1.3 GiB VRAM)");
+            out->steps = 20; out->cfg = 6.5f; out->sampler = 3; // DPM++ 2M Karras (MeinaMix V11 etc.)
+            snprintf(out->description, sizeof(out->description), "SD 1.5 MeinaMix V11 · DPM++ 2M Karras · CFG 6.5");
         }
     } else {
-        out->width = 768; out->height = 1024;
+        // Native 1024x1344 portrait for maximum SDXL / Illustrious eye, finger & lineart detail on PS4 Pro Neo
+        // (automatically clamped to 768x1024 on Base PS4 by apply_model_preset)
+        int is_illus = ci_has(model_name, "illustrious") || ci_has(model_name, "wai") ||
+                       ci_has(model_name, "hassaku") || ci_has(model_name, "nova") ||
+                       ci_has(model_name, "pencil") || ci_has(model_name, "walnut") ||
+                       ci_has(model_name, "plant") || ci_has(model_name, "noob") ||
+                       ci_has(model_name, "animagine");
+        out->width = 1024; out->height = 1344;
         out->upscale = 0;
-        snprintf(out->prompt, sizeof(out->prompt),
-                 "masterpiece, best quality, absurdres, 1girl, solo, upper body, silver hair, blue eyes, closed mouth, smile, sakura petals, night sky, anime");
-        snprintf(out->negative, sizeof(out->negative),
-                 "lowres, bad anatomy, bad eyes, worst quality, low quality, nsfw");
+        if (ci_has(model_name, "animagine")) {
+            snprintf(out->prompt, sizeof(out->prompt),
+                     "1girl, solo, upper body, silver hair, blue eyes, gentle smile, sakura petals, night sky, masterpiece, high score, great score, absurdres");
+            snprintf(out->negative, sizeof(out->negative),
+                     "lowres, bad anatomy, bad hands, extra digits, fewer digits, missing fingers, bad eyes, worst quality, low quality, low score, bad score, average score, blurry");
+        } else if (ci_has(model_name, "noob")) {
+            snprintf(out->prompt, sizeof(out->prompt),
+                     "masterpiece, best quality, newest, absurdres, highres, 1girl, solo, upper body, silver hair, blue eyes, gentle smile, sakura petals, night sky");
+            snprintf(out->negative, sizeof(out->negative),
+                     "worst quality, old, early, low quality, lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad eyes, asymmetrical eyes, blurry");
+        } else {
+            snprintf(out->prompt, sizeof(out->prompt),
+                     "masterpiece, best quality, amazing quality, very aesthetic, absurdres, 1girl, solo, upper body, silver hair, blue eyes, gentle smile, sakura petals, night sky");
+            snprintf(out->negative, sizeof(out->negative),
+                     "lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad feet, bad eyes, asymmetrical eyes, blurry, worst quality, low quality");
+        }
         if (ci_has(model_name, "dmd")) {
-            out->steps = 6; out->cfg = 1.4f; out->sampler = 2; // LCM with light CFG so negative prompt works!
-            snprintf(out->description, sizeof(out->description), "SDXL DMD2 Fast (CFG 1.4 · 6 steps · Negative Active)");
+            if (ci_has(model_name, "animagine")) {
+                out->steps = 5; out->cfg = 1.1f; out->sampler = 2; // Animagine XL 4.0 DMD2: low overshoot sweet spot
+                snprintf(out->description, sizeof(out->description),
+                         "Animagine XL 4.0 DMD2 · 1024x1344 Best Quality (LCM · 5 stp · CFG 1.1)");
+            } else if (ci_has(model_name, "noob")) {
+                out->steps = 6; out->cfg = 1.2f; out->sampler = 2; // NoobAI-XL 1.1 DMD2: crisp contrast without eye burn
+                snprintf(out->description, sizeof(out->description),
+                         "NoobAI-XL 1.1 DMD2 · 1024x1344 Best Quality (LCM · 6 stp · CFG 1.2)");
+            } else {
+                out->steps = 6; out->cfg = 1.4f; out->sampler = 2; // LCM + CFG 1.4 activates negative hand/eye guard!
+                snprintf(out->description, sizeof(out->description),
+                         is_illus ? "Illustrious DMD2 · 1024x1344 Best Quality (LCM · 6 stp · CFG 1.4)"
+                                  : "SDXL DMD2 · 1024x1344 Best Quality (LCM · 6 stp · CFG 1.4)");
+            }
         } else if (ci_has(model_name, "8step") || ci_has(model_name, "hyper")) {
             out->steps = 8; out->cfg = 3.5f; out->sampler = 1; // Euler
-            snprintf(out->description, sizeof(out->description), "SDXL 8-step Hyper-SD (Euler · CFG 3.5)");
+            snprintf(out->description, sizeof(out->description), "SDXL 8-step Hyper-SD · 1024x1344 (Euler · CFG 3.5)");
         } else if (ci_has(model_name, "lightning") || ci_has(model_name, "turbo")) {
             out->steps = 6; out->cfg = 2.0f; out->sampler = 1; // Euler
-            snprintf(out->description, sizeof(out->description), "SDXL Native Fast (Euler · 6 steps)");
+            snprintf(out->description, sizeof(out->description), "SDXL Native Fast · 1024x1344 (Euler · 6 steps)");
         } else if (ci_has(model_name, "animagine")) {
-            out->steps = 20; out->cfg = 5.0f; out->sampler = 3;
-            snprintf(out->description, sizeof(out->description), "SDXL Animagine XL 4.0 · DPM++ 2M Karras");
+            out->steps = 20; out->cfg = 5.5f; out->sampler = 3;
+            snprintf(out->description, sizeof(out->description), "SDXL Animagine XL 4.0 · DPM++ 2M Karras · CFG 5.5");
         } else if (ci_has(model_name, "noob")) {
             out->steps = 20; out->cfg = 5.5f; out->sampler = 3;
-            snprintf(out->description, sizeof(out->description), "SDXL NoobAI-XL 1.1 · DPM++ 2M Karras");
+            snprintf(out->description, sizeof(out->description), "SDXL NoobAI-XL 1.1 · DPM++ 2M Karras · CFG 5.5");
         } else {
-            out->steps = 20; out->cfg = 6.5f; out->sampler = 3;
-            snprintf(out->description, sizeof(out->description), "SDXL Full Quality (DPM++ 2M Karras · 20 steps)");
+            out->steps = 20; out->cfg = 6.0f; out->sampler = 3; // DPM++ 2M Karras smooth 2nd-order
+            snprintf(out->description, sizeof(out->description), "SDXL Full 20-Step · DPM++ 2M Karras · CFG 6.0");
         }
     }
 
-    // Override with <model_dir>/preset.cfg if present
+    // Only allow <model_dir>/preset.cfg to override optimal settings if the user explicitly saved custom=1!
+    if (!model_dir || !model_dir[0]) return;
     char cfg_path[320];
     snprintf(cfg_path, sizeof(cfg_path), "%s/preset.cfg", model_dir);
 #ifdef _WIN32
@@ -2305,6 +3638,8 @@ void sdxl_load_preset(const char* model_dir, const char* model_name, int is_sd15
     close(fd);
     if (n <= 0) return;
     buf[n] = 0;
+    if (!strstr(buf, "custom=1")) return; // Ignore legacy non-custom preset.cfg files that had stale CFG 1.0 / Euler a!
+
     char* line = buf;
     while (*line) {
         char* nl = strchr(line, '\n');
@@ -2429,8 +3764,13 @@ int sdxl_upscale_rgb(SdxlEngine* e, const uint8_t* src_rgb, uint32_t src_w, uint
             if (cancel && cancel(user)) {
                 free(acc); free(wgt); free(tile4); free(out_rgb);
                 e->cancel_fn = NULL;
+                e->rt_phase = 0;
                 return 1;
             }
+            e->rt_phase = 4;
+            e->rt_tiles_done = (uint32_t)done_tiles;
+            e->rt_tiles_total = (uint32_t)(total_tiles > 0 ? total_tiles : 1);
+            e->rt_tile_avg_sec = (done_tiles > 0) ? ((now_sec(e) - tu0) / (double)done_tiles) : 0.0;
             if (progress) {
                 char msg[96];
                 snprintf(msg, sizeof(msg), "Upscaling -> %ux%u (tile %d/%d)", dw, dh, done_tiles + 1, total_tiles);
@@ -2576,6 +3916,7 @@ int sdxl_upscale_rgb(SdxlEngine* e, const uint8_t* src_rgb, uint32_t src_w, uint
     free(acc); free(wgt); free(tile4);
     e->cancel_fn = NULL;
     e->cancel_user = NULL;
+    e->rt_phase = 0;
     e->stats.upscale_ms = (now_sec(e) - tu0) * 1000.0;
     glog("upscale RealESRGAN Anime v3: %ux%u -> %ux%u (%d tiles) in %.2fs",
          src_w, src_h, dw, dh, done_tiles, e->stats.upscale_ms / 1000.0);
@@ -2585,14 +3926,15 @@ int sdxl_upscale_rgb(SdxlEngine* e, const uint8_t* src_rgb, uint32_t src_w, uint
     return 0;
 }
 
-int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
-                  SdxlProgressFn progress, SdxlCancelFn cancel, void* user) {
+static int sdxl_generate_internal(SdxlEngine* e, const SdxlParams* p, const uint8_t* init_rgb, float denoise,
+                                  uint8_t* rgb_out, SdxlProgressFn progress, SdxlCancelFn cancel, void* user) {
     uint32_t W = p->width, H = p->height;
-    uint64_t max_lat = (e->is_sd15 || !e->neo) ? 12288ull : 16384ull;
-    if (W < 256 || H < 256 || W > 1280 || H > 1280 || (W % 64) != 0 || (H % 64) != 0 ||
+    uint32_t max_dim = (e->is_sd15 || !e->neo) ? 1280u : 1344u;
+    uint64_t max_lat = (e->is_sd15 || !e->neo) ? 12288ull : 21504ull;
+    if (W < 256 || H < 256 || W > max_dim || H > max_dim || (W % 64) != 0 || (H % 64) != 0 ||
         (uint64_t)(W / 8u) * (H / 8u) > max_lat) {
         fail(e, "resolution must be multiple of 64 and <= %s (got %ux%u)",
-             (e->is_sd15 || !e->neo) ? "768x1024" : "1024x1024", W, H);
+             (e->is_sd15 || !e->neo) ? "768x1024" : "1024x1344", W, H);
         return -1;
     }
     uint32_t steps = p->steps;
@@ -2624,17 +3966,24 @@ int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
     e->stats.temp_peak_c = t0_c;
 
     double t_start = now_sec(e);
+    e->rt_phase = 1;
+    e->rt_step_done = 0;
+    e->rt_steps_total = steps;
+    e->rt_tiles_done = 0;
+    e->rt_tiles_total = 0;
+    e->rt_step_avg_sec = 0.0;
+    e->rt_tile_avg_sec = 0.0;
 
     if (progress) progress(user, 0.02f, "Encoding prompt (CLIP-L + OpenCLIP-G)");
     double tc0 = now_sec(e);
-    if (encode_prompt(e, p->prompt, 0, e->ctx_cond, e->pool_cond)) { e->cancel_fn = NULL; return -1; }
+    if (encode_prompt(e, p->prompt, 0, e->ctx_cond, e->pool_cond)) { e->rt_phase = 0; e->cancel_fn = NULL; return -1; }
     e->stats.clip_l_ms = (now_sec(e) - tc0) * 1000.0;
     if (cfg > 1.001f) {
         double tc1 = now_sec(e);
-        if (encode_prompt(e, p->negative, 1, e->ctx_uncond, e->pool_uncond)) { e->cancel_fn = NULL; return -1; }
+        if (encode_prompt(e, p->negative, 1, e->ctx_uncond, e->pool_uncond)) { e->rt_phase = 0; e->cancel_fn = NULL; return -1; }
         e->stats.clip_g_ms = (now_sec(e) - tc1) * 1000.0;
     }
-    if (cancel && cancel(user)) { e->cancel_fn = NULL; return 1; }
+    if (cancel && cancel(user)) { e->rt_phase = 0; e->cancel_fn = NULL; return 1; }
     glog("clip: cond=%.1f ms, uncond=%.1f ms", e->stats.clip_l_ms, e->stats.clip_g_ms);
 
     float timesteps[64], sigmas[65];
@@ -2654,16 +4003,38 @@ int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
 
     Rng rng;
     rng_seed(&rng, p->seed ? p->seed : 42ull);
-    rng_randn(&rng, lat, lat_n);
-    float init_sigma = sqrtf(sigmas[0] * sigmas[0] + 1.0f);
-    for (size_t i = 0; i < lat_n; i++) lat[i] *= init_sigma;
+    uint32_t start_step = 0;
+    if (init_rgb) {
+        if (denoise < 0.08f) denoise = 0.08f;
+        if (denoise > 1.0f) denoise = 1.0f;
+        if (progress) progress(user, 0.04f, "Encoding face crop (VAE Encoder)...");
+        int er = vae_encode_tiled(e, init_rgb, H, W, lat, progress, user);
+        if (er != 0) {
+            free(lat); free(noise); free(old_denoised);
+            e->rt_phase = 0; e->cancel_fn = NULL;
+            return er;
+        }
+        start_step = (uint32_t)floorf((1.0f - denoise) * (float)steps);
+        if (start_step >= steps) start_step = steps - 1u;
+        rng_randn(&rng, noise, lat_n);
+        float s0 = sigmas[start_step];
+        for (size_t i = 0; i < lat_n; i++) lat[i] += noise[i] * s0;
+    } else {
+        rng_randn(&rng, lat, lat_n);
+        float init_sigma = sqrtf(sigmas[0] * sigmas[0] + 1.0f);
+        for (size_t i = 0; i < lat_n; i++) lat[i] *= init_sigma;
+    }
 
     e->gpu_acc_sec = 0.0;
     e->flops_acc = 0.0;
     double tu_start = now_sec(e);
 
-    for (uint32_t s = 0; s < steps; s++) {
-        if (cancel && cancel(user)) { free(lat); free(noise); free(old_denoised); e->cancel_fn = NULL; return 1; }
+    for (uint32_t s = start_step; s < steps; s++) {
+        if (cancel && cancel(user)) { free(lat); free(noise); free(old_denoised); e->rt_phase = 0; e->cancel_fn = NULL; return 1; }
+        e->rt_phase = 2;
+        e->rt_step_done = s;
+        e->rt_steps_total = steps;
+        if (s > 0) e->rt_step_avg_sec = (now_sec(e) - tu_start) / (double)s;
         int cur_t = sdxl_read_temp_c(NULL, NULL);
         if (cur_t > e->stats.temp_peak_c) e->stats.temp_peak_c = cur_t;
         char msg[128];
@@ -2679,9 +4050,9 @@ int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
 
         double ts0 = now_sec(e);
         int ur0 = unet_forward(e, e->lat_in, timesteps[s], e->ctx_cond, e->pool_cond, H, W, e->eps_c);
-        if (ur0 != 0) { free(lat); free(noise); free(old_denoised); e->cancel_fn = NULL; return ur0; }
+        if (ur0 != 0) { free(lat); free(noise); free(old_denoised); e->rt_phase = 0; e->cancel_fn = NULL; return ur0; }
         double cond_ms = (now_sec(e) - ts0) * 1000.0;
-        if (cancel && cancel(user)) { free(lat); free(noise); free(old_denoised); e->cancel_fn = NULL; return 1; }
+        if (cancel && cancel(user)) { free(lat); free(noise); free(old_denoised); e->rt_phase = 0; e->cancel_fn = NULL; return 1; }
 
         const float* ec = (const float*)(uintptr_t)e->eps_c;
         const float* eu = NULL;
@@ -2689,7 +4060,7 @@ int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
         if (cfg > 1.001f) {
             double ts1 = now_sec(e);
             int ur1 = unet_forward(e, e->lat_in, timesteps[s], e->ctx_uncond, e->pool_uncond, H, W, e->eps_u);
-            if (ur1 != 0) { free(lat); free(noise); free(old_denoised); e->cancel_fn = NULL; return ur1; }
+            if (ur1 != 0) { free(lat); free(noise); free(old_denoised); e->rt_phase = 0; e->cancel_fn = NULL; return ur1; }
             uncond_ms = (now_sec(e) - ts1) * 1000.0;
             eu = (const float*)(uintptr_t)e->eps_u;
         }
@@ -2744,9 +4115,9 @@ int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
             has_old_d = 1;
         } else if (p->sampler == 2) {
             if (sigma_next > 0.0f) rng_randn(&rng, noise, lat_n);
-            // Taper stochasticity gamma on final detail-forming step(s) when steps >= 7 while keeping exact sigma_next^2 variance!
+            // Taper stochasticity gamma on final detail-forming step(s) when steps >= 5 while keeping exact sigma_next^2 variance!
             float gamma = 1.0f;
-            if (steps >= 7u && sigma_next > 0.0f && sigma_next < 1.15f) {
+            if (steps >= 5u && sigma_next > 0.0f && sigma_next < 1.15f) {
                 gamma = (s + 2u >= steps) ? 0.45f : 0.75f;
             }
             float c_eps = sigma_next * sqrtf(1.0f - gamma * gamma);
@@ -2781,15 +4152,20 @@ int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
     e->stats.total_gflops = e->flops_acc * 1e-9;
     e->stats.effective_tflops = (e->gpu_acc_sec > 0.001) ? (e->flops_acc / (e->gpu_acc_sec * 1e12)) : 0.0;
 
-    if (progress) progress(user, 0.92f, "Decoding image (VAE)");
+    e->rt_phase = 3;
+    e->rt_tiles_done = 0;
+    e->rt_tiles_total = 0;
+    e->rt_tile_avg_sec = 0.0;
+    if (progress) progress(user, 0.90f, "Decoding image (VAE)");
     e->gpu_acc_sec = 0.0;
     double tv0 = now_sec(e);
-    int vr = vae_decode_tiled(e, lat, H, W, rgb_out);
+    int vr = vae_decode_tiled(e, lat, H, W, rgb_out, progress, user);
     e->stats.vae_ms = (now_sec(e) - tv0) * 1000.0;
     e->stats.vae_gpu_ms = e->gpu_acc_sec * 1000.0;
     free(lat);
     free(noise);
     free(old_denoised);
+    e->rt_phase = 0;
     e->cancel_fn = NULL;
     e->cancel_user = NULL;
     if (vr != 0) return vr;
@@ -2810,4 +4186,15 @@ int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
 
     if (progress) progress(user, 1.00f, "Done");
     return 0;
+}
+
+int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,
+                  SdxlProgressFn progress, SdxlCancelFn cancel, void* user) {
+    return sdxl_generate_internal(e, p, NULL, 1.0f, rgb_out, progress, cancel, user);
+}
+
+int sdxl_img2img(SdxlEngine* e, const SdxlParams* p, const uint8_t* init_rgb, float denoise,
+                 uint8_t* rgb_out, SdxlProgressFn progress, SdxlCancelFn cancel, void* user) {
+    if (!init_rgb) { fail(e, "img2img requires init_rgb"); return -1; }
+    return sdxl_generate_internal(e, p, init_rgb, denoise, rgb_out, progress, cancel, user);
 }

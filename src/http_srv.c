@@ -68,6 +68,17 @@ static void load_web_ui(void) {
     close(fd);
 }
 
+static void save_ui_mode_file(int mode) {
+    if (mode != 0 && mode != 1) return;
+    int fd = open("/data/garlic-diffusion/ui_mode.cfg", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd >= 0) {
+        char buf[32];
+        int n = snprintf(buf, sizeof(buf), "ui_mode=%d\n", mode);
+        if (n > 0) (void)write(fd, buf, (size_t)n);
+        close(fd);
+    }
+}
+
 void http_srv_lock(void) { scePthreadMutexLock(&srv_mu); }
 void http_srv_unlock(void) { scePthreadMutexUnlock(&srv_mu); }
 const char* http_srv_address(void) { return g_addr; }
@@ -97,6 +108,16 @@ static void send_resp_ex(int fd, int code, const char* reason, const char* ctype
 
 static void send_resp(int fd, int code, const char* reason, const char* ctype, const void* body, size_t len) {
     send_resp_ex(fd, code, reason, ctype, "no-store", body, len);
+}
+
+static void send_zip_resp(int fd, const char* filename, const void* body, size_t len) {
+    char hdr[640];
+    int h = snprintf(hdr, sizeof(hdr),
+                     "HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\nContent-Length: %zu\r\n"
+                     "Content-Disposition: attachment; filename=\"%s\"\r\n"
+                     "Cache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
+                     len, (filename && filename[0]) ? filename : "garlic_gallery.zip");
+    if (send_all(fd, hdr, (size_t)h) == 0 && len > 0) send_all(fd, body, len);
 }
 
 // Tiny JSON string/number extractors
@@ -146,6 +167,65 @@ static void json_escape(const char* s, char* out, size_t max) {
     out[n] = 0;
 }
 
+static int hex_val(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static int url_get_param(const char* qs, const char* key, char* out, size_t max) {
+    if (!qs || !key || !out || !max) return 0;
+    size_t kl = strlen(key);
+    const char* p = qs;
+    while (*p) {
+        if (strncmp(p, key, kl) == 0 && p[kl] == '=') {
+            p += kl + 1;
+            size_t n = 0;
+            while (*p && *p != '&' && n + 1 < max) {
+                if (*p == '+') { out[n++] = ' '; p++; }
+                else if (*p == '%' && hex_val(p[1]) >= 0 && hex_val(p[2]) >= 0) {
+                    out[n++] = (char)((hex_val(p[1]) << 4) | hex_val(p[2]));
+                    p += 3;
+                } else {
+                    out[n++] = *p++;
+                }
+            }
+            out[n] = 0;
+            return 1;
+        }
+        while (*p && *p != '&') p++;
+        if (*p == '&') p++;
+    }
+    return 0;
+}
+
+static int json_get_str_array(const char* json, const char* key, char out[][64], int max_items) {
+    char pat[64];
+    snprintf(pat, sizeof(pat), "\"%s\"", key);
+    const char* p = strstr(json, pat);
+    if (!p) return 0;
+    p += strlen(pat);
+    while (*p && *p != '[' && *p != '}') p++;
+    if (*p != '[') return 0;
+    p++;
+    int cnt = 0;
+    while (*p && *p != ']' && cnt < max_items) {
+        while (*p && (*p == ' ' || *p == ',' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+        if (*p != '"') break;
+        p++;
+        size_t k = 0;
+        while (*p && *p != '"' && k + 1 < 64) {
+            if (*p == '\\' && p[1]) { p++; out[cnt][k++] = *p++; }
+            else out[cnt][k++] = *p++;
+        }
+        out[cnt][k] = 0;
+        if (*p == '"') p++;
+        if (k > 0) cnt++;
+    }
+    return cnt;
+}
+
 static char* b64_encode(const uint8_t* in, size_t len, size_t* out_len) {
     static const char tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     size_t ol = ((len + 2) / 3) * 4;
@@ -174,6 +254,18 @@ static void apply_job_json(const char* body, DiffJob* j) {
     if (json_get_str(body, "prompt", tmp, sizeof(tmp))) snprintf(j->prompt, sizeof(j->prompt), "%s", tmp);
     if (json_get_str(body, "negative_prompt", tmp, sizeof(tmp)) || json_get_str(body, "negative", tmp, sizeof(tmp)))
         snprintf(j->negative, sizeof(j->negative), "%s", tmp);
+    if (json_get_str(body, "lora", tmp, sizeof(tmp))) {
+        if (!strchr(tmp, '/') && !strchr(tmp, '\\') && !strstr(tmp, ".."))
+            snprintf(j->lora, sizeof(j->lora), "%s", tmp);
+    }
+    {
+        double lv = 0.8;
+        if (json_get_double(body, "lora_scale", &lv) || json_get_double(body, "lora_strength", &lv)) {
+            if (lv < -2.0) lv = -2.0;
+            if (lv > 2.5) lv = 2.5;
+            j->lora_scale = (float)lv;
+        }
+    }
     if (json_get_str(body, "sampler_name", tmp, sizeof(tmp)) || json_get_str(body, "sampler_index", tmp, sizeof(tmp))) {
         if (strstr(tmp, "DPM") || strstr(tmp, "dpm")) j->sampler = 3;
         else if (strcmp(tmp, "LCM") == 0 || strcmp(tmp, "lcm") == 0) j->sampler = 2;
@@ -198,11 +290,23 @@ static void apply_job_json(const char* body, DiffJob* j) {
     if (json_get_double(body, "batch_count", &v) || json_get_double(body, "batch", &v) || json_get_double(body, "n_iter", &v)) {
         int bc = (int)v;
         if (bc < 1) bc = 1;
-        if (bc > 20) bc = 20;
+        if (bc > DIFF_MAX_BATCH_GEN) bc = DIFF_MAX_BATCH_GEN;
         j->batch_count = (uint32_t)bc;
     } else {
         j->batch_count = 1;
     }
+    if (json_get_double(body, "batch_rand_mask", &v) || json_get_double(body, "rand_mask", &v)) {
+        j->batch_rand_mask = (v > 0) ? (uint32_t)v : 0u;
+    }
+    if (json_get_str(body, "batch_folder", tmp, sizeof(tmp)) || json_get_str(body, "folder", tmp, sizeof(tmp))) {
+        gallery_clean_folder_name(tmp, j->batch_folder, sizeof(j->batch_folder));
+    }
+    if (json_get_double(body, "nsfw_allow", &v)) j->nsfw_allow = (v != 0) ? 1 : 0;
+    else if (strstr(body, "\"nsfw_allow\":true") || strstr(body, "\"nsfw_allow\": true")) j->nsfw_allow = 1;
+    else if (strstr(body, "\"nsfw_allow\":false") || strstr(body, "\"nsfw_allow\": false")) j->nsfw_allow = 0;
+    if (json_get_double(body, "auto_quality", &v)) j->auto_quality = (v != 0) ? 1 : 0;
+    else if (strstr(body, "\"auto_quality\":true") || strstr(body, "\"auto_quality\": true")) j->auto_quality = 1;
+    else if (strstr(body, "\"auto_quality\":false") || strstr(body, "\"auto_quality\": false")) j->auto_quality = 0;
     if (json_get_double(body, "shutdown_after", &v)) j->shutdown_after = (v != 0) ? 1 : 0;
     else if (strstr(body, "\"shutdown_after\":true") || strstr(body, "\"shutdown_after\": true")) j->shutdown_after = 1;
     else if (strstr(body, "\"shutdown_after\":false") || strstr(body, "\"shutdown_after\": false")) j->shutdown_after = 0;
@@ -415,8 +519,16 @@ static int run_sync_generation(const char* body, uint8_t** out_png, size_t* out_
     if (a1111_adapt && active_mdl[0]) {
         if (ci_contains(active_mdl, "dmd2") && (tmp.steps > 10 || tmp.cfg > 2.2f)) {
             uint32_t os = tmp.steps; float oc = tmp.cfg;
-            if (tmp.steps > 10) tmp.steps = 6;
-            if (tmp.cfg > 2.2f) tmp.cfg = 1.4f;
+            if (ci_contains(active_mdl, "animagine")) {
+                if (tmp.steps > 10) tmp.steps = 5;
+                if (tmp.cfg > 2.2f) tmp.cfg = 1.1f;
+            } else if (ci_contains(active_mdl, "noob")) {
+                if (tmp.steps > 10) tmp.steps = 6;
+                if (tmp.cfg > 2.2f) tmp.cfg = 1.2f;
+            } else {
+                if (tmp.steps > 10) tmp.steps = 6;
+                if (tmp.cfg > 2.2f) tmp.cfg = 1.4f;
+            }
             tmp.sampler = 2; // LCM
             glog("a1111: adapted DMD2 '%s' (%u stp / CFG %.1f -> %u stp / CFG %.1f / LCM)",
                  active_mdl, os, (double)oc, tmp.steps, (double)tmp.cfg);
@@ -462,6 +574,9 @@ static int run_sync_generation(const char* body, uint8_t** out_png, size_t* out_
     http_srv_lock();
     new_id = g_st->image_gen_id;
     if (snap) *snap = *g_st;
+    // Return final C-expanded & quality-shielded prompt/negative so Discord bots (Red cog) see all rolled tags!
+    if (out_prompt && pr_max && g_st->cur_prompt[0]) snprintf(out_prompt, pr_max, "%s", g_st->cur_prompt);
+    if (out_neg && ng_max && g_st->cur_negative[0]) snprintf(out_neg, ng_max, "%s", g_st->cur_negative);
     if (new_id != prev_id && g_st->png_data && g_st->png_size) {
         sz = g_st->png_size;
         copy = (uint8_t*)malloc(sz);
@@ -499,10 +614,15 @@ static void handle_client(int fd) {
     }
     if (got <= 0) { free(req); return; }
 
-    char method[16] = {0}, path[128] = {0};
-    sscanf(req, "%15s %127s", method, path);
-    char* q = strchr(path, '?');
-    if (q) *q = 0;
+    char method[16] = {0}, raw_uri[512] = {0}, path[160] = {0};
+    sscanf(req, "%15s %511s", method, raw_uri);
+    const char* query_str = "";
+    char* q = strchr(raw_uri, '?');
+    if (q) {
+        *q = 0;
+        query_str = q + 1;
+    }
+    snprintf(path, sizeof(path), "%s", raw_uri);
     const char* body = (header_end >= 0) ? (req + header_end) : "";
 
     if (strcmp(method, "OPTIONS") == 0) {
@@ -511,36 +631,212 @@ static void handle_client(int fd) {
         if (g_web_ui && g_web_ui_len) send_resp(fd, 200, "OK", "text/html; charset=utf-8", g_web_ui, g_web_ui_len);
         else send_resp(fd, 200, "OK", "text/html; charset=utf-8", FALLBACK_UI, sizeof(FALLBACK_UI) - 1);
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/gallery") == 0) {
-        GalleryItem* items = (GalleryItem*)malloc(sizeof(GalleryItem) * GALLERY_MAX_ITEMS);
+        char lim_s[16] = {0}, off_s[16] = {0}, q_buf[160] = {0}, fld_buf[64] = {0}, star_s[8] = {0};
+        int paged = url_get_param(query_str, "limit", lim_s, sizeof(lim_s));
+        int lim = paged ? atoi(lim_s) : GALLERY_MAX_ITEMS;
+        if (lim < 1) lim = 24;
+        if (paged && lim > 200) lim = 200;
+        if (!paged && lim > GALLERY_MAX_ITEMS) lim = GALLERY_MAX_ITEMS;
+        int off = url_get_param(query_str, "offset", off_s, sizeof(off_s)) ? atoi(off_s) : 0;
+        if (off < 0) off = 0;
+        url_get_param(query_str, "q", q_buf, sizeof(q_buf));
+        url_get_param(query_str, "folder", fld_buf, sizeof(fld_buf));
+        int star_only = url_get_param(query_str, "starred", star_s, sizeof(star_s)) ? (atoi(star_s) != 0) : 0;
+        if (strcmp(fld_buf, "__starred__") == 0) {
+            star_only = 1;
+            fld_buf[0] = 0;
+        }
+
+        GalleryItem* items = (GalleryItem*)malloc(sizeof(GalleryItem) * (size_t)lim);
         if (!items) { send_resp(fd, 500, "Internal Server Error", "text/plain", "oom", 3); free(req); return; }
-        int cnt = gallery_list(items, GALLERY_MAX_ITEMS);
-        size_t cap = (size_t)(cnt + 1) * 2400u + 256u;
+        int total = 0;
+        int cnt = (paged || fld_buf[0] || star_only)
+                      ? gallery_list_page_ex(items, off, lim, q_buf, fld_buf, star_only, &total)
+                      : gallery_list(items, lim);
+        size_t cap = (size_t)(cnt + 1) * 2500u + 320u;
         char* out = (char*)malloc(cap);
         if (out) {
             size_t pos = 0;
-            out[pos++] = '[';
-            for (int i = 0; i < cnt && pos + 2200u < cap; i++) {
-                char pr[1500], ng[800], md[128], sm[32];
+            if (paged) {
+                pos += (size_t)snprintf(out + pos, cap - pos,
+                                        "{\"total\":%d,\"offset\":%d,\"limit\":%d,\"items\":[",
+                                        total, off, lim);
+            } else {
+                out[pos++] = '[';
+            }
+            for (int i = 0; i < cnt && pos + 2400u < cap; i++) {
+                char pr[1500], ng[800], md[128], sm[32], lr[192], fl[96];
                 json_escape(items[i].prompt, pr, sizeof(pr));
                 json_escape(items[i].negative, ng, sizeof(ng));
                 json_escape(items[i].model, md, sizeof(md));
                 json_escape(items[i].sampler, sm, sizeof(sm));
+                json_escape(items[i].lora, lr, sizeof(lr));
+                json_escape(items[i].folder, fl, sizeof(fl));
                 pos += (size_t)snprintf(out + pos, cap - pos,
                                         "%s{\"id\":\"%s\",\"model\":\"%s\",\"width\":%u,\"height\":%u,"
                                         "\"steps\":%u,\"cfg\":%.2f,\"sampler\":\"%s\",\"seed\":%llu,"
                                         "\"eco\":%d,\"upscaled\":%d,\"sec\":%.2f,\"bytes\":%zu,"
+                                        "\"lora\":\"%s\",\"folder\":\"%s\",\"starred\":%s,"
                                         "\"prompt\":\"%s\",\"negative\":\"%s\"}",
                                         i ? "," : "", items[i].id, md, items[i].width, items[i].height,
                                         items[i].steps, (double)items[i].cfg, sm,
                                         (unsigned long long)items[i].seed, items[i].eco, items[i].upscaled,
-                                        items[i].sec, items[i].bytes, pr, ng);
+                                        items[i].sec, items[i].bytes, lr, fl,
+                                        items[i].starred ? "true" : "false", pr, ng);
             }
-            out[pos++] = ']';
+            if (paged) { out[pos++] = ']'; out[pos++] = '}'; }
+            else { out[pos++] = ']'; }
             out[pos] = 0;
             send_resp(fd, 200, "OK", "application/json", out, pos);
             free(out);
         }
         free(items);
+    } else if (strcmp(method, "GET") == 0 && strncmp(path, "/gallery/thumb/", 15) == 0) {
+        const char* fn = path + 15;
+        size_t fl = strlen(fn);
+        if (fl > 4 && strcmp(fn + fl - 4, ".png") == 0 && fl - 4 < 64) {
+            char id[64];
+            memcpy(id, fn, fl - 4);
+            id[fl - 4] = 0;
+            size_t sz = 0;
+            uint8_t* tpng = gallery_load_thumb_png(id, &sz);
+            if (tpng) {
+                send_resp_ex(fd, 200, "OK", "image/png", "public, max-age=31536000, immutable", tpng, sz);
+                free(tpng);
+            } else {
+                send_resp(fd, 404, "Not Found", "text/plain", "not found", 9);
+            }
+        } else {
+            send_resp(fd, 404, "Not Found", "text/plain", "not found", 9);
+        }
+    } else if (strcmp(method, "GET") == 0 && strncmp(path, "/gallery/item/", 14) == 0) {
+        const char* id = path + 14;
+        GalleryItem it;
+        if (gallery_get(id, &it) == 0) {
+            char pr[1500], ng[800], md[128], sm[32], lr[192], fl[96], out[2900];
+            json_escape(it.prompt, pr, sizeof(pr));
+            json_escape(it.negative, ng, sizeof(ng));
+            json_escape(it.model, md, sizeof(md));
+            json_escape(it.sampler, sm, sizeof(sm));
+            json_escape(it.lora, lr, sizeof(lr));
+            json_escape(it.folder, fl, sizeof(fl));
+            int n = snprintf(out, sizeof(out),
+                             "{\"id\":\"%s\",\"model\":\"%s\",\"width\":%u,\"height\":%u,"
+                             "\"steps\":%u,\"cfg\":%.2f,\"sampler\":\"%s\",\"seed\":%llu,"
+                             "\"eco\":%d,\"upscaled\":%d,\"sec\":%.2f,\"bytes\":%zu,"
+                             "\"lora\":\"%s\",\"folder\":\"%s\",\"starred\":%s,"
+                             "\"prompt\":\"%s\",\"negative\":\"%s\"}",
+                             it.id, md, it.width, it.height, it.steps, (double)it.cfg, sm,
+                             (unsigned long long)it.seed, it.eco, it.upscaled, it.sec, it.bytes,
+                             lr, fl, it.starred ? "true" : "false", pr, ng);
+            send_resp(fd, 200, "OK", "application/json", out, (size_t)n);
+        } else {
+            send_resp(fd, 404, "Not Found", "application/json", "{\"error\":\"not found\"}", 21);
+        }
+    } else if (strcmp(method, "GET") == 0 && strcmp(path, "/gallery/folders") == 0) {
+        GalleryFolder flist[GALLERY_MAX_FOLDERS];
+        int uns = 0, star = 0, all = 0;
+        int nf = gallery_list_folders(flist, GALLERY_MAX_FOLDERS, &uns, &star, &all);
+        char* out = (char*)malloc(8192);
+        if (out) {
+            size_t pos = (size_t)snprintf(out, 8192, "{\"all\":%d,\"unsorted\":%d,\"starred\":%d,\"folders\":[",
+                                          all, uns, star);
+            for (int i = 0; i < nf && pos + 128 < 8192; i++) {
+                char ne[96];
+                json_escape(flist[i].name, ne, sizeof(ne));
+                pos += (size_t)snprintf(out + pos, 8192 - pos, "%s{\"name\":\"%s\",\"count\":%d}",
+                                        i ? "," : "", ne, flist[i].count);
+            }
+            pos += (size_t)snprintf(out + pos, 8192 - pos, "]}");
+            send_resp(fd, 200, "OK", "application/json", out, pos);
+            free(out);
+        } else {
+            send_resp(fd, 500, "Internal Server Error", "text/plain", "oom", 3);
+        }
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/gallery/folder/create") == 0) {
+        char raw[64] = {0}, clean[48] = {0};
+        json_get_str(body, "name", raw, sizeof(raw));
+        if (gallery_create_folder(raw, clean, sizeof(clean)) == 0) {
+            char ce[96], resp[160];
+            json_escape(clean, ce, sizeof(ce));
+            int l = snprintf(resp, sizeof(resp), "{\"ok\":true,\"name\":\"%s\"}", ce);
+            send_resp(fd, 200, "OK", "application/json", resp, (size_t)l);
+        } else {
+            send_resp(fd, 400, "Bad Request", "application/json", "{\"error\":\"invalid folder name\"}", 31);
+        }
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/gallery/folder/delete") == 0) {
+        char raw[64] = {0};
+        double dv = 0;
+        json_get_str(body, "name", raw, sizeof(raw));
+        int del_imgs = json_get_double(body, "delete_images", &dv) ? ((int)dv != 0) :
+                       (strstr(body, "\"delete_images\":true") != NULL || strstr(body, "\"delete_images\": true") != NULL);
+        if (gallery_delete_folder(raw, del_imgs) == 0) {
+            http_srv_lock();
+            if (ci_eq(g_job->batch_folder, raw)) g_job->batch_folder[0] = 0;
+            http_srv_unlock();
+            send_resp(fd, 200, "OK", "application/json", "{\"ok\":true}", 11);
+        } else {
+            send_resp(fd, 400, "Bad Request", "application/json", "{\"error\":\"invalid folder\"}", 26);
+        }
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/gallery/folder/move") == 0) {
+        char (*ids)[64] = (char (*)[64])malloc(256 * sizeof(*ids));
+        char fld[64] = {0};
+        json_get_str(body, "folder", fld, sizeof(fld));
+        int n_ids = ids ? json_get_str_array(body, "ids", ids, 256) : 0;
+        int moved = (ids && n_ids > 0) ? gallery_set_folder_batch((const char (*)[64])ids, n_ids, fld) : -1;
+        free(ids);
+        if (moved >= 0) {
+            char resp[64];
+            int l = snprintf(resp, sizeof(resp), "{\"ok\":true,\"moved\":%d}", moved);
+            send_resp(fd, 200, "OK", "application/json", resp, (size_t)l);
+        } else {
+            send_resp(fd, 400, "Bad Request", "application/json", "{\"error\":\"move failed\"}", 23);
+        }
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/gallery/star") == 0) {
+        char id[64] = {0};
+        double sv = 1.0;
+        json_get_str(body, "id", id, sizeof(id));
+        int st = json_get_double(body, "starred", &sv) ? ((int)sv != 0) :
+                 (strstr(body, "\"starred\":false") == NULL && strstr(body, "\"starred\": false") == NULL);
+        if (gallery_set_starred(id, st) == 0) send_resp(fd, 200, "OK", "application/json", "{\"ok\":true}", 11);
+        else send_resp(fd, 404, "Not Found", "application/json", "{\"error\":\"not found\"}", 21);
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/gallery/batch_delete") == 0) {
+        char (*ids)[64] = (char (*)[64])malloc(512 * sizeof(*ids));
+        int n_ids = ids ? json_get_str_array(body, "ids", ids, 512) : 0;
+        int del = 0;
+        for (int i = 0; i < n_ids; i++) {
+            if (gallery_delete(ids[i]) == 0) del++;
+        }
+        free(ids);
+        char resp[64];
+        int l = snprintf(resp, sizeof(resp), "{\"ok\":true,\"deleted\":%d}", del);
+        send_resp(fd, 200, "OK", "application/json", resp, (size_t)l);
+    } else if ((strcmp(method, "GET") == 0 && (strcmp(path, "/gallery/zip") == 0 || strcmp(path, "/gallery/folder/zip") == 0)) ||
+               (strcmp(method, "POST") == 0 && strcmp(path, "/gallery/batch_zip") == 0)) {
+        char fld[64] = {0};
+        char (*ids)[64] = NULL;
+        int n_ids = 0;
+        if (strcmp(method, "GET") == 0) {
+            url_get_param(query_str, "folder", fld, sizeof(fld));
+        } else {
+            json_get_str(body, "folder", fld, sizeof(fld));
+            ids = (char (*)[64])malloc(256 * sizeof(*ids));
+            if (ids) n_ids = json_get_str_array(body, "ids", ids, 256);
+        }
+        size_t zsz = 0;
+        uint8_t* zbuf = gallery_build_zip((const char (*)[64])ids, n_ids, fld, &zsz);
+        free(ids);
+        if (zbuf && zsz > 0) {
+            char zname[96], clean_f[48];
+            if (gallery_clean_folder_name(fld, clean_f, sizeof(clean_f)))
+                snprintf(zname, sizeof(zname), "garlic_%s.zip", clean_f);
+            else
+                snprintf(zname, sizeof(zname), "garlic_gallery_batch.zip");
+            send_zip_resp(fd, zname, zbuf, zsz);
+            free(zbuf);
+        } else {
+            send_resp(fd, 404, "Not Found", "application/json", "{\"error\":\"no matching images\"}", 30);
+        }
     } else if (strcmp(method, "GET") == 0 && strncmp(path, "/gallery/", 9) == 0) {
         const char* fn = path + 9;
         size_t fl = strlen(fn);
@@ -575,8 +871,61 @@ static void handle_client(int fd) {
         int ok = gallery_valid_id(id) && g_st->ready && !g_st->busy && !g_job->pending && !g_job->switch_req && !g_job->gal_op;
         if (ok) {
             snprintf(g_job->gal_id, sizeof(g_job->gal_id), "%s", id);
+            snprintf(g_job->gal_ids[0], sizeof(g_job->gal_ids[0]), "%s", id);
+            g_job->gal_ids_n = 1;
             int m = (int)md;
             g_job->gal_op = (m == 3) ? 3 : ((m == 2) ? 2 : 1);
+            g_job->cancel_req = 0;
+        }
+        http_srv_unlock();
+        if (ok) send_resp(fd, 202, "Accepted", "application/json", "{\"ok\":true}", 11);
+        else send_resp(fd, 503, "Service Unavailable", "application/json", "{\"error\":\"busy\"}", 16);
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/gallery/batch_upscale") == 0) {
+        char raw_ids[DIFF_MAX_BATCH_GAL][64];
+        int n_raw = json_get_str_array(body, "ids", raw_ids, DIFF_MAX_BATCH_GAL);
+        double md = 1.0;
+        json_get_double(body, "mode", &md);
+        int m = ((int)md == 3) ? 3 : (((int)md == 2) ? 2 : 1);
+        http_srv_lock();
+        int can_q = g_st->ready && !g_st->busy && !g_job->pending && !g_job->switch_req && !g_job->gal_op;
+        int valid_n = 0;
+        if (can_q && n_raw > 0) {
+            for (int i = 0; i < n_raw && valid_n < DIFF_MAX_BATCH_GAL; i++) {
+                if (gallery_valid_id(raw_ids[i])) {
+                    snprintf(g_job->gal_ids[valid_n], sizeof(g_job->gal_ids[0]), "%s", raw_ids[i]);
+                    valid_n++;
+                }
+            }
+            if (valid_n > 0) {
+                snprintf(g_job->gal_id, sizeof(g_job->gal_id), "%s", g_job->gal_ids[0]);
+                g_job->gal_ids_n = valid_n;
+                g_job->gal_op = m;
+                g_job->cancel_req = 0;
+            }
+        }
+        http_srv_unlock();
+        if (!can_q) send_resp(fd, 503, "Service Unavailable", "application/json", "{\"error\":\"busy\"}", 16);
+        else if (valid_n <= 0) send_resp(fd, 400, "Bad Request", "application/json", "{\"error\":\"no valid gallery ids\"}", 32);
+        else {
+            char resp[64];
+            int l = snprintf(resp, sizeof(resp), "{\"ok\":true,\"count\":%d}", valid_n);
+            send_resp(fd, 202, "Accepted", "application/json", resp, (size_t)l);
+        }
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/gallery/fix_face") == 0) {
+        char id[64] = {0};
+        double dn = 0.42;
+        json_get_str(body, "id", id, sizeof(id));
+        json_get_double(body, "denoise", &dn);
+        if (dn < 0.15) dn = 0.15;
+        if (dn > 0.75) dn = 0.75;
+        http_srv_lock();
+        int ok = gallery_valid_id(id) && g_st->ready && !g_st->busy && !g_job->pending && !g_job->switch_req && !g_job->gal_op;
+        if (ok) {
+            snprintf(g_job->gal_id, sizeof(g_job->gal_id), "%s", id);
+            snprintf(g_job->gal_ids[0], sizeof(g_job->gal_ids[0]), "%s", id);
+            g_job->gal_ids_n = 1;
+            g_job->gal_denoise = (float)dn;
+            g_job->gal_op = 5;
             g_job->cancel_req = 0;
         }
         http_srv_unlock();
@@ -619,9 +968,12 @@ static void handle_client(int fd) {
                 pos += (size_t)snprintf(out + pos, cap - pos,
                                         "%s{\"id\":\"%s\",\"name\":\"%s\",\"model\":\"%s\",\"width\":%u,\"height\":%u,"
                                         "\"steps\":%u,\"cfg\":%.2f,\"sampler\":\"%s\",\"upscale\":%d,\"eco\":%d,"
+                                        "\"nsfw\":%s,\"nsfw_only\":%s,\"is_speed\":%s,"
                                         "\"prompt\":\"%s\",\"negative\":\"%s\"}",
                                         i ? "," : "", items[i].id, nm, md, items[i].width, items[i].height,
                                         items[i].steps, (double)items[i].cfg, sm, items[i].upscale, items[i].eco,
+                                        items[i].nsfw ? "true" : "false", items[i].nsfw ? "true" : "false",
+                                        items[i].is_speed ? "true" : "false",
                                         pr, ng);
             }
             out[pos++] = ']';
@@ -648,6 +1000,16 @@ static void handle_client(int fd) {
         p.cfg = (json_get_double(body, "cfg", &v) && v >= 1.0) ? (float)v : 7.0f;
         p.upscale = json_get_double(body, "upscale", &v) ? (int)v : 0;
         p.eco = json_get_double(body, "eco", &v) ? (int)v : 2;
+        if (json_get_double(body, "nsfw", &v)) p.nsfw = (v != 0) ? 1 : 0;
+        else if (strstr(body, "\"nsfw\":true") || strstr(body, "\"nsfw\": true")) p.nsfw = 1;
+        if (json_get_double(body, "is_speed", &v)) p.is_speed = (v != 0) ? 1 : 0;
+        else if (strstr(body, "\"is_speed\":true") || strstr(body, "\"is_speed\": true")) p.is_speed = 1;
+        p.nsfw = json_get_double(body, "nsfw_only", &v) ? ((int)v != 0) :
+                 (json_get_double(body, "nsfw", &v) ? ((int)v != 0) :
+                  (strstr(body, "\"nsfw_only\":true") != NULL || strstr(body, "\"nsfw_only\": true") != NULL ||
+                   strstr(body, "\"nsfw\":true") != NULL || strstr(body, "\"nsfw\": true") != NULL));
+        p.is_speed = json_get_double(body, "is_speed", &v) ? ((int)v != 0) :
+                     (strstr(body, "\"is_speed\":true") != NULL || strstr(body, "\"is_speed\": true") != NULL);
         char sid[64] = {0};
         if (presets_save(&p, sid, sizeof(sid)) == 0) {
             http_srv_lock(); g_job->presets_dirty = 1; http_srv_unlock();
@@ -902,16 +1264,242 @@ static void handle_client(int fd) {
         } else {
             send_resp(fd, 404, "Not Found", "application/json", "{\"error\":\"model not found\"}", 27);
         }
+    } else if (strcmp(method, "GET") == 0 && strcmp(path, "/loras/manager") == 0) {
+        InstalledLora* inst = (InstalledLora*)malloc(sizeof(InstalledLora) * LORA_MAX_INSTALLED);
+        CatalogLora* cat = (CatalogLora*)malloc(sizeof(CatalogLora) * LORA_MAX_CATALOG);
+        char* out = (char*)malloc(40960);
+        if (inst && cat && out) {
+            int ni = lora_list_installed(inst, LORA_MAX_INSTALLED);
+            int nc = lora_get_catalog(cat, LORA_MAX_CATALOG);
+            ModelDlStatus dl;
+            model_dl_get_status(&dl);
+            int is15 = 0;
+            char cur_l[80] = {0};
+            float cur_ls = 0.8f;
+            http_srv_lock();
+            is15 = g_st->is_sd15;
+            snprintf(cur_l, sizeof(cur_l), "%s", g_job->lora);
+            cur_ls = g_job->lora_scale;
+            http_srv_unlock();
+
+            char cle[128], dlm_e[128], dlr_e[256], dlf_e[128], dls_e[256], dle_e[384];
+            json_escape(cur_l, cle, sizeof(cle));
+            json_escape(dl.model_id, dlm_e, sizeof(dlm_e));
+            json_escape(dl.repo, dlr_e, sizeof(dlr_e));
+            json_escape(dl.cur_file, dlf_e, sizeof(dlf_e));
+            json_escape(dl.stage, dls_e, sizeof(dls_e));
+            json_escape(dl.error, dle_e, sizeof(dle_e));
+
+            size_t pos = 0;
+            pos += (size_t)snprintf(out + pos, 40960 - pos,
+                                    "{\"active_arch\":\"%s\",\"selected_lora\":\"%s\",\"lora_scale\":%.2f,\"installed\":[",
+                                    is15 ? "sd15" : "sdxl", cle, (double)cur_ls);
+            for (int i = 0; i < ni && pos + 320 < 40960; i++) {
+                char ne[128], fe[160];
+                json_escape(inst[i].name, ne, sizeof(ne));
+                json_escape(inst[i].filename, fe, sizeof(fe));
+                pos += (size_t)snprintf(out + pos, 40960 - pos,
+                                        "%s{\"name\":\"%s\",\"filename\":\"%s\",\"arch\":\"%s\",\"size_mb\":%u,\"rank\":%u,\"has_te\":%s}",
+                                        i ? "," : "", ne, fe, inst[i].arch, inst[i].size_mb, inst[i].rank,
+                                        inst[i].has_te ? "true" : "false");
+            }
+            pos += (size_t)snprintf(out + pos, 40960 - pos, "],\"catalog\":[");
+            for (int i = 0; i < nc && pos + 800 < 40960; i++) {
+                char ide[128], te[160], tre[192], de[320], fe[160], ue[512];
+                json_escape(cat[i].id, ide, sizeof(ide));
+                json_escape(cat[i].title, te, sizeof(te));
+                json_escape(cat[i].trigger, tre, sizeof(tre));
+                json_escape(cat[i].desc, de, sizeof(de));
+                json_escape(cat[i].filename, fe, sizeof(fe));
+                json_escape(cat[i].url, ue, sizeof(ue));
+                int qd = lora_dl_is_queued(cat[i].filename) || lora_dl_is_queued(cat[i].id);
+                pos += (size_t)snprintf(out + pos, 40960 - pos,
+                                        "%s{\"id\":\"%s\",\"title\":\"%s\",\"arch\":\"%s\",\"size_mb\":%u,"
+                                        "\"default_weight\":%.2f,\"trigger\":\"%s\",\"desc\":\"%s\","
+                                        "\"filename\":\"%s\",\"url\":\"%s\",\"queued\":%s}",
+                                        i ? "," : "", ide, te, cat[i].arch, cat[i].size_mb,
+                                        (double)cat[i].default_weight, tre, de, fe, ue, qd ? "true" : "false");
+            }
+            pos += (size_t)snprintf(out + pos, 40960 - pos,
+                                    "],\"download\":{\"active\":%s,\"finished\":%d,\"queue_len\":%d,\"model_id\":\"%s\",\"repo\":\"%s\","
+                                    "\"cur_file\":\"%s\",\"file_idx\":%d,\"file_total\":%d,"
+                                    "\"bytes_done\":%llu,\"bytes_total\":%llu,\"speed_mbs\":%.2f,"
+                                    "\"stage\":\"%s\",\"error\":\"%s\"}}",
+                                    dl.active ? "true" : "false", dl.finished, dl.queue_len, dlm_e, dlr_e, dlf_e,
+                                    dl.file_idx, dl.file_total, (unsigned long long)dl.bytes_done,
+                                    (unsigned long long)dl.bytes_total, dl.speed_mbs, dls_e, dle_e);
+            send_resp(fd, 200, "OK", "application/json", out, pos);
+        } else {
+            send_resp(fd, 500, "Internal Server Error", "text/plain", "oom", 3);
+        }
+        free(inst); free(cat); free(out);
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/loras/catalog/refresh") == 0) {
+        int n = lora_refresh_catalog();
+        char resp[96];
+        int l = snprintf(resp, sizeof(resp), "{\"ok\":%s,\"count\":%d}", n > 0 ? "true" : "false", n);
+        send_resp(fd, 200, "OK", "application/json", resp, (size_t)l);
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/loras/download") == 0) {
+        char id[64] = {0}, url[384] = {0}, fn[80] = {0};
+        json_get_str(body, "id", id, sizeof(id));
+        json_get_str(body, "url", url, sizeof(url));
+        json_get_str(body, "filename", fn, sizeof(fn));
+        int rc = lora_dl_start(id, url, fn);
+        if (rc == 0 || rc == 1) {
+            char resp[64];
+            int l = snprintf(resp, sizeof(resp), "{\"ok\":true,\"queued\":%s}", rc == 1 ? "true" : "false");
+            send_resp(fd, 202, "Accepted", "application/json", resp, (size_t)l);
+        } else {
+            ModelDlStatus dl;
+            model_dl_get_status(&dl);
+            char ee[320], resp[420];
+            json_escape(dl.error[0] ? dl.error : (rc == -2 ? "Another model download is already running" : "Invalid LoRA URL"), ee, sizeof(ee));
+            int l = snprintf(resp, sizeof(resp), "{\"error\":\"%s\"}", ee);
+            send_resp(fd, rc == -2 ? 503 : 400, "Error", "application/json", resp, (size_t)l);
+        }
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/loras/download_all") == 0) {
+        char arch[16] = {0};
+        json_get_str(body, "arch", arch, sizeof(arch));
+        if (!arch[0]) {
+            http_srv_lock();
+            snprintf(arch, sizeof(arch), "%s", g_st->is_sd15 ? "sd15" : "sdxl");
+            http_srv_unlock();
+        }
+        int rc = lora_dl_queue_all(arch);
+        if (rc >= 0) {
+            char resp[96];
+            int l = snprintf(resp, sizeof(resp), "{\"ok\":true,\"queued\":%d,\"arch\":\"%s\"}", rc, arch);
+            send_resp(fd, 202, "Accepted", "application/json", resp, (size_t)l);
+        } else {
+            send_resp(fd, rc == -2 ? 503 : 400, "Error", "application/json",
+                      "{\"error\":\"Another model download is already running\"}", 55);
+        }
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/loras/delete") == 0) {
+        char id[80] = {0};
+        json_get_str(body, "id", id, sizeof(id));
+        if (lora_delete(id) == 0) {
+            http_srv_lock();
+            if (strcmp(g_job->lora, id) == 0) g_job->lora[0] = 0;
+            g_job->loras_dirty = 1;
+            http_srv_unlock();
+            send_resp(fd, 200, "OK", "application/json", "{\"ok\":true}", 11);
+        } else {
+            send_resp(fd, 404, "Not Found", "application/json", "{\"error\":\"lora not found\"}", 26);
+        }
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/loras/select") == 0) {
+        char lr[80] = {0};
+        double ls = 0.8;
+        json_get_str(body, "lora", lr, sizeof(lr));
+        int has_s = json_get_double(body, "lora_scale", &ls);
+        if (!strchr(lr, '/') && !strchr(lr, '\\') && !strstr(lr, "..")) {
+            // Reject incompatible architecture LoRAs so they cannot be selected for the active model
+            int is15 = 0;
+            http_srv_lock(); is15 = g_st->is_sd15; http_srv_unlock();
+            if (lr[0]) {
+                InstalledLora* inst = (InstalledLora*)malloc(sizeof(InstalledLora) * LORA_MAX_INSTALLED);
+                int incompatible = 0;
+                char bad_arch[16] = {0};
+                if (inst) {
+                    int ni = lora_list_installed(inst, LORA_MAX_INSTALLED);
+                    const char* act_arch = is15 ? "sd15" : "sdxl";
+                    for (int i = 0; i < ni; i++) {
+                        if (strcmp(inst[i].name, lr) == 0) {
+                            if (inst[i].arch[0] && strcmp(inst[i].arch, "any") != 0 && strcmp(inst[i].arch, act_arch) != 0) {
+                                incompatible = 1;
+                                snprintf(bad_arch, sizeof(bad_arch), "%s", inst[i].arch);
+                            }
+                            break;
+                        }
+                    }
+                    free(inst);
+                }
+                if (incompatible) {
+                    char resp[192];
+                    int l = snprintf(resp, sizeof(resp),
+                                     "{\"error\":\"Incompatible LoRA (%s) for active %s model\"}",
+                                     bad_arch, is15 ? "SD 1.5" : "SDXL");
+                    send_resp(fd, 400, "Bad Request", "application/json", resp, (size_t)l);
+                    return;
+                }
+            }
+            http_srv_lock();
+            snprintf(g_job->lora, sizeof(g_job->lora), "%s", lr);
+            if (has_s) {
+                if (ls < -2.0) ls = -2.0;
+                if (ls > 2.5) ls = 2.5;
+                g_job->lora_scale = (float)ls;
+            }
+            g_st->settings_seq++;
+            http_srv_unlock();
+            send_resp(fd, 200, "OK", "application/json", "{\"ok\":true}", 11);
+        } else {
+            send_resp(fd, 400, "Bad Request", "application/json", "{\"error\":\"invalid lora\"}", 24);
+        }
     } else if (strcmp(method, "GET") == 0 && (strcmp(path, "/status") == 0 || strcmp(path, "/stats") == 0)) {
-        char st_esc[256], err_esc[512], mdl_esc[128], pd_esc[192], pp_esc[768], pn_esc[512], mlist[1400], out[5600];
+        char* out = (char*)malloc(16384);
+        char* cpr_esc = (char*)malloc(1600);
+        char* cng_esc = (char*)malloc(900);
+        if (!out || !cpr_esc || !cng_esc) {
+            free(out); free(cpr_esc); free(cng_esc);
+            send_resp(fd, 500, "Internal Server Error", "text/plain", "oom", 3);
+            free(req);
+            return;
+        }
+        char st_esc[256], err_esc[512], mdl_esc[128], pd_esc[192], sd_esc[192], pp_esc[768], pn_esc[512], lr_esc[128], clr_esc[128], alr_esc[192], cfld_esc[96], mlist[2560];
         static const char* SMP_NAMES[4] = {"Euler a", "Euler", "LCM", "DPM++ 2M Karras"};
+        uint32_t grev = gallery_revision();
+        AppUpdateStatus upd;
+        app_update_get_status(&upd);
+        ModelDlStatus udl;
+        model_dl_get_status(&udl);
+        int ota_dl_active = (udl.active && strcmp(udl.model_id, "Garlic-Diffusion.pkg") == 0);
+        int ota_dl_pct = (ota_dl_active && udl.bytes_total > 0) ? (int)((100ull * udl.bytes_done) / udl.bytes_total) : 0;
+        char urem_esc[32], uchg_esc[384], ustg_esc[220];
+        json_escape(upd.remote_ver, urem_esc, sizeof(urem_esc));
+        json_escape(upd.changelog, uchg_esc, sizeof(uchg_esc));
+        json_escape(udl.error[0] ? udl.error : udl.stage, ustg_esc, sizeof(ustg_esc));
+
+        GalleryStageStatus stg;
+        gallery_stage_get_status(&stg);
+        static const char* const STG_NAMES[5] = {"idle", "staging", "flushing", "complete", "error"};
+        const char* stg_name = STG_NAMES[(stg.state >= 0 && stg.state <= 4) ? stg.state : 0];
+        char stg_err_esc[256];
+        json_escape(stg.error, stg_err_esc, sizeof(stg_err_esc));
+
         http_srv_lock();
         json_escape(g_st->stage, st_esc, sizeof(st_esc));
         json_escape(g_st->error, err_esc, sizeof(err_esc));
         json_escape(g_st->model, mdl_esc, sizeof(mdl_esc));
         json_escape(g_st->preset_desc, pd_esc, sizeof(pd_esc));
+        json_escape(g_st->speed_desc, sd_esc, sizeof(sd_esc));
         json_escape(g_st->preset_prompt, pp_esc, sizeof(pp_esc));
         json_escape(g_st->preset_negative, pn_esc, sizeof(pn_esc));
+        json_escape(g_job->lora, lr_esc, sizeof(lr_esc));
+        json_escape(g_st->active_lora, alr_esc, sizeof(alr_esc));
+        float lscale = g_job->lora_scale;
+        int is_switching = g_job->switch_req;
+        int nsfw_ok = g_job->nsfw_allow;
+        int auto_q = g_job->auto_quality;
+        int ui_m = g_job->ui_mode;
+
+        // Expose active in-progress job settings when busy, or live Studio configuration when idle!
+        int use_cur = (g_st->busy && g_st->cur_w > 0);
+        json_escape(use_cur ? g_st->cur_prompt : g_job->prompt, cpr_esc, 1600);
+        json_escape(use_cur ? g_st->cur_negative : g_job->negative, cng_esc, 900);
+        json_escape(use_cur ? g_st->cur_lora : g_job->lora, clr_esc, sizeof(clr_esc));
+        json_escape(use_cur ? g_st->cur_folder : g_job->batch_folder, cfld_esc, sizeof(cfld_esc));
+        float cls = use_cur ? g_st->cur_lora_scale : g_job->lora_scale;
+        uint32_t cw = use_cur ? g_st->cur_w : g_job->width;
+        uint32_t ch = use_cur ? g_st->cur_h : g_job->height;
+        uint32_t cst = use_cur ? g_st->cur_steps : g_job->steps;
+        float ccfg = use_cur ? g_st->cur_cfg : g_job->cfg;
+        int csmp = use_cur ? g_st->cur_sampler : g_job->sampler;
+        if (csmp < 0 || csmp > 3) csmp = 0;
+        int cups = use_cur ? g_st->cur_upscale : g_job->upscale;
+        int ceco = use_cur ? g_st->cur_eco : g_job->eco_mode;
+        uint64_t cseed = use_cur ? g_st->cur_seed : g_job->seed;
+        uint32_t cbatch = use_cur ? g_st->cur_batch : (g_job->batch_count ? g_job->batch_count : 1u);
+        uint32_t crand = use_cur ? g_st->cur_rand_mask : g_job->batch_rand_mask;
+
         size_t mp = 0;
         mlist[mp++] = '[';
         for (int i = 0; i < g_st->num_models && mp + 80 < sizeof(mlist); i++) {
@@ -922,24 +1510,49 @@ static void handle_client(int fd) {
         mlist[mp++] = ']';
         mlist[mp] = 0;
         int ps = (g_st->preset_sampler >= 0 && g_st->preset_sampler <= 3) ? g_st->preset_sampler : 0;
-        int n = snprintf(out, sizeof(out),
-                         "{\"gpu_ready\":%s,\"ready\":%s,\"busy\":%s,\"neo\":%d,\"arch\":\"%s\",\"has_upscaler\":%s,"
+        int sps = (g_st->speed_sampler >= 0 && g_st->speed_sampler <= 3) ? g_st->speed_sampler : 0;
+        int n = snprintf(out, 16384,
+                         "{\"version\":\"%s\",\"ui_mode\":%d,"
+                         "\"gpu_ready\":%s,\"ready\":%s,\"busy\":%s,\"switching\":%s,\"neo\":%d,\"arch\":\"%s\",\"has_upscaler\":%s,"
+                         "\"nsfw_allow\":%s,\"auto_quality\":%s,"
                          "\"temp_c\":%d,\"temp_peak_c\":%d,\"eco_mode\":%d,"
-                         "\"gpu_used_mb\":%u,\"gpu_total_mb\":%u,\"progress\":%.3f,\"stage\":\"%s\",\"model\":\"%s\","
+                         "\"gpu_used_mb\":%u,\"gpu_total_mb\":%u,\"progress\":%.3f,\"eta_sec\":%.1f,\"elapsed_sec\":%.1f,"
+                         "\"stage\":\"%s\",\"model\":\"%s\","
+                         "\"lora\":\"%s\",\"lora_scale\":%.2f,\"active_lora\":\"%s\",\"gallery_rev\":%u,\"settings_seq\":%u,"
                          "\"models\":%s,\"preset\":{\"width\":%u,\"height\":%u,\"steps\":%u,\"cfg\":%.2f,"
                          "\"sampler\":\"%s\",\"upscale\":%d,\"description\":\"%s\",\"prompt\":\"%s\",\"negative\":\"%s\"},"
+                         "\"speed_preset\":{\"width\":%u,\"height\":%u,\"steps\":%u,\"cfg\":%.2f,"
+                         "\"sampler\":\"%s\",\"upscale\":%d,\"description\":\"%s\"},"
+                         "\"current\":{\"prompt\":\"%s\",\"negative\":\"%s\",\"lora\":\"%s\",\"lora_scale\":%.2f,"
+                         "\"width\":%u,\"height\":%u,\"steps\":%u,\"cfg\":%.2f,\"sampler\":\"%s\",\"upscale\":%d,"
+                         "\"eco\":%d,\"seed\":%llu,\"batch_count\":%u,\"rand_mask\":%u,\"folder\":\"%s\",\"shutdown_after\":%s},"
+                         "\"update\":{\"checked\":%s,\"available\":%s,\"pkg_ready\":%s,\"current\":\"%s\",\"remote\":\"%s\","
+                         "\"size_mb\":%u,\"changelog\":\"%s\",\"dl_active\":%s,\"dl_pct\":%d,\"dl_speed\":%.2f,\"dl_stage\":\"%s\"},"
                          "\"error\":\"%s\",\"width\":%u,\"height\":%u,\"steps\":%u,\"cfg\":%.2f,\"seed\":%llu,"
                          "\"last_sec\":%.2f,\"unet_gpu_sec\":%.2f,\"vae_sec\":%.2f,\"upscale_sec\":%.2f,\"cooldown_sec\":%.2f,"
                          "\"eff_tflops\":%.3f,\"bench_gemm_tflops\":%.3f,\"bench_attn_ms\":%.2f,"
                          "\"bench_mode_tf\":[%.3f,%.3f,%.3f,%.3f],"
-                         "\"has_image\":%s,\"image_gen_id\":%u,\"batch_cur\":%u,\"batch_total\":%u,\"shutdown_after\":%s,\"last_gallery_id\":\"%s\"}",
+                         "\"has_image\":%s,\"image_gen_id\":%u,\"batch_cur\":%u,\"batch_total\":%u,\"shutdown_after\":%s,\"last_gallery_id\":\"%s\","
+                         "\"storage\":{\"state\":\"%s\",\"queued\":%u,\"flushed\":%u,\"used_mb\":%.2f,\"max_mb\":%.1f,\"fallback\":%s,\"last_id\":\"%s\",\"error\":\"%s\"}}",
+                         GD_APP_VERSION, ui_m,
                          g_st->gpu_ready ? "true" : "false", g_st->ready ? "true" : "false", g_st->busy ? "true" : "false",
+                         is_switching ? "true" : "false",
                          g_st->neo, g_st->is_sd15 ? "sd15" : "sdxl", g_st->has_upscaler ? "true" : "false",
+                         nsfw_ok ? "true" : "false", auto_q ? "true" : "false",
                          g_st->temp_c, g_st->temp_peak_c, g_st->eco_mode,
                          g_st->gpu_used_mb, g_st->gpu_total_mb,
-                         (double)g_st->progress, st_esc, mdl_esc, mlist,
+                         (double)g_st->progress, (double)g_st->eta_sec, (double)g_st->elapsed_sec,
+                         st_esc, mdl_esc,
+                         lr_esc, (double)lscale, alr_esc, grev, g_st->settings_seq, mlist,
                          g_st->preset_w, g_st->preset_h, g_st->preset_steps, (double)g_st->preset_cfg,
                          SMP_NAMES[ps], g_st->preset_upscale, pd_esc, pp_esc, pn_esc,
+                         g_st->speed_w, g_st->speed_h, g_st->speed_steps, (double)g_st->speed_cfg,
+                         SMP_NAMES[sps], g_st->speed_upscale, sd_esc,
+                         cpr_esc, cng_esc, clr_esc, (double)cls, cw, ch, cst, (double)ccfg, SMP_NAMES[csmp],
+                         cups, ceco, (unsigned long long)cseed, cbatch, crand, cfld_esc, g_job->shutdown_after ? "true" : "false",
+                         upd.checked ? "true" : "false", upd.update_available ? "true" : "false", upd.pkg_ready ? "true" : "false",
+                         upd.current_ver, urem_esc, upd.size_mb, uchg_esc,
+                         ota_dl_active ? "true" : "false", ota_dl_pct, udl.speed_mbs, ustg_esc,
                          err_esc, g_st->width, g_st->height, g_st->steps, (double)g_st->cfg,
                          (unsigned long long)g_st->seed, g_st->last_sec,
                          g_st->unet_gpu_sec, g_st->vae_sec, g_st->upscale_sec, g_st->cooldown_sec,
@@ -947,9 +1560,13 @@ static void handle_client(int fd) {
                          g_st->bench_mode_tf[0], g_st->bench_mode_tf[1],
                          g_st->bench_mode_tf[2], g_st->bench_mode_tf[3],
                          (g_st->png_data && g_st->png_size) ? "true" : "false", g_st->image_gen_id,
-                         g_st->batch_cur, g_st->batch_total, g_st->shutdown_after ? "true" : "false", g_st->last_gallery_id);
+                         g_st->batch_cur, g_st->batch_total, g_st->shutdown_after ? "true" : "false", g_st->last_gallery_id,
+                         stg_name, stg.queued_count, stg.flushed_total,
+                         (double)stg.used_bytes / 1048576.0, (double)stg.max_bytes / 1048576.0,
+                         stg.fallback_used ? "true" : "false", stg.last_id, stg_err_esc);
         http_srv_unlock();
         send_resp(fd, 200, "OK", "application/json", out, (size_t)n);
+        free(out); free(cpr_esc); free(cng_esc);
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/image.png") == 0) {
         uint8_t* copy = NULL;
         size_t sz = 0;
@@ -966,6 +1583,89 @@ static void handle_client(int fd) {
         } else {
             send_resp(fd, 404, "Not Found", "text/plain", "no image yet", 12);
         }
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/settings") == 0) {
+        double v = 0;
+        char tmp[64] = {0};
+        int save_uim = -99, nsfw_changed = 0;
+        http_srv_lock();
+        int prev_ns = g_job->nsfw_allow;
+        if (json_get_double(body, "nsfw_allow", &v)) g_job->nsfw_allow = (v != 0) ? 1 : 0;
+        else if (strstr(body, "\"nsfw_allow\":true") || strstr(body, "\"nsfw_allow\": true")) g_job->nsfw_allow = 1;
+        else if (strstr(body, "\"nsfw_allow\":false") || strstr(body, "\"nsfw_allow\": false")) g_job->nsfw_allow = 0;
+        nsfw_changed = (g_job->nsfw_allow != prev_ns);
+        if (nsfw_changed) g_job->presets_dirty = 1;
+        if (json_get_double(body, "auto_quality", &v)) g_job->auto_quality = (v != 0) ? 1 : 0;
+        else if (strstr(body, "\"auto_quality\":true") || strstr(body, "\"auto_quality\": true")) g_job->auto_quality = 1;
+        else if (strstr(body, "\"auto_quality\":false") || strstr(body, "\"auto_quality\": false")) g_job->auto_quality = 0;
+        if (json_get_double(body, "ui_mode", &v)) {
+            int nm = (int)v;
+            if (nm == 0 || nm == 1) {
+                g_job->ui_mode = nm;
+                g_st->ui_mode = nm;
+                save_uim = nm;
+            }
+        }
+        if (json_get_double(body, "rand_mask", &v) || json_get_double(body, "batch_rand_mask", &v))
+            g_job->batch_rand_mask = (v > 0) ? (uint32_t)v : 0u;
+        if (json_get_str(body, "folder", tmp, sizeof(tmp)) || json_get_str(body, "batch_folder", tmp, sizeof(tmp)))
+            gallery_clean_folder_name(tmp, g_job->batch_folder, sizeof(g_job->batch_folder));
+        g_st->nsfw_allow = g_job->nsfw_allow;
+        g_st->auto_quality = g_job->auto_quality;
+        g_st->cur_rand_mask = g_job->batch_rand_mask;
+        g_st->settings_seq++;
+        int ns = g_job->nsfw_allow, aq = g_job->auto_quality, uim = g_job->ui_mode;
+        uint32_t sseq = g_st->settings_seq, rmk = g_job->batch_rand_mask;
+        http_srv_unlock();
+        if (save_uim == 0 || save_uim == 1) save_ui_mode_file(save_uim);
+        char resp[192];
+        int l = snprintf(resp, sizeof(resp),
+                         "{\"ok\":true,\"nsfw_allow\":%s,\"auto_quality\":%s,\"ui_mode\":%d,\"rand_mask\":%u,\"settings_seq\":%u}",
+                         ns ? "true" : "false", aq ? "true" : "false", uim, rmk, sseq);
+        send_resp(fd, 200, "OK", "application/json", resp, (size_t)l);
+    } else if (strcmp(method, "GET") == 0 && strcmp(path, "/update/status") == 0) {
+        AppUpdateStatus upd;
+        app_update_get_status(&upd);
+        char rem_e[32], url_e[384], chg_e[384], out[1024];
+        json_escape(upd.remote_ver, rem_e, sizeof(rem_e));
+        json_escape(upd.pkg_url, url_e, sizeof(url_e));
+        json_escape(upd.changelog, chg_e, sizeof(chg_e));
+        int l = snprintf(out, sizeof(out),
+                         "{\"checked\":%s,\"available\":%s,\"pkg_ready\":%s,\"current\":\"%s\","
+                         "\"remote\":\"%s\",\"pkg_url\":\"%s\",\"size_mb\":%u,\"changelog\":\"%s\"}",
+                         upd.checked ? "true" : "false", upd.update_available ? "true" : "false",
+                         upd.pkg_ready ? "true" : "false", upd.current_ver, rem_e, url_e, upd.size_mb, chg_e);
+        send_resp(fd, 200, "OK", "application/json", out, (size_t)l);
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/update/check") == 0) {
+        int rc = app_update_check_now();
+        AppUpdateStatus upd;
+        app_update_get_status(&upd);
+        char rem_e[32], chg_e[384], out[768];
+        json_escape(upd.remote_ver, rem_e, sizeof(rem_e));
+        json_escape(upd.changelog, chg_e, sizeof(chg_e));
+        int l = snprintf(out, sizeof(out),
+                         "{\"ok\":%s,\"checked\":%s,\"available\":%s,\"pkg_ready\":%s,\"current\":\"%s\",\"remote\":\"%s\",\"changelog\":\"%s\"}",
+                         rc == 0 ? "true" : "false", upd.checked ? "true" : "false",
+                         upd.update_available ? "true" : "false", upd.pkg_ready ? "true" : "false",
+                         upd.current_ver, rem_e, chg_e);
+        send_resp(fd, 200, "OK", "application/json", out, (size_t)l);
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/update/download") == 0) {
+        int rc = app_update_download_pkg();
+        if (rc == 0) {
+            send_resp(fd, 202, "Accepted", "application/json", "{\"ok\":true,\"dest\":\"" OTA_PKG_DEST "\"}", 44);
+        } else {
+            ModelDlStatus dl;
+            model_dl_get_status(&dl);
+            char ee[256], resp[320];
+            json_escape(dl.error[0] ? dl.error : (rc == -2 ? "Another download is already running" : "Failed to start OTA download"), ee, sizeof(ee));
+            int l = snprintf(resp, sizeof(resp), "{\"error\":\"%s\"}", ee);
+            send_resp(fd, rc == -2 ? 503 : 400, "Error", "application/json", resp, (size_t)l);
+        }
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/update/install_exit") == 0) {
+        char msg[256] = {0}, me[320], resp[384];
+        int rc = app_update_prepare_and_exit(msg, sizeof(msg));
+        json_escape(msg, me, sizeof(me));
+        int l = snprintf(resp, sizeof(resp), "{\"ok\":%s,\"message\":\"%s\"}", rc == 0 ? "true" : "false", me);
+        send_resp(fd, rc == 0 ? 200 : 400, rc == 0 ? "OK" : "Bad Request", "application/json", resp, (size_t)l);
     } else if (strcmp(method, "POST") == 0 && strcmp(path, "/shutdown_after") == 0) {
         double v = 0;
         int en = 0;
@@ -974,6 +1674,7 @@ static void handle_client(int fd) {
         http_srv_lock();
         g_job->shutdown_after = en;
         g_st->shutdown_after = en;
+        g_st->settings_seq++;
         http_srv_unlock();
         send_resp(fd, 200, "OK", "application/json", en ? "{\"shutdown_after\":true}" : "{\"shutdown_after\":false}", en ? 23 : 24);
     } else if (strcmp(method, "POST") == 0 &&
@@ -1017,21 +1718,23 @@ static void handle_client(int fd) {
             apply_job_json(body, g_job);
             g_job->cancel_req = 0;
             g_job->pending = 1;
+            g_st->settings_seq++;
         }
         http_srv_unlock();
         if (ok) send_resp(fd, 202, "Accepted", "application/json", "{\"ok\":true}", 11);
         else send_resp(fd, 503, "Service Unavailable", "application/json", "{\"error\":\"busy\"}", 16);
     // ---- Automatic1111 (A1111) compatible endpoints ----
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/sdapi/v1/sd-models") == 0) {
-        char out[4096];
+        char* out = (char*)malloc(12288);
+        if (!out) { send_resp(fd, 500, "Internal Server Error", "text/plain", "oom", 3); free(req); return; }
         size_t pos = 0;
         out[pos++] = '[';
         http_srv_lock();
         int nm = g_st->num_models;
-        for (int i = 0; i < nm && pos + 260 < sizeof(out); i++) {
+        for (int i = 0; i < nm && pos + 280 < 12288; i++) {
             char me[128];
             json_escape(g_st->models[i], me, sizeof(me));
-            pos += (size_t)snprintf(out + pos, sizeof(out) - pos,
+            pos += (size_t)snprintf(out + pos, 12288 - pos,
                                     "%s{\"title\":\"%s\",\"model_name\":\"%s\",\"hash\":\"0000000000\","
                                     "\"sha256\":null,\"filename\":\"/data/garlic-diffusion/models/%s\",\"config\":null}",
                                     i ? "," : "", me, me, me);
@@ -1039,7 +1742,7 @@ static void handle_client(int fd) {
         if (nm == 0) {
             char me[128];
             json_escape(g_st->model[0] ? g_st->model : "waiNSFWIllustrious_v140", me, sizeof(me));
-            pos += (size_t)snprintf(out + pos, sizeof(out) - pos,
+            pos += (size_t)snprintf(out + pos, 12288 - pos,
                                     "{\"title\":\"%s\",\"model_name\":\"%s\",\"hash\":\"0000000000\","
                                     "\"sha256\":null,\"filename\":\"/data/garlic-diffusion/models/%s\",\"config\":null}",
                                     me, me, me);
@@ -1048,6 +1751,7 @@ static void handle_client(int fd) {
         out[pos++] = ']';
         out[pos] = 0;
         send_resp(fd, 200, "OK", "application/json", out, pos);
+        free(out);
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/sdapi/v1/samplers") == 0) {
         const char* s = "[{\"name\":\"Euler a\",\"aliases\":[\"euler_a\",\"k_euler_a\"],\"options\":{}},"
                         "{\"name\":\"Euler\",\"aliases\":[\"euler\",\"k_euler\"],\"options\":{}},"
@@ -1060,7 +1764,8 @@ static void handle_client(int fd) {
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/sdapi/v1/upscalers") == 0) {
         const char* s = "[{\"name\":\"None\",\"model_name\":null,\"model_path\":null,\"model_url\":null,\"scale\":1},"
                         "{\"name\":\"RealESRGAN Anime v3 (1080p)\",\"model_name\":\"realesr-animevideov3\",\"model_path\":null,\"model_url\":null,\"scale\":2},"
-                        "{\"name\":\"RealESRGAN Anime v3 (2x)\",\"model_name\":\"realesr-animevideov3\",\"model_path\":null,\"model_url\":null,\"scale\":2}]";
+                        "{\"name\":\"RealESRGAN Anime v3 (2x)\",\"model_name\":\"realesr-animevideov3\",\"model_path\":null,\"model_url\":null,\"scale\":2},"
+                        "{\"name\":\"RealESRGAN Anime v3 (4K UHD)\",\"model_name\":\"realesr-animevideov3\",\"model_path\":null,\"model_url\":null,\"scale\":4}]";
         send_resp(fd, 200, "OK", "application/json", s, strlen(s));
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/sdapi/v1/scripts") == 0) {
         const char* s = "{\"txt2img\":[],\"img2img\":[]}";
@@ -1069,19 +1774,26 @@ static void handle_client(int fd) {
         UserPreset* items = (UserPreset*)malloc(sizeof(UserPreset) * PRESETS_MAX_ITEMS);
         if (!items) { send_resp(fd, 200, "OK", "application/json", "[]", 2); free(req); return; }
         int cnt = presets_list(items, PRESETS_MAX_ITEMS);
+        int allow_nsfw = 0;
+        http_srv_lock();
+        allow_nsfw = g_job->nsfw_allow;
+        http_srv_unlock();
         size_t cap = (size_t)(cnt + 1) * 2000u + 64u;
         char* out = (char*)malloc(cap);
         if (out) {
             size_t pos = 0;
+            int emitted = 0;
             out[pos++] = '[';
             for (int i = 0; i < cnt && pos + 1800u < cap; i++) {
+                if (items[i].nsfw && !allow_nsfw) continue;
                 char nm[128], pr[1200], ng[600];
                 json_escape(items[i].name, nm, sizeof(nm));
                 json_escape(items[i].prompt, pr, sizeof(pr));
                 json_escape(items[i].negative, ng, sizeof(ng));
                 pos += (size_t)snprintf(out + pos, cap - pos,
                                         "%s{\"name\":\"%s\",\"prompt\":\"%s\",\"negative_prompt\":\"%s\"}",
-                                        i ? "," : "", nm, pr, ng);
+                                        emitted ? "," : "", nm, pr, ng);
+                emitted++;
             }
             out[pos++] = ']';
             out[pos] = 0;
@@ -1089,9 +1801,31 @@ static void handle_client(int fd) {
             free(out);
         }
         free(items);
+    } else if (strcmp(method, "GET") == 0 && strcmp(path, "/sdapi/v1/loras") == 0) {
+        InstalledLora* inst = (InstalledLora*)malloc(sizeof(InstalledLora) * LORA_MAX_INSTALLED);
+        char* out = (char*)malloc(16384);
+        if (inst && out) {
+            int ni = lora_list_installed(inst, LORA_MAX_INSTALLED);
+            size_t pos = 0;
+            out[pos++] = '[';
+            for (int i = 0; i < ni && pos + 320 < 16384; i++) {
+                char ne[128], fe[160];
+                json_escape(inst[i].name, ne, sizeof(ne));
+                json_escape(inst[i].filename, fe, sizeof(fe));
+                pos += (size_t)snprintf(out + pos, 16384 - pos,
+                                        "%s{\"name\":\"%s\",\"alias\":\"%s\",\"path\":\"/data/garlic-diffusion/loras/%s\","
+                                        "\"metadata\":{\"arch\":\"%s\"}}",
+                                        i ? "," : "", ne, ne, fe, inst[i].arch);
+            }
+            out[pos++] = ']';
+            out[pos] = 0;
+            send_resp(fd, 200, "OK", "application/json", out, pos);
+        } else {
+            send_resp(fd, 200, "OK", "application/json", "[]", 2);
+        }
+        free(inst); free(out);
     } else if (strcmp(method, "GET") == 0 &&
-               (strcmp(path, "/sdapi/v1/loras") == 0 || strcmp(path, "/sdapi/v1/sd-vae") == 0 ||
-                strcmp(path, "/sdapi/v1/embeddings") == 0)) {
+               (strcmp(path, "/sdapi/v1/sd-vae") == 0 || strcmp(path, "/sdapi/v1/embeddings") == 0)) {
         send_resp(fd, 200, "OK", "application/json", "[]", 2);
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/sdapi/v1/options") == 0) {
         char mdl_esc[128], out[320];
@@ -1114,14 +1848,15 @@ static void handle_client(int fd) {
         json_escape(g_st->stage, st_esc, sizeof(st_esc));
         int busy = g_st->busy;
         float prog = busy ? g_st->progress : 0.0f;
-        uint32_t steps = g_job->steps;
+        float eta = busy ? g_st->eta_sec : 0.0f;
+        uint32_t steps = (busy && g_st->cur_steps) ? g_st->cur_steps : g_job->steps;
         uint32_t cur_step = (uint32_t)(prog * (float)steps);
         http_srv_unlock();
         int n = snprintf(out, sizeof(out),
-                         "{\"progress\":%.3f,\"eta_relative\":0.0,\"state\":{\"skipped\":false,\"interrupted\":false,"
+                         "{\"progress\":%.3f,\"eta_relative\":%.1f,\"state\":{\"skipped\":false,\"interrupted\":false,"
                          "\"job\":\"%s\",\"job_count\":%d,\"job_timestamp\":\"0\",\"job_no\":0,"
                          "\"sampling_step\":%u,\"sampling_steps\":%u},\"current_image\":null,\"textinfo\":\"%s\"}",
-                         (double)prog, busy ? "txt2img" : "", busy ? 1 : 0, cur_step, steps, st_esc);
+                         (double)prog, (double)eta, busy ? "txt2img" : "", busy ? 1 : 0, cur_step, steps, st_esc);
         send_resp(fd, 200, "OK", "application/json", out, (size_t)n);
     } else if (strcmp(method, "GET") == 0 &&
                (strcmp(path, "/internal/ping") == 0 || strcmp(path, "/sdapi/v1/cmd-flags") == 0 ||

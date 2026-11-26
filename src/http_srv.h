@@ -5,11 +5,15 @@
 #include <stddef.h>
 
 #define DIFF_HTTP_PORT 8081
-#define DIFF_MAX_MODELS 16
+#define DIFF_MAX_MODELS 32
+#define DIFF_MAX_BATCH_GAL 128
+#define DIFF_MAX_BATCH_GEN 100
 
 typedef struct {
     char prompt[1024];
     char negative[512];
+    char lora[80];
+    float lora_scale;
     uint32_t width;
     uint32_t height;
     uint32_t steps;
@@ -18,19 +22,28 @@ typedef struct {
     int eco_mode;   // 0=Turbo(36CU), 1=Balanced(25CU), 2=Quiet(20CU), 3=Silent(14CU)
     int sampler;    // 0=Euler a, 1=Euler, 2=LCM, 3=DPM++ 2M Karras
     int upscale;    // 0=Off, 1=1080p Anime (RealESRGAN), 2=2x Anime HD, 3=4K UHD (up to 3840x2160)
-    uint32_t batch_count; // 1..20 sequential images with fresh random seeds
-    int shutdown_after;   // 1 = cleanly power off PS4 after batch finishes
+    uint32_t batch_count;     // 1..100 sequential images with fresh random seeds
+    uint32_t batch_rand_mask; // RAND_POSE | RAND_EXPR | RAND_SCENE | ... bitmask
+    char batch_folder[64];    // optional gallery folder for generated images
+    int nsfw_allow;           // 0 = SFW guard ON (default), 1 = NSFW allowed (unrestricted)
+    int auto_quality;         // 1 = Auto-Quality & Hand/Eye Shield ON (default)
+    int ui_mode;              // -1 = Unset (show 2-choice welcome), 0 = Easy Mode, 1 = Advanced Mode
+    int shutdown_after;       // 1 = cleanly power off PS4 after batch finishes
     int pending;
     int cancel_req;
     char switch_model[64];
     int switch_req;
     int rescan_req;
-    int gal_op;     // 0=none, 1=upscale 1080p, 2=upscale 2x, 3=upscale 4K, 4=resize
+    int gal_op;     // 0=none, 1=upscale 1080p, 2=upscale 2x, 3=upscale 4K, 4=resize, 5=fix_face
     char gal_id[64];
+    char gal_ids[DIFF_MAX_BATCH_GAL][64];
+    int gal_ids_n;
     uint32_t gal_w, gal_h;
+    float gal_denoise;
     int presets_dirty;
     int styles_dirty;
     int chars_dirty;
+    int loras_dirty;
 } DiffJob;
 
 typedef struct {
@@ -50,13 +63,17 @@ typedef struct {
     char model[64];
     char models[DIFF_MAX_MODELS][64];
     int num_models;
-    // Active model auto-preset metadata
+    // Active model auto-preset metadata (Best Quality + Speed Mode)
     uint32_t preset_w, preset_h, preset_steps;
     float preset_cfg;
     int preset_sampler, preset_upscale;
     char preset_desc[96];
     char preset_prompt[512];
     char preset_negative[384];
+    uint32_t speed_w, speed_h, speed_steps;
+    float speed_cfg;
+    int speed_sampler, speed_upscale;
+    char speed_desc[96];
     char error[256];
     uint32_t width, height, steps;
     float cfg;
@@ -77,6 +94,22 @@ typedef struct {
     uint32_t batch_total;
     int shutdown_after;
     char last_gallery_id[64];
+    char active_lora[128];
+    uint32_t gallery_rev;
+    float eta_sec;
+    float elapsed_sec;
+    // Live / in-progress Studio & Job settings snapshot (for reload & multi-device sync)
+    uint32_t settings_seq;
+    char cur_prompt[1024];
+    char cur_negative[512];
+    char cur_lora[80];
+    float cur_lora_scale;
+    uint32_t cur_w, cur_h, cur_steps, cur_batch, cur_rand_mask;
+    float cur_cfg;
+    uint64_t cur_seed;
+    int cur_sampler, cur_upscale, cur_eco;
+    int nsfw_allow, auto_quality, ui_mode;
+    char cur_folder[64];
 } DiffStatus;
 
 int http_srv_start(DiffJob* shared_job, DiffStatus* shared_status);

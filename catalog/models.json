@@ -1,0 +1,146 @@
+[
+  {
+    "id": "WAI_Illustrious_v17_dmd2",
+    "title": "WAI-Illustrious v17 DMD2 (Fast SDXL)",
+    "arch": "sdxl",
+    "size_mb": 3716,
+    "desc": "Latest WAI-Illustrious v17 + DMD2 fast 6-step SDXL (~50s Quiet mode · CFG 1.4 · Recommended SDXL)",
+    "files": "clip_g.psd1,clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "Nova_Anime_XL_v18_dmd2",
+    "title": "Nova Anime XL v18 DMD2 (Fast SDXL)",
+    "arch": "sdxl",
+    "size_mb": 3716,
+    "desc": "Vibrant 2D/2.5D Illustrious anime · Jewel eyes & clean hands · 6 steps (~50s Pro)",
+    "files": "clip_g.psd1,clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "Hassaku_XL_v31_dmd2",
+    "title": "Hassaku XL Illustrious v3.1 DMD2 (Fast SDXL)",
+    "arch": "sdxl",
+    "size_mb": 3716,
+    "desc": "Crisp broadcast anime · Clean fingers & expressions · 6 steps (~50s Pro)",
+    "files": "clip_g.psd1,clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "Illustrious_Pencil_v32_dmd2",
+    "title": "Illustrious Pencil XL v3.2 DMD2 (Fast SDXL)",
+    "arch": "sdxl",
+    "size_mb": 3716,
+    "desc": "Fine-line artbook illustration · Sharp hand & pose anatomy · 6 steps (~50s Pro)",
+    "files": "clip_g.psd1,clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "Plant_Milk_Walnut_dmd2",
+    "title": "Plant Milk Walnut DMD2 (Fast SDXL)",
+    "arch": "sdxl",
+    "size_mb": 3716,
+    "desc": "Painterly gouache & dark-fantasy anime · Expressive eyes · 6 steps (~50s Pro)",
+    "files": "clip_g.psd1,clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "waiNSFWIllustrious_v140_dmd2",
+    "title": "WAI-Illustrious v14 DMD2 (Fast SDXL)",
+    "arch": "sdxl",
+    "size_mb": 3716,
+    "desc": "Sharp glowing anime · 6 steps CFG 1.4 (~50s Pro) · Standalone SDXL",
+    "files": "clip_g.psd1,clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "Animagine_XL_4_dmd2",
+    "title": "Animagine XL 4.0 DMD2 (Fast SDXL)",
+    "arch": "sdxl",
+    "size_mb": 3716,
+    "desc": "Clean modern anime · 5 steps CFG 1.1 LCM (~44s Pro) · Standalone SDXL",
+    "files": "clip_g.psd1,clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "NoobAI_XL_1.1_dmd2",
+    "title": "NoobAI-XL 1.1 DMD2 (Fast SDXL)",
+    "arch": "sdxl",
+    "size_mb": 3716,
+    "desc": "Crisp Danbooru anime · 6 steps CFG 1.2 LCM (~50s Pro) · Standalone SDXL",
+    "files": "clip_g.psd1,clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "waiNSFWIllustrious_v140_8step",
+    "title": "WAI-Illustrious v14 8-Step (Hyper-SD)",
+    "arch": "sdxl",
+    "size_mb": 3716,
+    "desc": "Euler CFG 3.5 · Negative prompt active · Standalone 8-step SDXL",
+    "files": "clip_g.psd1,clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "waiNSFWIllustrious_v140",
+    "title": "WAI-Illustrious v14 Full (20-Step SDXL)",
+    "arch": "sdxl",
+    "size_mb": 3716,
+    "desc": "Full 20-step reference SDXL checkpoint · Standalone SDXL",
+    "files": "clip_g.psd1,clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "MeinaMix_V11_8step",
+    "title": "MeinaMix V11 8-Step (Ultra-Fast SD 1.5)",
+    "arch": "sd15",
+    "size_mb": 1220,
+    "desc": "Classic glossy anime · ~25s + 1080p upscale · Ideal for Base PS4!",
+    "files": "clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "Counterfeit_V25",
+    "title": "Counterfeit V2.5 (Pastel Anime SD 1.5)",
+    "arch": "sd15",
+    "size_mb": 1220,
+    "desc": "Iconic Pixiv pastel illustration · Clean hands & bare feet · Auto 1080p RealESRGAN",
+    "files": "clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "GhostMix_V2",
+    "title": "GhostMix v2.0 (2.5D Fantasy/Sci-Fi SD 1.5)",
+    "arch": "sd15",
+    "size_mb": 1220,
+    "desc": "Detailed 2.5D cyberpunk & fantasy anime · Sharp eyes · Auto 1080p RealESRGAN",
+    "files": "clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "MeinaMix_V11",
+    "title": "MeinaMix V11 (20-Step SD 1.5)",
+    "arch": "sd15",
+    "size_mb": 1220,
+    "desc": "Full quality SD 1.5 anime · 1.5 GiB VRAM · Auto 1080p RealESRGAN",
+    "files": "clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "DreamShaper_8",
+    "title": "DreamShaper 8 (2.5D / Fantasy SD 1.5)",
+    "arch": "sd15",
+    "size_mb": 1220,
+    "desc": "Versatile 2.5D fantasy/illustration · 1.5 GiB VRAM · Base PS4 ready",
+    "files": "clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "Anything_V5",
+    "title": "Anything V5 (Cel-Shaded SD 1.5)",
+    "arch": "sd15",
+    "size_mb": 1220,
+    "desc": "Crisp cel-shaded anime · 1.5 GiB VRAM · Auto 1080p RealESRGAN",
+    "files": "clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  }
+]

@@ -223,6 +223,7 @@ def main():
     ap.add_argument("--arch", choices=["sdxl", "sd15"], default="sdxl", help="Model architecture (sdxl or sd15)")
     ap.add_argument("--fp16-variant", action="store_true", help="Download .fp16.safetensors variants on HF")
     ap.add_argument("--no-vae", action="store_true", help="Skip vae.psd1 (shares VAE from sibling model of same arch)")
+    ap.add_argument("--with-vae-encoder", action="store_true", help="Also export optional vae_enc.psd1 (for Gallery Fix Face / img2img)")
     ap.add_argument("--keep-cache", action="store_true")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--unet-only", action="store_true", help="Only build unet.psd1 (shares CLIP/VAE on PS4)")
@@ -257,6 +258,9 @@ def main():
     if not args.no_vae:
         jobs.append(("vae.psd1", f"vae/diffusion_pytorch_model{sfx}",
                      lambda k: k.startswith("decoder.") or k.startswith("post_quant_conv."), "f32"))
+    if args.with_vae_encoder:
+        jobs.append(("vae_enc.psd1", f"vae/diffusion_pytorch_model{sfx}",
+                     lambda k: k.startswith("encoder.") or k.startswith("quant_conv."), "f32"))
     jobs.append(("clip_l.psd1", f"text_encoder/model{sfx}",
                  lambda k: k != "text_model.embeddings.position_ids", "q8"))
     if args.arch == "sdxl":
@@ -287,9 +291,13 @@ def main():
     if args.arch == "sd15":
         w, h, ups = 512, 768, 1
         prompt = "masterpiece, best quality, 1girl, silver hair, blue eyes, glowing sakura petals, night sky, anime style"
-        neg = "(worst quality, low quality:1.4), lowres, bad anatomy, bad hands, blurry, text, watermark"
+        neg = "(worst quality, low quality:1.4), lowres, bad anatomy, bad hands, extra digits, fewer digits, bad feet, bad eyes, blurry, text, watermark"
         if "8step" in nl or "hyper" in nl:
             steps, cfg, smp, desc = 8, 3.5, "Euler", "SD 1.5 Fast 8-step (Hyper-SD15 · ~10s + 1080p)"
+        elif "counterfeit" in nl:
+            steps, cfg, smp, desc = 20, 7.0, "DPM++ 2M Karras", "SD 1.5 Counterfeit V2.5 · Pastel Pixiv anime (+ 1080p)"
+        elif "ghostmix" in nl:
+            steps, cfg, smp, desc = 20, 7.0, "DPM++ 2M Karras", "SD 1.5 GhostMix v2.0 · 2.5D fantasy/sci-fi anime (+ 1080p)"
         elif "dreamshaper" in nl:
             steps, cfg, smp, desc = 20, 7.0, "Euler a", "SD 1.5 DreamShaper 8 · 2.5D fantasy/anime (~20s + 1080p)"
         elif "anything" in nl:
@@ -297,11 +305,21 @@ def main():
         else:
             steps, cfg, smp, desc = 20, 7.0, "Euler a", "SD 1.5 MeinaMix V11 · Glossy classic anime (~20s + 1080p)"
     else:
-        w, h, ups = 768, 1024, 0
-        prompt = "masterpiece, best quality, amazing quality, 1girl, silver hair, blue eyes, glowing sakura petals, night sky, anime style"
-        neg = "lowres, bad anatomy, bad hands, text, error, blurry, worst quality, low quality"
+        w, h, ups = 1024, 1344, 0
+        prompt = "masterpiece, best quality, amazing quality, absurdres, 1girl, solo, silver hair, blue eyes, glowing sakura petals, night sky, anime style"
+        neg = "lowres, bad anatomy, bad hands, extra digits, fewer digits, bad feet, bad eyes, text, error, blurry, worst quality, low quality"
         if "dmd" in nl:
-            steps, cfg, smp, desc = 6, 1.0, "LCM", f"SDXL {args.name} · DMD2 Ultra-Fast (6 steps, CFG 1.0, ~45s)"
+            steps, cfg, smp = 6, 1.4, "LCM"
+            if "nova" in nl:
+                desc = "SDXL Nova Anime XL v18 + DMD2 · Vibrant 2D/2.5D anime (6 stp, CFG 1.4, ~50s)"
+            elif "hassaku" in nl:
+                desc = "SDXL Hassaku XL Illustrious v3.1 + DMD2 · Crisp anime (6 stp, CFG 1.4, ~50s)"
+            elif "pencil" in nl:
+                desc = "SDXL Illustrious Pencil XL v3.2 + DMD2 · Fine-line artbook (6 stp, CFG 1.4, ~50s)"
+            elif "walnut" in nl or "plant" in nl:
+                desc = "SDXL Plant Milk Walnut + DMD2 · Painterly anime (6 stp, CFG 1.4, ~50s)"
+            else:
+                desc = f"SDXL {args.name} · DMD2 Ultra-Fast (6 steps, CFG 1.4, ~50s)"
         elif "8step" in nl or "hyper" in nl:
             steps, cfg, smp, desc = 8, 3.5, "Euler", f"SDXL {args.name} · Hyper-SD 8-step (Euler, CFG 3.5)"
         elif "animagine" in nl:

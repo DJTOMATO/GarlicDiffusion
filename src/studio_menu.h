@@ -11,18 +11,35 @@
 #include "garlic_ui.h"
 
 enum {
-    ROW_MODEL = 0, ROW_PRESET, ROW_CHAR, ROW_STYLE, ROW_PROMPT, ROW_NEG, ROW_RES,
-    ROW_STEPS, ROW_CFG, ROW_SAMPLER, ROW_UPSCALE, ROW_POWER, ROW_SEED, ROW_BATCH, ROW_GEN, ROW_COUNT
+    ROW_MODEL = 0, ROW_LORA, ROW_PRESET, ROW_CHAR, ROW_STYLE, ROW_PROMPT, ROW_NEG, ROW_RES,
+    ROW_STEPS, ROW_CFG, ROW_SAMPLER, ROW_UPSCALE, ROW_POWER, ROW_SEED, ROW_BATCH, ROW_GEN, ROW_CREDITS, ROW_COUNT
+};
+enum {
+    EROW_CHAR = 0, EROW_SCENE = 1, EROW_FRAMING = 2, EROW_QUALITY = 3, EROW_MODEL = 4, EROW_GEN = 5, EROW_CREDITS = 6, EROW_COUNT = 7
 };
 enum { K_DROP = 0, K_CHOICE, K_SLIDER, K_TEXT, K_ACTION };
 
 static const uint8_t SM_KIND[ROW_COUNT] = {
-    K_DROP, K_DROP, K_CHOICE, K_CHOICE, K_TEXT, K_TEXT, K_CHOICE,
-    K_SLIDER, K_SLIDER, K_CHOICE, K_CHOICE, K_CHOICE, K_CHOICE, K_CHOICE, K_ACTION
+    K_DROP, K_CHOICE, K_DROP, K_CHOICE, K_CHOICE, K_TEXT, K_TEXT, K_CHOICE,
+    K_SLIDER, K_SLIDER, K_CHOICE, K_CHOICE, K_CHOICE, K_CHOICE, K_CHOICE, K_ACTION, K_DROP
 };
 static const char* const SM_LABEL[ROW_COUNT] = {
-    "Model", "Preset", "Character", "Art Style", "Prompt", "Negative", "Resolution",
-    "Steps", "CFG Scale", "Sampler", "Upscale", "Power Mode", "Seed", "Batch", "Generate"
+    "Model", "LoRA", "Preset", "Character", "Art Style", "Prompt", "Negative", "Resolution",
+    "Steps", "CFG Scale", "Sampler", "Upscale", "Power Mode", "Seed", "Batch", "Generate", "Credits & Updates"
+};
+static const char* const SM_EASY_LABEL[EROW_COUNT] = {
+    "1. Character", "2. Scene / Preset", "3. Framing", "4. Speed / Quality", "5. Checkpoint", "Generate", "Credits & Updates"
+};
+static const char* const SM_EASY_FRAMING[4] = {
+    "Portrait (Close-Up Face & Eyes)",
+    "Upper Body (Cowboy Shot & Hands)",
+    "Full Body (Head to Toe Standing)",
+    "Wide 16:9 (Cinematic Wallpaper)"
+};
+static const char* const SM_EASY_QUALITY[3] = {
+    "Fast Mode  ·  Quickest render (Speed Profile)",
+    "Best Quality  ·  Model Sweet-Spot + Anatomy Shield",
+    "Best + 1080p HD  ·  Sweet-Spot + Real-ESRGAN Upscale"
 };
 static const char* const SM_SAMPLER[4] = { "Euler a", "Euler", "LCM (DMD2 models)", "DPM++ 2M Karras" };
 static const char* const SM_UPSCALE[4] = {
@@ -31,8 +48,9 @@ static const char* const SM_UPSCALE[4] = {
 
 #define SM_PX 56
 #define SM_PW 760
-#define SM_ROW0 108
-#define SM_ROW_H 45
+#define SM_ROW0 106
+#define SM_ROW_H 40
+#define SM_EASY_ROW_H 76
 #define SM_DD_VIS 9
 #define SM_STEPS_MIN 4
 #define SM_STEPS_MAX 40
@@ -42,12 +60,18 @@ static const char* const SM_UPSCALE[4] = {
 typedef struct {
     const char* model;
     int neo, busy, ready, has_upscaler;
+    int ui_mode;                                  // 0 = Easy Mode, 1 = Advanced Studio
+    int easy_framing;                             // 0=Portrait, 1=Upper, 2=Full Body, 3=Wide 16:9
+    int easy_quality;                             // 0=Fast, 1=Best Quality, 2=Best + 1080p HD
+    const char* update_ver;                       // non-empty if a newer GitHub version is available
     uint32_t vram_u, vram_t;
     float prog;
     const char* stage;
     const char* err;
     const char* toast;
     const char* addr;
+    const char* lora_name;                        // NULL or "" = Off
+    float lora_scale;
     const char* preset_name;                      // NULL = none selected
     const char* char_name;                        // NULL = Off
     const char* char_series;
@@ -57,10 +81,12 @@ typedef struct {
     uint32_t w, h, steps;
     float cfg;
     int sampler, upscale, eco;
-    uint32_t batch;
-    int shutdown_after;
+    uint32_t batch, rand_mask;
+    int shutdown_after, nsfw_allow, auto_quality;
+    const char* batch_folder;
     uint64_t seed, last_seed;
     double last_sec, last_tf;
+    float eta_sec, elapsed_sec;
     const uint8_t* preview;                       // RGB, preview_w x preview_h
     uint32_t pw, ph;
     int focus, adjust;
@@ -83,6 +109,14 @@ static void sm_power_label(int eco, int neo, char* out, size_t cap) {
     static const char* const base[4] = { "Turbo (18CU)", "Balanced (14CU)", "Quiet (11CU)", "Silent (7CU)" };
     if (eco < 0 || eco > 3) eco = 2;
     snprintf(out, cap, "%s  ·  %s", (neo ? pro : base)[eco], sm_power_note(eco));
+}
+
+static void sm_fmt_eta(float sec, char* out, size_t cap) {
+    if (sec <= 0.4f) { out[0] = 0; return; }
+    int s = (int)(sec + 0.5f);
+    if (s < 60) snprintf(out, cap, "ETA ~%ds", s);
+    else if (s < 3600) snprintf(out, cap, "ETA ~%dm %02ds", s / 60, s % 60);
+    else snprintf(out, cap, "ETA ~%dh %02dm", s / 3600, (s % 3600) / 60);
 }
 
 static void sm_res_label(uint32_t w, uint32_t h, char* out, size_t cap) {
@@ -128,6 +162,12 @@ static void sm_row_value(const StudioView* v, int row, char* out, size_t cap, fl
     case ROW_MODEL:
         snprintf(out, cap, "%s", (v->model && v->model[0]) ? v->model : "No model loaded - press X");
         break;
+    case ROW_LORA:
+        if (v->lora_name && v->lora_name[0])
+            snprintf(out, cap, "%s   ·   %.2f", v->lora_name, (double)v->lora_scale);
+        else
+            snprintf(out, cap, "Off");
+        break;
     case ROW_PRESET:
         snprintf(out, cap, "%s", v->preset_name ? v->preset_name : "Choose a saved prompt...");
         break;
@@ -170,19 +210,211 @@ static void sm_row_value(const StudioView* v, int row, char* out, size_t cap, fl
         else if (v->last_seed) snprintf(out, cap, "Random each time  ·  last %llu", (unsigned long long)v->last_seed);
         else snprintf(out, cap, "Random each time");
         break;
-    case ROW_BATCH:
-        if (v->shutdown_after) {
-            if (v->batch <= 1) snprintf(out, cap, "1 image  ·  SHUTDOWN PS4 AFTER");
-            else snprintf(out, cap, "%u images  ·  SHUTDOWN PS4 AFTER", v->batch);
-        } else {
-            if (v->batch <= 1) snprintf(out, cap, "1 image  ·  single");
-            else snprintf(out, cap, "%u images  ·  random seed each", v->batch);
+    case ROW_BATCH: {
+        char flags[192] = {0};
+        size_t fp = 0;
+        if (v->rand_mask) {
+            char cats[96] = {0};
+            size_t cp = 0;
+            static const char* const CN[9] = {"Pose", "Expr", "Scene", "Light", "Outfit", "Detail", "Cam", "Ecchi", "Cog"};
+            for (int b = 0; b < 9; b++) {
+                if (v->rand_mask & (1u << b))
+                    cp += (size_t)snprintf(cats + cp, sizeof(cats) - cp, "%s%s", cp ? "+" : "", CN[b]);
+            }
+            fp += (size_t)snprintf(flags + fp, sizeof(flags) - fp, "  ·  🎲 %s", cats[0] ? cats : "ON");
         }
+        if (v->batch_folder && v->batch_folder[0])
+            fp += (size_t)snprintf(flags + fp, sizeof(flags) - fp, "  ·  /%s", v->batch_folder);
+        if (v->shutdown_after) fp += (size_t)snprintf(flags + fp, sizeof(flags) - fp, "  ·  SHUTDOWN");
+        if (v->batch <= 1)
+            snprintf(out, cap, "1 image%s", flags[0] ? flags : "  ·  single (X = options)");
+        else
+            snprintf(out, cap, "%u images%s", v->batch, flags[0] ? flags : "  ·  random seed each");
+        break;
+    }
+    case ROW_CREDITS:
+        if (v->update_ver && v->update_ver[0])
+            snprintf(out, cap, "Update v%s Available!  ·  Press X or L3", v->update_ver);
+        else
+            snprintf(out, cap, "Licenses, OTA Updater & Content Filter  (Press X or L3)");
         break;
     default:
         out[0] = 0;
         break;
     }
+}
+
+static void sm_easy_row_value(const StudioView* v, int erow, char* out, size_t cap) {
+    switch (erow) {
+    case EROW_CHAR:
+        if (v->char_name && v->char_name[0])
+            snprintf(out, cap, "%s   (%s)", v->char_name, (v->char_series && v->char_series[0]) ? v->char_series : "Character");
+        else
+            snprintf(out, cap, "Any / Custom Character   (Left/Right or X to pick)");
+        break;
+    case EROW_SCENE:
+        if (v->preset_name && v->preset_name[0])
+            snprintf(out, cap, "%s", v->preset_name);
+        else
+            snprintf(out, cap, "Default / Custom Scene   (X to pick, L2 Surprise, R2 Type)");
+        break;
+    case EROW_FRAMING:
+        snprintf(out, cap, "%s", SM_EASY_FRAMING[(v->easy_framing >= 0 && v->easy_framing <= 3) ? v->easy_framing : 2]);
+        break;
+    case EROW_QUALITY:
+        snprintf(out, cap, "%s", SM_EASY_QUALITY[(v->easy_quality >= 0 && v->easy_quality <= 2) ? v->easy_quality : 1]);
+        break;
+    case EROW_MODEL:
+        snprintf(out, cap, "%s   ·   %ux%u  ·  %u stp  ·  CFG %.1f",
+                 (v->model && v->model[0]) ? v->model : "No model loaded - press X",
+                 v->w, v->h, v->steps, (double)v->cfg);
+        break;
+    case EROW_CREDITS:
+        if (v->update_ver && v->update_ver[0])
+            snprintf(out, cap, "Update v%s Ready on GitHub!  ·  Press X or L3 to Open", v->update_ver);
+        else
+            snprintf(out, cap, "Open Credits, Licenses, OTA Updates & Content Filter  (Press X or L3)");
+        break;
+    default:
+        out[0] = 0;
+        break;
+    }
+}
+
+static void sm_draw_easy_row(uint32_t* back, const StudioView* v, int erow) {
+    const int x = SM_PX, w = SM_PW, h = 68;
+    const int y = SM_ROW0 + 6 + erow * SM_EASY_ROW_H;
+    const int foc = (v->focus == erow);
+    const int cy = y + h / 2;
+
+    if (erow == EROW_GEN) {
+        uint32_t fill = !v->ready ? 0x1B3156 : (v->busy ? 0x1B3156 : C_ACCENT);
+        g_rrect(back, x, y + 6, w, h - 6, 18, fill, foc ? 255 : 225);
+        g_rrect_line(back, x, y + 6, w, h - 6, 18, foc ? 2 : 1, foc ? 0xFFFFFF : C_LINE_HI, 255);
+        char gen_lbl[96], eta_b[32];
+        if (v->busy) {
+            sm_fmt_eta(v->eta_sec, eta_b, sizeof(eta_b));
+            if (eta_b[0]) snprintf(gen_lbl, sizeof(gen_lbl), "Working...  ·  %s  ·  press O to cancel", eta_b);
+            else snprintf(gen_lbl, sizeof(gen_lbl), "Working...  ·  press O to cancel");
+        } else if (!v->ready) {
+            snprintf(gen_lbl, sizeof(gen_lbl), "Open Starter Model Downloader (press X)");
+        } else {
+            snprintf(gen_lbl, sizeof(gen_lbl), "Generate Anime Artwork");
+        }
+        int tw = g_str_width(&g_fbold, gen_lbl) + (v->ready && !v->busy ? 44 : 0);
+        int tx = x + (w - tw) / 2;
+        if (v->ready && !v->busy) tx += g_draw_btn(back, GBTN_TRIANGLE, tx, cy + 3) + 12;
+        g_draw_str(back, &g_fbold, tx, cy + 3 - g_fbold.line / 2, gen_lbl, 0xFFFFFF);
+        return;
+    }
+
+    g_rrect(back, x, y, w, h, 16, foc ? C_SURFACE_HI : C_SURFACE, foc ? 255 : 215);
+    g_rrect_line(back, x, y, w, h, 16, foc ? 2 : 1, foc ? C_ACCENT_HI : C_LINE, 255);
+    if (foc) g_rrect(back, x + 10, y + 14, 4, h - 28, 2, C_ACCENT_HI, 255);
+
+    g_draw_str(back, &g_fbold, x + 28, y + 8, SM_EASY_LABEL[erow], foc ? 0xFFFFFF : C_ACCENT_HI);
+    char val[300], fit[300];
+    sm_easy_row_value(v, erow, val, sizeof(val));
+    sm_fit(&g_fsmall, val, w - 84, fit, sizeof(fit));
+    g_draw_str(back, &g_fsmall, x + 28, y + 37, fit, foc ? 0xFFFFFF : C_TEXT);
+    if (foc) {
+        if (erow != EROW_MODEL && erow != EROW_CREDITS) {
+            sm_chev(back, x + w - 48, cy, -1, C_ACCENT_HI);
+            sm_chev(back, x + w - 24, cy, +1, C_ACCENT_HI);
+        } else {
+            sm_chev(back, x + w - 30, cy, 0, C_ACCENT_HI);
+        }
+    }
+}
+
+static void sm_draw_welcome(uint32_t* back, int sel, int neo, const char* model, int busy,
+                            uint32_t vram_u, uint32_t vram_t, const char* addr) {
+    g_draw_bg(back);
+    g_draw_header(back, neo ? "PS4 Pro Neo  ·  Welcome" : "PS4 Base  ·  Welcome",
+                  (model && model[0]) ? model : "Loading...", busy, vram_u, vram_t, addr);
+
+    g_draw_str(back, &g_fbig, 56, 132, "Welcome to Garlic Diffusion", 0xFFFFFF);
+    g_draw_str(back, &g_fsmall, 56, 184,
+               "Choose how you want to create anime artwork. You can switch between Easy and Advanced anytime with R1!",
+               C_TEXT_DIM);
+
+    // Card 0: Easy Mode
+    const int cw = 876, ch = 594, cy = 232;
+    const int c0x = 56, c1x = 988;
+    int s0 = (sel == 0), s1 = (sel == 1);
+
+    g_rrect(back, c0x, cy, cw, ch, 24, s0 ? C_SURFACE_HI : C_SURFACE, s0 ? 252 : 215);
+    g_rrect_line(back, c0x, cy, cw, ch, 24, s0 ? 3 : 1, s0 ? C_GREEN : C_LINE_HI, 255);
+    g_rrect(back, c0x + 34, cy + 26, 184, 34, 17, 0x0F3A2A, 245);
+    g_rrect_line(back, c0x + 34, cy + 26, 184, 34, 17, 1, C_GREEN, 255);
+    g_draw_str(back, &g_fbold, c0x + 54, cy + 30, "RECOMMENDED", C_GREEN);
+    g_draw_str(back, &g_fbig, c0x + 34, cy + 78, "Easy Mode", 0xFFFFFF);
+    g_draw_str(back, &g_fsmall, c0x + 34, cy + 130, "For fast, effortless anime art with zero technical setup:", C_ACCENT_HI);
+    static const char* const E_BULLETS[5] = {
+        "1. Pick a Character (290+ anime heroes & heroines) or type a name",
+        "2. Pick a Scene / Action preset — or press L2 for a Surprise Scene",
+        "3. Choose Framing: Portrait, Upper Body, Full Body, or 16:9 Wallpaper",
+        "4. Choose Speed vs Best Quality vs 1080p HD Upscale",
+        "5. Optimal CFG, Steps, Sampler & Hand/Eye Shield are auto-locked!"
+    };
+    for (int i = 0; i < 5; i++) {
+        int by = cy + 178 + i * 64;
+        char bfit[180];
+        sm_fit(&g_fsmall, E_BULLETS[i], cw - 108, bfit, sizeof(bfit));
+        g_rrect(back, c0x + 34, by, cw - 68, 50, 12, C_PANEL, 225);
+        g_draw_str(back, &g_fsmall, c0x + 54, by + 13, bfit, C_TEXT);
+    }
+    if (s0) {
+        g_rrect(back, c0x + 34, cy + ch - 72, cw - 68, 48, 14, C_GREEN, 245);
+        const char* b0 = "Press X to Start in Easy Mode";
+        g_draw_str(back, &g_fbold, c0x + (cw - g_str_width(&g_fbold, b0)) / 2, cy + ch - 60, b0, 0x041A10);
+    }
+
+    // Card 1: Advanced Studio
+    g_rrect(back, c1x, cy, cw, ch, 24, s1 ? C_SURFACE_HI : C_SURFACE, s1 ? 252 : 215);
+    g_rrect_line(back, c1x, cy, cw, ch, 24, s1 ? 3 : 1, s1 ? C_ACCENT_HI : C_LINE_HI, 255);
+    g_rrect(back, c1x + 34, cy + 26, 170, 34, 17, 0x10294E, 245);
+    g_rrect_line(back, c1x + 34, cy + 26, 170, 34, 17, 1, C_ACCENT_HI, 255);
+    g_draw_str(back, &g_fbold, c1x + 54, cy + 30, "PRO STUDIO", C_ACCENT_HI);
+    g_draw_str(back, &g_fbig, c1x + 34, cy + 78, "Advanced Studio", 0xFFFFFF);
+    g_draw_str(back, &g_fsmall, c1x + 34, cy + 130, "Full control over every parameter on PS4 GPU:", C_ACCENT_HI);
+    static const char* const A_BULLETS[5] = {
+        "1. Full Positive & Negative Prompt editors + inline {a|b|c} wildcards",
+        "2. Native GPU .safetensors LoRA stacking & strength sliders",
+        "3. Custom Resolution (up to 1024x1344), Steps, CFG & Sampler control",
+        "4. Batch 1-100 runs with 500-word Randomizer & Gallery Folders",
+        "5. Real-ESRGAN 1080p / 2x / 4K UHD Upscaling & Power/CU tuning"
+    };
+    for (int i = 0; i < 5; i++) {
+        int by = cy + 178 + i * 64;
+        char bfit[180];
+        sm_fit(&g_fsmall, A_BULLETS[i], cw - 108, bfit, sizeof(bfit));
+        g_rrect(back, c1x + 34, by, cw - 68, 50, 12, C_PANEL, 225);
+        g_draw_str(back, &g_fsmall, c1x + 54, by + 13, bfit, C_TEXT);
+    }
+    if (s1) {
+        g_rrect(back, c1x + 34, cy + ch - 72, cw - 68, 48, 14, C_ACCENT, 250);
+        const char* b1 = "Press X to Start in Advanced Studio";
+        g_draw_str(back, &g_fbold, c1x + (cw - g_str_width(&g_fbold, b1)) / 2, cy + ch - 60, b1, 0xFFFFFF);
+    }
+
+    // Friendly First-Time & Trial-and-Error Expectation Banner
+    g_rrect(back, 56, 844, 1808, 126, 18, C_PANEL, 240);
+    g_rrect_line(back, 56, 844, 1808, 126, 18, 1, C_LINE_HI, 255);
+    g_draw_str(back, &g_fbold, 84, 858, "First Time Here? Built-In Model & LoRA Downloader + How AI Seeds Work:", 0xF2A65A);
+    {
+        char w1[200], w2[220];
+        sm_fit(&g_fsmall, "No models yet? Our Guided Starter Manager opens automatically so you can download your first checkpoint in 1 click!", 1740, w1, sizeof(w1));
+        sm_fit(&g_fsmall, "Note: Every render uses a random seed, so results vary! Try a few renders or a small batch, star your favorites, and upscale winners.", 1740, w2, sizeof(w2));
+        g_draw_str(back, &g_fsmall, 84, 892, w1, C_TEXT);
+        g_draw_str(back, &g_fsmall, 84, 922, w2, C_TEXT_DIM);
+    }
+
+    const GHint wh[] = {
+        { GBTN_LEFTRIGHT, "Choose Mode" },
+        { GBTN_CROSS, "Confirm & Start" },
+    };
+    g_draw_footer(back, wh, 2, "Web UI also ready at http://PS4-IP:8081");
 }
 
 static void sm_draw_row(uint32_t* back, const StudioView* v, int row) {
@@ -201,9 +433,13 @@ static void sm_draw_row(uint32_t* back, const StudioView* v, int row) {
         uint32_t fill = !v->ready ? 0x1B3156 : (v->busy ? 0x1B3156 : C_ACCENT);
         g_rrect(back, x, y, w, h, 14, fill, foc ? 255 : 215);
         g_rrect_line(back, x, y, w, h, 14, foc ? 2 : 1, foc ? 0xFFFFFF : C_LINE_HI, 255);
-        char gen_lbl[64];
-        if (v->busy) snprintf(gen_lbl, sizeof(gen_lbl), "Generating...  press O to cancel");
-        else if (!v->ready) snprintf(gen_lbl, sizeof(gen_lbl), "Load a model first");
+        char gen_lbl[96], eta_b[32];
+        if (v->busy) {
+            sm_fmt_eta(v->eta_sec, eta_b, sizeof(eta_b));
+            if (eta_b[0]) snprintf(gen_lbl, sizeof(gen_lbl), "Generating...  ·  %s  ·  press O to cancel", eta_b);
+            else snprintf(gen_lbl, sizeof(gen_lbl), "Generating...  press O to cancel");
+        }
+        else if (!v->ready) snprintf(gen_lbl, sizeof(gen_lbl), "Download / Load a Starter Model (press X)");
         else if (v->batch > 1 && v->shutdown_after) snprintf(gen_lbl, sizeof(gen_lbl), "Generate %u Images  ·  Auto-Shutdown", v->batch);
         else if (v->batch > 1) snprintf(gen_lbl, sizeof(gen_lbl), "Generate %u Images", v->batch);
         else if (v->shutdown_after) snprintf(gen_lbl, sizeof(gen_lbl), "Generate Image  ·  Auto-Shutdown");
@@ -257,22 +493,48 @@ static void sm_draw_row(uint32_t* back, const StudioView* v, int row) {
     g_draw_str(back, &g_fsmall, tx, ty, fit, is_off && !foc ? C_TEXT_MUTED : vcol);
 }
 
+static const char* sm_easy_hint(const StudioView* v, int erow, char* buf, size_t cap) {
+    switch (erow) {
+    case EROW_CHAR:
+        return "Pick from 290+ anime characters (Left/Right or X), or leave on Any/Custom.";
+    case EROW_SCENE:
+        return "Press X to pick a Scene Preset, Left/Right to cycle, L2 for a Surprise Scene, or R2 to type a custom scene!";
+    case EROW_FRAMING:
+        return "Controls camera distance & aspect ratio: Portrait, Upper Body, Full Body, or 16:9 Widescreen.";
+    case EROW_QUALITY:
+        return "Automatically locks optimal CFG, Steps, Sampler & Hand/Eye Anatomy Shield for the active checkpoint.";
+    case EROW_MODEL:
+        return "Switch AI checkpoint on PS4 GPU (press X). Press OPTIONS to download new models from Hugging Face.";
+    case EROW_CREDITS:
+        return "Open Credits, Open-Source Licenses, GitHub OTA Updater & Content Filter settings (works anytime!).";
+    case EROW_GEN:
+        if (v->last_sec > 0.0) {
+            snprintf(buf, cap, "Press X or Triangle to generate!   Last render: %.1fs  ·  %.2f TFLOPS  ·  Press R1 for Advanced Studio", v->last_sec, v->last_tf);
+            return buf;
+        }
+        return "Press X or Triangle to generate!   (Press R1 anytime to switch to Advanced Studio)";
+    }
+    return "";
+}
+
 static const char* sm_hint(const StudioView* v, int row, char* buf, size_t cap) {
     switch (row) {
-    case ROW_MODEL:   return "Checkpoint on the GPU. Press X to pick another (loads in a few seconds). OPTIONS opens the model downloader.";
-    case ROW_PRESET:  return "Saved prompt presets. Press X to choose one.";
-    case ROW_CHAR:    return "Adds a character's tags in front of your prompt. Left/Right cycles, X shows the full list.";
+    case ROW_MODEL:   return "Checkpoint on the GPU. Switching auto-applies optimal CFG, Steps & Sampler. OPTIONS opens Model & LoRA Downloader.";
+    case ROW_LORA:    return "Fuses a .safetensors LoRA from /data/garlic-diffusion/loras onto GPU weights. Press X to pick a LoRA; Left/Right adjusts strength.";
+    case ROW_PRESET:  return "Saved prompt & adaptive Speed presets (preserves model optimal CFG/Sampler). Press X to choose one.";
+    case ROW_CHAR:    return "Inserts or swaps character tags directly into Prompt (auto-deduplicated). Left/Right cycles, X shows full list.";
     case ROW_STYLE:   return "Adds an art style (cel shading, Shinkai, ...) after your prompt. Left/Right cycles, X shows the list.";
     case ROW_PROMPT:  return v->prompt && v->prompt[0] ? v->prompt : "(empty) Press X to type a prompt.";
     case ROW_NEG:     return v->neg && v->neg[0] ? v->neg : "(empty) Press X to type a negative prompt.";
-    case ROW_RES:     return "Bigger = more detail in eyes and hands but slower. SDXL is native at 832x1216 / 1024x1024, SD 1.5 at 512x768.";
-    case ROW_STEPS:   return "More steps = more detail but slower. Distilled DMD2 / 8-step models: 6-8. Full models: 20-28.";
-    case ROW_CFG:     return "Prompt strength. At 1.0 the negative prompt is IGNORED (fastest). DMD2 models: try 1.4 to enable it. Others: 3.5-7.";
-    case ROW_SAMPLER: return "DPM++ 2M Karras: smooth 2nd-order sampler for 20+ step models. LCM is for DMD2 models only.";
+    case ROW_RES:     return "Bigger = more detail in eyes and hands. Illustrious/SDXL shines at 1024x1344 (PS4 Pro), SD 1.5 at 512x768.";
+    case ROW_STEPS:   return "More steps = more detail but slower. Distilled DMD2 / 8-step models: 6-8. Full models: 20-24.";
+    case ROW_CFG:     return "Prompt strength. DMD2 models shine at CFG 1.4 + LCM. 8-step: 3.5 + Euler. Full models: 5.5-6.5 + DPM++ 2M Karras.";
+    case ROW_SAMPLER: return "DPM++ 2M Karras: smooth 2nd-order sampler for 20+ step models. LCM is for DMD2 models.";
     case ROW_UPSCALE: return "Real-ESRGAN Anime v3 runs on the GPU after rendering: 1080p, 2x or 4K UHD.";
     case ROW_POWER:   return "GPU compute units and fan noise. Quiet is the default; avoid Turbo for long sessions.";
     case ROW_SEED:    return "Random each time, or lock the last used seed to re-render the same composition.";
-    case ROW_BATCH:   return "Generate 1-20 images in a row with random seeds. Press X to also toggle Auto-Shutdown PS4 after batch.";
+    case ROW_BATCH:   return "Generate 1-100 images in a row. Press X for 500-word Randomizer, Target Folder & Auto-Shutdown.";
+    case ROW_CREDITS: return "Open Credits, Licenses, GitHub OTA Updater & Content Filter (press X or L3 anytime).";
     case ROW_GEN:
         if (v->last_sec > 0.0) {
             snprintf(buf, cap, "Press X or Triangle to generate.   Last render: %.1fs  ·  %.2f TFLOPS", v->last_sec, v->last_tf);
@@ -340,29 +602,66 @@ static void sm_draw_dropdown(uint32_t* back, const StudioView* v) {
 
 static void sm_draw_studio(uint32_t* back, const StudioView* v) {
     g_draw_bg(back);
-    g_draw_header(back, v->neo ? "PS4 Pro Neo" : "PS4 Base",
+    const int is_easy = (v->ui_mode == 0);
+    char hsub[96];
+    if (v->update_ver && v->update_ver[0]) {
+        snprintf(hsub, sizeof(hsub), "%s  ·  %s  ·  Update v%s!",
+                 v->neo ? "PS4 Pro" : "PS4 Base", is_easy ? "Easy Mode" : "Advanced", v->update_ver);
+    } else {
+        snprintf(hsub, sizeof(hsub), "%s  ·  %s",
+                 v->neo ? "PS4 Pro Neo" : "PS4 Base", is_easy ? "Easy Mode [R1=Adv]" : "Advanced [R1=Easy]");
+    }
+    g_draw_header(back, hsub,
                   (v->model && v->model[0]) ? v->model : "No Model", v->busy, v->vram_u, v->vram_t, v->addr);
 
-    for (int r = 0; r < ROW_COUNT; r++) sm_draw_row(back, v, r);
+    int iy;
+    if (is_easy) {
+        for (int r = 0; r < EROW_COUNT; r++) sm_draw_easy_row(back, v, r);
+        iy = SM_ROW0 + 6 + EROW_COUNT * SM_EASY_ROW_H + 14;
+    } else {
+        for (int r = 0; r < ROW_COUNT; r++) sm_draw_row(back, v, r);
+        iy = SM_ROW0 + ROW_COUNT * SM_ROW_H + 10;
+    }
 
-    // Info box: progress + status / help text for the focused setting
-    const int ix = SM_PX, iy = SM_ROW0 + ROW_COUNT * SM_ROW_H + 10, iw = SM_PW, ih = 980 - iy;
+    // Info box: progress + live ETA + status / help text for the focused setting
+    const int ix = SM_PX, iw = SM_PW, ih = 980 - iy;
     g_rrect(back, ix, iy, iw, ih, 16, C_PANEL, 235);
     g_rrect_line(back, ix, iy, iw, ih, 16, 1, C_LINE_HI, 255);
-    g_rrect(back, ix + 20, iy + 16, iw - 40, 10, 5, 0x1B3156, 255);
-    int pfw = (int)((float)(iw - 40) * g_clamp01(v->prog));
+    int bar_w = iw - 40;
+    char eta_pill[64] = {0};
+    if (v->busy) {
+        char eb[32];
+        sm_fmt_eta(v->eta_sec, eb, sizeof(eb));
+        int pct = (int)(g_clamp01(v->prog) * 100.0f + 0.5f);
+        if (eb[0]) snprintf(eta_pill, sizeof(eta_pill), "%d%%  ·  %s", pct, eb);
+        else snprintf(eta_pill, sizeof(eta_pill), "%d%%", pct);
+        int epw = g_str_width(&g_fsmall, eta_pill);
+        bar_w = iw - 56 - epw;
+        g_draw_str(back, &g_fsmall, ix + iw - 20 - epw, iy + 8, eta_pill, C_GREEN);
+    }
+    g_rrect(back, ix + 20, iy + 16, bar_w, 10, 5, 0x1B3156, 255);
+    int pfw = (int)((float)bar_w * g_clamp01(v->prog));
     if (pfw > 0) g_rrect(back, ix + 20, iy + 16, pfw < 10 ? 10 : pfw, 10, 5, v->busy ? C_ACCENT_HI : C_GREEN, 255);
-    char hbuf[200];
+    char hbuf[220];
     const char* txt;
     uint32_t tcol = C_TEXT_DIM;
     if (v->err && v->err[0]) { txt = v->err; tcol = C_RED; }
     else if (v->busy) { txt = v->stage; tcol = C_TEXT; }
     else if (v->toast && v->toast[0]) { txt = v->toast; tcol = C_GREEN; }
-    else {
+    else if (is_easy) {
+        txt = sm_easy_hint(v, v->focus, hbuf, sizeof(hbuf));
+        if (is_easy && v->focus == EROW_SCENE && v->prompt && v->prompt[0]) {
+            snprintf(hbuf, sizeof(hbuf), "Prompt: %s", v->prompt);
+            txt = hbuf;
+            tcol = C_TEXT;
+        }
+    } else {
         txt = sm_hint(v, v->focus, hbuf, sizeof(hbuf));
         if (v->focus == ROW_PROMPT || v->focus == ROW_NEG) tcol = C_TEXT;
     }
-    g_draw_wrapped(back, &g_fsmall, ix + 20, iy + 38, iw - 40, 28, tcol, txt ? txt : "", 5);
+    int max_ln = (ih - 46) / 28;
+    if (max_ln < 2) max_ln = 2;
+    g_draw_wrapped(back, &g_fsmall, ix + 20, iy + 36, iw - 40, 28, tcol, txt ? txt : "", max_ln);
 
     // Artwork panel
     const int px = SM_PX + SM_PW + 24, py = 112, pw = 1920 - 56 - px, ph = 868;
@@ -379,14 +678,24 @@ static void sm_draw_studio(uint32_t* back, const StudioView* v) {
         int tx = ecx - (w1 + g_fbig.space + w2) / 2;
         tx = g_draw_str(back, &g_fbig, tx, ecy + 60, "Garlic", 0xFFFFFF);
         g_draw_str(back, &g_fbig, tx + g_fbig.space, ecy + 60, "Diffusion", C_ACCENT_HI);
-        const char* s1 = "Native Stable Diffusion 1.5, SDXL & Real-ESRGAN on PS4 GPU. Offline.";
-        const char* s2 = "Pick your settings on the left, then press Triangle to generate.";
-        g_draw_str(back, &g_fsmall, ecx - g_str_width(&g_fsmall, s1) / 2, ecy + 114, s1, C_TEXT);
-        g_draw_str(back, &g_fsmall, ecx - g_str_width(&g_fsmall, s2) / 2, ecy + 144, s2, C_TEXT_MUTED);
+        const char* s1 = (!v->ready && !v->busy)
+            ? "No checkpoint loaded yet! Press OPTIONS (or X on Generate) for Starter Setup."
+            : "Native Stable Diffusion 1.5, SDXL & Real-ESRGAN on PS4 GPU.";
+        const char* s2 = "Tip: Every random seed is unique — try a few renders or a small batch";
+        const char* s3 = "to cherry-pick the cleanest pose, hands & eyes, then upscale your winner!";
+        char fs1[180], fs2[180], fs3[180];
+        sm_fit(&g_fsmall, s1, pw - 56, fs1, sizeof(fs1));
+        sm_fit(&g_fsmall, s2, pw - 56, fs2, sizeof(fs2));
+        sm_fit(&g_fsmall, s3, pw - 56, fs3, sizeof(fs3));
+        g_draw_str(back, &g_fsmall, ecx - g_str_width(&g_fsmall, fs1) / 2, ecy + 112, fs1, (!v->ready && !v->busy) ? 0xF2A65A : C_TEXT);
+        g_draw_str(back, &g_fsmall, ecx - g_str_width(&g_fsmall, fs2) / 2, ecy + 150, fs2, C_TEXT_DIM);
+        g_draw_str(back, &g_fsmall, ecx - g_str_width(&g_fsmall, fs3) / 2, ecy + 178, fs3, C_TEXT_MUTED);
     }
 
-    // Footer hints depend on the current mode
-    const char* right = "ko-fi.com/djtomato  ·  discord.gg/Gbyq3kpGjc";
+    // Footer hints depend on the current mode — L3 Credits works anytime (even while busy!)
+    const char* right = (v->update_ver && v->update_ver[0])
+        ? "Update Ready! Press L3 for Credits"
+        : "ko-fi.com/djtomato";
     if (v->dd_open) {
         sm_draw_dropdown(back, v);
         const GHint h[] = { { GBTN_UPDOWN, "Choose" }, { GBTN_L1, "Page up" }, { GBTN_R1, "Page down" },
@@ -396,13 +705,20 @@ static void sm_draw_studio(uint32_t* back, const StudioView* v) {
         const GHint h[] = { { GBTN_LEFTRIGHT, "Adjust" }, { GBTN_CROSS, "Confirm" }, { GBTN_CIRCLE, "Revert" } };
         g_draw_footer(back, h, 3, "");
     } else if (v->busy) {
-        const GHint h[] = { { GBTN_CIRCLE, "Cancel" } };
-        g_draw_footer(back, h, 1, right);
+        const GHint h[] = { { GBTN_CIRCLE, "Cancel Job" }, { GBTN_UPDOWN, "Browse" },
+                            { GBTN_SQUARE, "Gallery" }, { GBTN_R1, is_easy ? "Advanced" : "Easy" },
+                            { GBTN_OPTIONS, "Models" }, { GBTN_L3, "Credits" } };
+        g_draw_footer(back, h, 6, right);
+    } else if (is_easy) {
+        const GHint h[] = { { GBTN_UPDOWN, "Select" }, { GBTN_LEFTRIGHT, "Change" }, { GBTN_CROSS, "Open" },
+                            { GBTN_L2, "Surprise" }, { GBTN_TRIANGLE, "Generate" }, { GBTN_SQUARE, "Gallery" },
+                            { GBTN_R1, "Advanced" }, { GBTN_L3, "Credits" } };
+        g_draw_footer(back, h, 8, right);
     } else {
-        const GHint h[] = { { GBTN_UPDOWN, "Select" }, { GBTN_LEFTRIGHT, "Change" }, { GBTN_CROSS, "Open / Edit" },
-                            { GBTN_TRIANGLE, "Generate" }, { GBTN_SQUARE, "Gallery" },
-                            { GBTN_OPTIONS, "Models" }, { GBTN_CIRCLE, "Credits" } };
-        g_draw_footer(back, h, 7, right);
+        const GHint h[] = { { GBTN_UPDOWN, "Select" }, { GBTN_LEFTRIGHT, "Change" }, { GBTN_CROSS, "Open" },
+                            { GBTN_TRIANGLE, "Generate" }, { GBTN_SQUARE, "Gallery" }, { GBTN_R1, "Easy" },
+                            { GBTN_OPTIONS, "Models" }, { GBTN_L3, "Credits" } };
+        g_draw_footer(back, h, 8, right);
     }
 }
 

@@ -1,8 +1,9 @@
-// Garlic Diffusion: Persistent Image Gallery & User/Model Preset Manager
+// Garlic Diffusion: Persistent Image Gallery, Folders, ZIP Builder & User/Model Preset Manager
 // Uses raw POSIX open/read/write/unlink + opendir for full OpenOrbis PS4 compatibility.
 
 #include "gallery.h"
 #include "png_write.h"
+#include "preset_seeds.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -13,6 +14,9 @@
 #include <sys/stat.h>
 #ifndef _WIN32
 #include <unistd.h>
+#ifndef SDXL_CPU
+#include <orbis/libkernel.h>
+#endif
 #else
 #include <io.h>
 #include <direct.h>
@@ -20,10 +24,15 @@
 #endif
 
 static char g_out_dir[256] = "/data/garlic-diffusion/out";
+static char g_thumbs_dir[280] = "/data/garlic-diffusion/out/.thumbs";
+static char g_folders_file[280] = "/data/garlic-diffusion/out/.folders";
 static char g_presets_dir[256] = "/data/garlic-diffusion/presets";
 static char g_styles_dir[256] = "/data/garlic-diffusion/styles";
 static char g_chars_dir[256] = "/data/garlic-diffusion/characters";
 static uint32_t g_next_seq = 1;
+static volatile uint32_t g_gal_rev = 1;
+
+uint32_t gallery_revision(void) { return g_gal_rev; }
 
 static int path_exists_local(const char* path) {
     int fd = open(path, O_RDONLY);
@@ -97,6 +106,15 @@ static void strip_newlines(char* s) {
     }
 }
 
+static int ci_eq_gal(const char* a, const char* b) {
+    if (!a || !b) return 0;
+    while (*a && *b) {
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
+        a++; b++;
+    }
+    return *a == 0 && *b == 0;
+}
+
 static void make_safe_id(const char* name, char* out, size_t max) {
     size_t j = 0;
     for (size_t i = 0; name && name[i] && j + 1 < max; i++) {
@@ -107,6 +125,28 @@ static void make_safe_id(const char* name, char* out, size_t max) {
     while (j > 0 && out[j - 1] == '_') j--;
     if (j == 0) { snprintf(out, max, "preset"); return; }
     out[j] = 0;
+}
+
+int gallery_clean_folder_name(const char* raw, char* out, size_t max) {
+    if (!out || max == 0) return -1;
+    out[0] = 0;
+    if (!raw) return 0;
+    while (*raw == ' ' || *raw == '\t' || *raw == '\r' || *raw == '\n') raw++;
+    size_t j = 0;
+    int prev_sp = 0;
+    for (size_t i = 0; raw[i] && j + 1 < max && j < 48; i++) {
+        unsigned char c = (unsigned char)raw[i];
+        if (isalnum(c) || c == '-' || c == '_') {
+            out[j++] = (char)c;
+            prev_sp = 0;
+        } else if (c == ' ') {
+            if (!prev_sp && j > 0) { out[j++] = ' '; prev_sp = 1; }
+        }
+    }
+    while (j > 0 && out[j - 1] == ' ') j--;
+    out[j] = 0;
+    if (strncmp(out, "__", 2) == 0) { out[0] = 0; return -1; }
+    return (int)j;
 }
 
 int gallery_valid_id(const char* id) {
@@ -120,106 +160,25 @@ int gallery_valid_id(const char* id) {
 
 static void seed_default_presets(void) {
     char marker[320];
-    snprintf(marker, sizeof(marker), "%s/.seeded_v2", g_presets_dir);
+    snprintf(marker, sizeof(marker), "%s/.seeded_v4", g_presets_dir);
     if (path_exists_local(marker)) return;
 
-    static const UserPreset DEFAULTS[] = {
-        { "sakura_night", "Sakura Night Portrait", "",
-          "masterpiece, best quality, absurdres, 1girl, solo, upper body, silver hair, blue eyes, closed mouth, smile, glowing sakura petals, night sky, sfw",
-          "lowres, bad anatomy, bad eyes, worst quality, low quality, nsfw",
-          "DPM++ 2M Karras", 768, 1024, 20, 6.5f, 0, 2 },
-        { "miku_concert_1080p", "Hatsune Miku Neon Concert (1080p)", "",
-          "masterpiece, best quality, absurdres, neon Tokyo skyline, starry night sky, glowing stage lights, 1girl, solo, hatsune miku, upper body, looking at viewer, aqua eyes, closed mouth, smile, sfw",
-          "lowres, bad anatomy, bad eyes, worst quality, low quality, nsfw",
-          "LCM", 768, 1024, 6, 1.4f, 1, 2 },
-        { "miku_16x9_overpass", "Miku 16:9 Coastal Sunset (1080p)", "",
-          "masterpiece, best quality, absurdres, sunset ocean, coastal bridge, golden clouds, 1girl, solo, hatsune miku, upper body, looking at viewer, aqua eyes, closed mouth, smile, white jacket, sfw",
-          "lowres, bad anatomy, bad eyes, worst quality, low quality, nsfw",
-          "LCM", 1024, 576, 6, 1.4f, 1, 2 },
-        { "fast_draft_preview", "Fast Draft Preview (~17s)", "",
-          "masterpiece, best quality, absurdres, blue concert lights, starry bokeh, 1girl, solo, hatsune miku, upper body, portrait, aqua eyes, closed mouth, smile, sfw",
-          "lowres, bad eyes, worst quality, low quality, nsfw",
-          "LCM", 512, 512, 4, 1.0f, 0, 2 },
-        { "cyberpunk_samurai", "Cyberpunk Samurai Rain", "",
-          "masterpiece, best quality, 1girl, cyberpunk samurai, neon Tokyo street, rain, katana, glowing reflections, dramatic lighting, vibrant anime illustration, fully clothed, sfw",
-          "lowres, bad anatomy, bad hands, text, error, blurry, worst quality, low quality, nsfw",
-          "Euler a", 768, 1024, 20, 7.0f, 0, 2 },
-        { "fantasy_wizard", "Enchanted Crystal Mage", "",
-          "masterpiece, best quality, 1girl, wizard hat, glowing crystal staff, enchanted twilight forest, fireflies, detailed anime illustration, fully clothed, sfw",
-          "lowres, bad anatomy, bad hands, text, error, blurry, worst quality, low quality, nsfw",
-          "Euler a", 768, 1024, 20, 7.0f, 0, 2 },
-        { "seaside_sunset", "Seaside Golden Sunset", "",
-          "masterpiece, best quality, 1girl, seaside sunset, white sundress, wind blowing hair, golden ocean light, cinematic anime key visual, fully clothed, sfw",
-          "lowres, bad anatomy, bad hands, text, error, blurry, worst quality, low quality, nsfw",
-          "Euler a", 768, 1024, 20, 7.0f, 0, 2 },
-        { "cozy_cafe", "Cozy Rainy Cafe (1080p)", "",
-          "masterpiece, best quality, 1girl, cozy anime cafe, wearing knit sweater, holding warm coffee cup, rain outside window, warm amber sunlight, soft bokeh, detailed, fully clothed, sfw",
-          "lowres, bad anatomy, bad hands, text, error, blurry, worst quality, low quality, nsfw",
-          "Euler", 512, 768, 8, 3.5f, 1, 2 },
-        { "wallpaper_1080p", "16:9 Floating Sky Castle (1080p)", "",
-          "masterpiece, best quality, amazing quality, wide panoramic anime landscape, floating fantasy castle above golden sunset clouds, cascading waterfalls, glowing sky lanterns, Makoto Shinkai anime wallpaper, no humans",
-          "lowres, people, human, text, watermark, blurry, worst quality, low quality, nsfw",
-          "LCM", 1024, 576, 6, 1.0f, 1, 2 },
-        { "scenic_aurora_16x9", "16:9 Alpine Aurora Lake (1080p)", "",
-          "masterpiece, best quality, amazing quality, wide panoramic anime wallpaper, serene alpine lake reflecting snow-capped mountains and glowing Milky Way aurora sky, wooden dock with warm lantern, Makoto Shinkai background, no humans",
-          "lowres, people, human, text, watermark, blurry, worst quality, nsfw",
-          "LCM", 1024, 576, 6, 1.0f, 1, 2 },
-        { "scenic_canyon_16x9", "16:9 Emerald Canyon Bridges (1080p)", "",
-          "masterpiece, best quality, breathtaking wide panoramic fantasy landscape painting, ancient arched stone bridges over glowing emerald canyon river, waterfalls, towering misty cliffs, golden sunrise rays, studio concept art, no humans",
-          "lowres, people, human, text, watermark, blurry, worst quality, nsfw",
-          "Euler a", 896, 512, 20, 7.0f, 1, 2 },
-        { "scenic_ghibli_16x9", "16:9 Ghibli Coastal Train (1080p)", "",
-          "masterpiece, best quality, scenic cel-shaded anime background, wide shot, coastal seaside train tracks overlooking sparkling turquoise ocean, giant fluffy summer cumulonimbus clouds, red torii gate on grassy cliff, Studio Ghibli style, no humans",
-          "lowres, people, human, text, watermark, blurry, worst quality, nsfw",
-          "Euler a", 896, 512, 20, 7.0f, 1, 2 },
-        { "winter_lantern_fest", "Winter Lantern Night Festival", "",
-          "masterpiece, best quality, amazing quality, 1girl, warm winter scarf and coat, smiling warmly under glowing floating paper lanterns at snowy Japanese night festival, bokeh street stalls, vibrant anime art, fully clothed, sfw",
-          "nsfw, bad eyes, deformed hands, lowres, blurry, text, watermark, worst quality",
-          "LCM", 768, 1024, 6, 1.0f, 1, 2 },
-        { "sakura_school_walk", "Cherry Blossom Courtyard (1080p)", "",
-          "masterpiece, best quality, 1girl, sparkling eyes, gentle smile, cozy cream cardigan over blue collared shirt, cherry blossom trees in golden hour sunlight, drifting sakura petals, crisp anime illustration, fully clothed, sfw",
-          "nsfw, bad eyes, deformed hands, lowres, blurry, text, watermark, worst quality",
-          "Euler", 512, 768, 8, 3.5f, 1, 2 },
-        { "mecha_hangar_16x9", "16:9 Mecha Hangar Bay", "",
-          "masterpiece, best quality, amazing quality, wide cinematic anime scene, massive sleek white and blue humanoid mecha standing in illuminated sci-fi hangar bay, volumetric skylight beams, sparks, detailed mechanical design, dramatic scale",
-          "lowres, blurry, text, watermark, worst quality, nsfw",
-          "LCM", 1024, 576, 6, 1.0f, 1, 2 },
-        { "twilight_shrine", "Twilight Mountain Shrine", "",
-          "masterpiece, best quality, amazing quality, scenic anime background, stone staircase lined with glowing red torii gates ascending misty pine mountain at twilight, warm stone lanterns, purple-orange dusk sky, fireflies, no humans",
-          "lowres, people, human, text, watermark, blurry, worst quality, nsfw",
-          "LCM", 768, 1024, 6, 1.0f, 1, 2 },
-        { "fullbody_knight", "Full-Body Fantasy Paladin (Tall)", "",
-          "masterpiece, best quality, amazing quality, 1girl, full body, silver and sapphire fantasy knight armor over white cape, holding ornate glowing sword, standing on sunlit stone castle terrace, clear blue sky, heroic anime key visual, fully clothed, sfw",
-          "nsfw, bad eyes, deformed hands, bad anatomy, lowres, blurry, text, watermark, worst quality",
-          "LCM", 832, 1216, 6, 1.0f, 1, 2 },
-        { "cozy_bookshop", "Magical Antique Bookshop", "",
-          "masterpiece, best quality, 2d anime illustration, cel shaded anime art, 1girl, scholar coat and scarf, warm glowing floating lanterns among towering antique wooden bookshelves, holding open illustrated grimoire, rich cozy colors, fully clothed, sfw",
-          "photorealistic, realistic, 3d, doll, uncanny, nsfw, bad eyes, deformed hands, lowres, blurry, worst quality",
-          "Euler a", 512, 768, 20, 7.0f, 1, 2 },
-        { "starry_observatory", "16:9 Starry Observatory Rooftop", "",
-          "masterpiece, best quality, amazing quality, wide shot, 1girl standing beside brass telescope on hilltop observatory balcony under sweeping Milky Way galaxy and shooting stars, gentle night breeze, serene Makoto Shinkai anime atmosphere, fully clothed, sfw",
-          "nsfw, bad eyes, deformed hands, lowres, blurry, text, watermark, worst quality",
-          "LCM", 1024, 576, 6, 1.0f, 1, 2 },
-        { "ultra_square_kv", "Ultra Square Key Visual (1024px)", "",
-          "masterpiece, best quality, amazing quality, 1girl, expressive detailed anime eyes, dynamic flowing hair and ribbons, sunlit stained glass cathedral hall with drifting light particles, ultra detailed anime movie key visual, fully clothed, sfw",
-          "nsfw, bad eyes, deformed hands, lowres, blurry, text, watermark, worst quality",
-          "LCM", 1024, 1024, 8, 1.0f, 0, 2 },
-    };
-    for (size_t i = 0; i < sizeof(DEFAULTS) / sizeof(DEFAULTS[0]); i++) {
-        char fp[320];
-        snprintf(fp, sizeof(fp), "%s/%s.cfg", g_presets_dir, DEFAULTS[i].id);
-        if (!path_exists_local(fp)) presets_save(&DEFAULTS[i], NULL, 0);
+    gd_init_preset_seeds();
+    for (size_t i = 0; i < sizeof(SEED_PRESETS) / sizeof(SEED_PRESETS[0]); i++) {
+        presets_save(&SEED_PRESETS[i], NULL, 0);
     }
-    write_all_file(marker, "2\n", 2);
+    write_all_file(marker, "4\n", 2);
 }
 
 void gallery_init(const char* out_dir, const char* presets_dir) {
     if (out_dir && out_dir[0]) snprintf(g_out_dir, sizeof(g_out_dir), "%s", out_dir);
+    snprintf(g_thumbs_dir, sizeof(g_thumbs_dir), "%s/.thumbs", g_out_dir);
+    snprintf(g_folders_file, sizeof(g_folders_file), "%s/.folders", g_out_dir);
     if (presets_dir && presets_dir[0]) snprintf(g_presets_dir, sizeof(g_presets_dir), "%s", presets_dir);
     ensure_dir(g_out_dir);
+    ensure_dir(g_thumbs_dir);
     ensure_dir(g_presets_dir);
 
-    // Find max existing g_NNNN sequence so new images sort cleanly on top
     uint32_t max_seq = 0;
     DIR* d = opendir(g_out_dir);
     if (d) {
@@ -231,6 +190,7 @@ void gallery_init(const char* out_dir, const char* presets_dir) {
         closedir(d);
     }
     g_next_seq = max_seq + 1;
+    g_gal_rev++;
     seed_default_presets();
 }
 
@@ -250,6 +210,9 @@ static void parse_meta_buf(char* buf, GalleryItem* it) {
             else if (strcmp(k, "prompt") == 0) snprintf(it->prompt, sizeof(it->prompt), "%s", v);
             else if (strcmp(k, "negative") == 0) snprintf(it->negative, sizeof(it->negative), "%s", v);
             else if (strcmp(k, "sampler") == 0) snprintf(it->sampler, sizeof(it->sampler), "%s", v);
+            else if (strcmp(k, "lora") == 0) snprintf(it->lora, sizeof(it->lora), "%s", v);
+            else if (strcmp(k, "folder") == 0) gallery_clean_folder_name(v, it->folder, sizeof(it->folder));
+            else if (strcmp(k, "starred") == 0) it->starred = atoi(v) ? 1 : 0;
             else if (strcmp(k, "width") == 0) it->width = (uint32_t)atoi(v);
             else if (strcmp(k, "height") == 0) it->height = (uint32_t)atoi(v);
             else if (strcmp(k, "steps") == 0) it->steps = (uint32_t)atoi(v);
@@ -264,36 +227,385 @@ static void parse_meta_buf(char* buf, GalleryItem* it) {
     }
 }
 
-int gallery_save(const uint8_t* png, size_t png_size, const GalleryItem* meta, char* out_id, size_t out_id_max) {
-    if (!png || !png_size || !meta) return -1;
-    ensure_dir(g_out_dir);
+static int write_meta_item(const char* id, const GalleryItem* meta) {
+    char pr[1024], ng[512], lr[128], fld[64] = {0};
+    snprintf(pr, sizeof(pr), "%s", meta->prompt); strip_newlines(pr);
+    snprintf(ng, sizeof(ng), "%s", meta->negative); strip_newlines(ng);
+    snprintf(lr, sizeof(lr), "%s", meta->lora); strip_newlines(lr);
+    if (meta->folder[0]) gallery_clean_folder_name(meta->folder, fld, sizeof(fld));
 
-    char id[64];
-    snprintf(id, sizeof(id), "g_%05u_%llu", g_next_seq++, (unsigned long long)(meta->seed & 0xFFFFFFFFull));
-
+    char mbuf[2600];
+    int n = snprintf(mbuf, sizeof(mbuf),
+                     "id=%s\nmodel=%s\nwidth=%u\nheight=%u\nsteps=%u\ncfg=%.2f\nsampler=%s\n"
+                     "seed=%llu\neco=%d\nupscaled=%d\nsec=%.2f\nlora=%s\nfolder=%s\nstarred=%d\nprompt=%s\nnegative=%s\n",
+                     id, meta->model, meta->width, meta->height, meta->steps, (double)meta->cfg,
+                     meta->sampler[0] ? meta->sampler : "Euler a",
+                     (unsigned long long)meta->seed, meta->eco, meta->upscaled, meta->sec, lr,
+                     fld, meta->starred ? 1 : 0, pr, ng);
     char fp[320];
+    snprintf(fp, sizeof(fp), "%s/%s.meta", g_out_dir, id);
+    return write_all_file(fp, mbuf, (size_t)(n > 0 ? n : 0));
+}
+
+static uint8_t* build_thumb_png_mem(const uint8_t* rgb, uint32_t w, uint32_t h, size_t* out_sz) {
+    if (!rgb || !w || !h) return NULL;
+    const uint32_t MAX_EDGE = 240u;
+    uint32_t tw = w, th = h;
+    if (w >= h && w > MAX_EDGE) {
+        tw = MAX_EDGE;
+        th = (uint32_t)(((uint64_t)h * MAX_EDGE + w / 2u) / w);
+    } else if (h > w && h > MAX_EDGE) {
+        th = MAX_EDGE;
+        tw = (uint32_t)(((uint64_t)w * MAX_EDGE + h / 2u) / h);
+    }
+    if (tw < 1u) tw = 1u;
+    if (th < 1u) th = 1u;
+    uint8_t* sub = (tw == w && th == h) ? NULL : rgb_resize(rgb, w, h, tw, th);
+    const uint8_t* src = sub ? sub : rgb;
+    size_t tsz = 0;
+    uint8_t* tpng = png_encode_rgb(src, tw, th, &tsz);
+    free(sub);
+    if (out_sz) *out_sz = tsz;
+    return tpng;
+}
+
+static uint8_t* build_thumb_png(const char* id, const uint8_t* rgb, uint32_t w, uint32_t h, size_t* out_sz) {
+    size_t tsz = 0;
+    uint8_t* tpng = build_thumb_png_mem(rgb, w, h, &tsz);
+    if (tpng && tsz > 0 && id && id[0]) {
+        ensure_dir(g_thumbs_dir);
+        char tfp[360];
+        snprintf(tfp, sizeof(tfp), "%s/%s.png", g_thumbs_dir, id);
+        write_all_file(tfp, tpng, tsz);
+    }
+    if (out_sz) *out_sz = tsz;
+    return tpng;
+}
+
+// ---- Bounded RAM-First Image Staging Buffer (tmpfs-style) ---------------------------------------
+#define GALLERY_STAGE_MAX_ITEMS 8
+
+typedef struct {
+    int active;
+    char id[64];
+    uint8_t* png;
+    size_t png_size;
+    uint8_t* thumb_png;
+    size_t thumb_size;
+    GalleryItem meta;
+} StagedEntry;
+
+static StagedEntry g_stage_q[GALLERY_STAGE_MAX_ITEMS];
+static StagedEntry g_stage_active_flush;
+static int g_stage_head = 0, g_stage_tail = 0, g_stage_count = 0;
+static int g_stage_flushing_now = 0;
+static size_t g_stage_used_bytes = 0;
+static size_t g_stage_max_bytes = (64u << 20);
+static int g_stage_state = GALLERY_STAGE_IDLE;
+static uint32_t g_stage_flushed_total = 0;
+static int g_stage_fallback_used = 0;
+static char g_stage_last_id[64] = "";
+static char g_stage_error[128] = "";
+static int g_stage_thread_ok = 0;
+
+#if !defined(_WIN32) && !defined(SDXL_CPU)
+static OrbisPthreadMutex g_stage_mu;
+static int g_stage_mu_ok = 0;
+static void stage_lock(void) { if (g_stage_mu_ok) scePthreadMutexLock(&g_stage_mu); }
+static void stage_unlock(void) { if (g_stage_mu_ok) scePthreadMutexUnlock(&g_stage_mu); }
+static void stage_sleep_us(uint32_t us) { sceKernelUsleep(us); }
+#else
+static void stage_lock(void) {}
+static void stage_unlock(void) {}
+static void stage_sleep_us(uint32_t us) { (void)us; }
+#endif
+
+static int persist_staged_files(const char* id, const uint8_t* png, size_t png_size,
+                                const uint8_t* thumb_png, size_t thumb_size, const GalleryItem* meta) {
+    ensure_dir(g_out_dir);
+    char fp[360];
     snprintf(fp, sizeof(fp), "%s/%s.png", g_out_dir, id);
     if (write_all_file(fp, png, png_size) != 0) return -1;
 
-    char pr[1024], ng[512];
-    snprintf(pr, sizeof(pr), "%s", meta->prompt); strip_newlines(pr);
-    snprintf(ng, sizeof(ng), "%s", meta->negative); strip_newlines(ng);
-    char mbuf[2200];
-    int n = snprintf(mbuf, sizeof(mbuf),
-                     "id=%s\nmodel=%s\nwidth=%u\nheight=%u\nsteps=%u\ncfg=%.2f\nsampler=%s\n"
-                     "seed=%llu\neco=%d\nupscaled=%d\nsec=%.2f\nprompt=%s\nnegative=%s\n",
-                     id, meta->model, meta->width, meta->height, meta->steps, (double)meta->cfg,
-                     meta->sampler[0] ? meta->sampler : "Euler a",
-                     (unsigned long long)meta->seed, meta->eco, meta->upscaled, meta->sec, pr, ng);
-    snprintf(fp, sizeof(fp), "%s/%s.meta", g_out_dir, id);
-    write_all_file(fp, mbuf, (size_t)(n > 0 ? n : 0));
+    if (thumb_png && thumb_size > 0) {
+        ensure_dir(g_thumbs_dir);
+        snprintf(fp, sizeof(fp), "%s/%s.png", g_thumbs_dir, id);
+        write_all_file(fp, thumb_png, thumb_size);
+    }
+    if (meta->folder[0]) {
+        char clean_f[64];
+        if (gallery_clean_folder_name(meta->folder, clean_f, sizeof(clean_f)) > 0)
+            gallery_create_folder(clean_f, NULL, 0);
+    }
+    if (write_meta_item(id, meta) != 0) return -1;
+    return 0;
+}
+
+#if !defined(_WIN32) && !defined(SDXL_CPU)
+static void* stage_flush_loop(void* arg) {
+    (void)arg;
+    for (;;) {
+        StagedEntry item;
+        int has_item = 0;
+        stage_lock();
+        if (g_stage_count > 0) {
+            item = g_stage_q[g_stage_head];
+            memset(&g_stage_q[g_stage_head], 0, sizeof(g_stage_q[g_stage_head]));
+            g_stage_head = (g_stage_head + 1) % GALLERY_STAGE_MAX_ITEMS;
+            g_stage_count--;
+            g_stage_active_flush = item;
+            g_stage_flushing_now = 1;
+            g_stage_state = GALLERY_STAGE_FLUSHING;
+            g_stage_error[0] = 0;
+            has_item = 1;
+        }
+        stage_unlock();
+
+        if (!has_item) {
+            stage_sleep_us(35000);
+            continue;
+        }
+
+        int rc = persist_staged_files(item.id, item.png, item.png_size,
+                                      item.thumb_png, item.thumb_size, &item.meta);
+
+        stage_lock();
+        size_t freed = item.png_size + item.thumb_size;
+        if (g_stage_used_bytes >= freed) g_stage_used_bytes -= freed;
+        else g_stage_used_bytes = 0;
+        memset(&g_stage_active_flush, 0, sizeof(g_stage_active_flush));
+        g_stage_flushing_now = 0;
+        if (rc == 0) {
+            g_stage_flushed_total++;
+            snprintf(g_stage_last_id, sizeof(g_stage_last_id), "%s", item.id);
+            g_stage_state = (g_stage_count > 0) ? GALLERY_STAGE_FLUSHING : GALLERY_STAGE_COMPLETE;
+            g_gal_rev++;
+        } else {
+            snprintf(g_stage_error, sizeof(g_stage_error), "Failed writing %s.png to disk", item.id);
+            g_stage_state = GALLERY_STAGE_ERROR;
+        }
+        stage_unlock();
+
+        free(item.png);
+        free(item.thumb_png);
+    }
+    return NULL;
+}
+#endif
+
+void gallery_stage_init(size_t max_bytes) {
+    if (max_bytes >= (8u << 20) && max_bytes <= (128u << 20)) {
+        g_stage_max_bytes = max_bytes;
+    }
+#if !defined(_WIN32) && !defined(SDXL_CPU)
+    if (!g_stage_mu_ok) {
+        if (scePthreadMutexInit(&g_stage_mu, NULL, "gdiff_stg") == 0) g_stage_mu_ok = 1;
+    }
+    if (!g_stage_thread_ok && g_stage_mu_ok) {
+        OrbisPthread th;
+        OrbisPthreadAttr attr;
+        scePthreadAttrInit(&attr);
+        scePthreadAttrSetstacksize(&attr, 128 << 10);
+        if (scePthreadCreate(&th, &attr, stage_flush_loop, NULL, "gdiff_flush") == 0) {
+            scePthreadDetach(th);
+            g_stage_thread_ok = 1;
+        }
+        scePthreadAttrDestroy(&attr);
+    }
+#endif
+}
+
+void gallery_stage_flush_all(void) {
+    for (int wait_it = 0; wait_it < 3000; wait_it++) {
+        stage_lock();
+        int pending = g_stage_count + g_stage_flushing_now;
+        stage_unlock();
+        if (pending == 0) break;
+        stage_sleep_us(20000);
+    }
+}
+
+void gallery_stage_get_status(GalleryStageStatus* out) {
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    stage_lock();
+    out->state = g_stage_state;
+    out->queued_count = (uint32_t)(g_stage_count + g_stage_flushing_now);
+    out->flushed_total = g_stage_flushed_total;
+    out->used_bytes = (uint32_t)g_stage_used_bytes;
+    out->max_bytes = (uint32_t)g_stage_max_bytes;
+    out->fallback_used = g_stage_fallback_used;
+    snprintf(out->last_id, sizeof(out->last_id), "%s", g_stage_last_id);
+    snprintf(out->error, sizeof(out->error), "%s", g_stage_error);
+    stage_unlock();
+}
+
+static int stage_find_copy_png(const char* id, int want_thumb, uint8_t** out_buf, size_t* out_sz) {
+    int found = 0;
+    stage_lock();
+    for (int k = -1; k < GALLERY_STAGE_MAX_ITEMS; k++) {
+        const StagedEntry* e = (k < 0) ? (g_stage_flushing_now ? &g_stage_active_flush : NULL)
+                                       : (g_stage_q[k].active ? &g_stage_q[k] : NULL);
+        if (!e || strcmp(e->id, id) != 0) continue;
+        const uint8_t* src = want_thumb ? e->thumb_png : e->png;
+        size_t sz = want_thumb ? e->thumb_size : e->png_size;
+        if (src && sz > 0) {
+            uint8_t* cp = (uint8_t*)malloc(sz);
+            if (cp) {
+                memcpy(cp, src, sz);
+                *out_buf = cp;
+                if (out_sz) *out_sz = sz;
+                found = 1;
+            }
+        }
+        break;
+    }
+    stage_unlock();
+    return found;
+}
+
+static int stage_find_meta(const char* id, GalleryItem* out) {
+    int found = 0;
+    stage_lock();
+    for (int k = -1; k < GALLERY_STAGE_MAX_ITEMS; k++) {
+        const StagedEntry* e = (k < 0) ? (g_stage_flushing_now ? &g_stage_active_flush : NULL)
+                                       : (g_stage_q[k].active ? &g_stage_q[k] : NULL);
+        if (!e || strcmp(e->id, id) != 0) continue;
+        *out = e->meta;
+        snprintf(out->id, sizeof(out->id), "%s", e->id);
+        out->bytes = e->png_size;
+        found = 1;
+        break;
+    }
+    stage_unlock();
+    return found;
+}
+
+int gallery_stage_enqueue(const uint8_t* png, size_t png_size, const uint8_t* rgb_opt, uint32_t rgb_w, uint32_t rgb_h,
+                          const GalleryItem* meta, char* out_id, size_t out_id_max) {
+    if (!png || !png_size || !meta) return -1;
+
+    char id[64];
+    stage_lock();
+    snprintf(id, sizeof(id), "g_%05u_%llu", g_next_seq++, (unsigned long long)(meta->seed & 0xFFFFFFFFull));
+    g_stage_state = GALLERY_STAGE_STAGING;
+    g_stage_fallback_used = 0;
+    g_stage_error[0] = 0;
+    snprintf(g_stage_last_id, sizeof(g_stage_last_id), "%s", id);
+    stage_unlock();
+
+    size_t thumb_sz = 0;
+    uint8_t* thumb_png = (rgb_opt && rgb_w > 0 && rgb_h > 0)
+        ? build_thumb_png_mem(rgb_opt, rgb_w, rgb_h, &thumb_sz) : NULL;
+    size_t need = png_size + thumb_sz;
+
+    // Safe fallback if background flusher isn't active or single image exceeds hard RAM budget
+    if (!g_stage_thread_ok || need > g_stage_max_bytes) {
+        if (g_stage_thread_ok) gallery_stage_flush_all();
+        stage_lock();
+        g_stage_state = GALLERY_STAGE_FLUSHING;
+        g_stage_fallback_used = 1;
+        stage_unlock();
+        int rc = persist_staged_files(id, png, png_size, thumb_png, thumb_sz, meta);
+        free(thumb_png);
+        stage_lock();
+        if (rc == 0) {
+            g_stage_flushed_total++;
+            g_stage_state = GALLERY_STAGE_COMPLETE;
+            g_gal_rev++;
+        } else {
+            snprintf(g_stage_error, sizeof(g_stage_error), "Direct-write fallback failed for %s", id);
+            g_stage_state = GALLERY_STAGE_ERROR;
+        }
+        stage_unlock();
+        if (rc == 0 && out_id && out_id_max) snprintf(out_id, out_id_max, "%s", id);
+        return rc;
+    }
+
+    // Backpressure: wait for background flusher to free RAM if buffer is full or would exceed cap
+    for (int wait_it = 0; wait_it < 1500; wait_it++) {
+        stage_lock();
+        int room = (g_stage_count < GALLERY_STAGE_MAX_ITEMS) &&
+                   (g_stage_used_bytes + need <= g_stage_max_bytes);
+        stage_unlock();
+        if (room) break;
+        stage_sleep_us(20000);
+    }
+
+    uint8_t* png_copy = (uint8_t*)malloc(png_size);
+    if (!png_copy) {
+        // OOM safe fallback: flush queue and write directly
+        gallery_stage_flush_all();
+        stage_lock();
+        g_stage_state = GALLERY_STAGE_FLUSHING;
+        g_stage_fallback_used = 1;
+        stage_unlock();
+        int rc = persist_staged_files(id, png, png_size, thumb_png, thumb_sz, meta);
+        free(thumb_png);
+        stage_lock();
+        if (rc == 0) {
+            g_stage_flushed_total++;
+            g_stage_state = GALLERY_STAGE_COMPLETE;
+            g_gal_rev++;
+        } else {
+            snprintf(g_stage_error, sizeof(g_stage_error), "OOM fallback disk write failed for %s", id);
+            g_stage_state = GALLERY_STAGE_ERROR;
+        }
+        stage_unlock();
+        if (rc == 0 && out_id && out_id_max) snprintf(out_id, out_id_max, "%s", id);
+        return rc;
+    }
+    memcpy(png_copy, png, png_size);
+
+    stage_lock();
+    StagedEntry* slot = &g_stage_q[g_stage_tail];
+    slot->active = 1;
+    snprintf(slot->id, sizeof(slot->id), "%s", id);
+    slot->png = png_copy;
+    slot->png_size = png_size;
+    slot->thumb_png = thumb_png;
+    slot->thumb_size = thumb_sz;
+    slot->meta = *meta;
+    snprintf(slot->meta.id, sizeof(slot->meta.id), "%s", id);
+    slot->meta.bytes = png_size;
+    g_stage_tail = (g_stage_tail + 1) % GALLERY_STAGE_MAX_ITEMS;
+    g_stage_count++;
+    g_stage_used_bytes += need;
+    g_gal_rev++;
+    stage_unlock();
 
     if (out_id && out_id_max) snprintf(out_id, out_id_max, "%s", id);
     return 0;
 }
 
+int gallery_save_ex(const uint8_t* png, size_t png_size, const uint8_t* rgb_opt, uint32_t rgb_w, uint32_t rgb_h,
+                    const GalleryItem* meta, char* out_id, size_t out_id_max) {
+    if (!png || !png_size || !meta) return -1;
+    ensure_dir(g_out_dir);
+
+    char id[64];
+    stage_lock();
+    snprintf(id, sizeof(id), "g_%05u_%llu", g_next_seq++, (unsigned long long)(meta->seed & 0xFFFFFFFFull));
+    stage_unlock();
+
+    size_t tsz = 0;
+    uint8_t* tpng = (rgb_opt && rgb_w > 0 && rgb_h > 0) ? build_thumb_png_mem(rgb_opt, rgb_w, rgb_h, &tsz) : NULL;
+    int rc = persist_staged_files(id, png, png_size, tpng, tsz, meta);
+    free(tpng);
+    if (rc != 0) return -1;
+
+    g_gal_rev++;
+    if (out_id && out_id_max) snprintf(out_id, out_id_max, "%s", id);
+    return 0;
+}
+
+int gallery_save(const uint8_t* png, size_t png_size, const GalleryItem* meta, char* out_id, size_t out_id_max) {
+    return gallery_save_ex(png, png_size, NULL, 0, 0, meta, out_id, out_id_max);
+}
+
 int gallery_get(const char* id, GalleryItem* out) {
     if (!gallery_valid_id(id) || !out) return -1;
+    if (stage_find_meta(id, out)) return 0;
     memset(out, 0, sizeof(*out));
     snprintf(out->id, sizeof(out->id), "%s", id);
     snprintf(out->sampler, sizeof(out->sampler), "Euler a");
@@ -324,56 +636,518 @@ int gallery_get(const char* id, GalleryItem* out) {
     return 0;
 }
 
-static int cmp_gallery_desc(const void* a, const void* b) {
-    const GalleryItem* ga = (const GalleryItem*)a;
-    const GalleryItem* gb = (const GalleryItem*)b;
+static int cmp_id_desc(const void* a, const void* b) {
+    const char* ia = (const char*)a;
+    const char* ib = (const char*)b;
     unsigned sa = 0, sb = 0;
-    int ha = (sscanf(ga->id, "g_%u_", &sa) == 1);
-    int hb = (sscanf(gb->id, "g_%u_", &sb) == 1);
-    // New sequenced gallery images (g_NNNNN_*) ALWAYS sort newest-first ahead of legacy img_* files!
+    int ha = (sscanf(ia, "g_%u_", &sa) == 1);
+    int hb = (sscanf(ib, "g_%u_", &sb) == 1);
     if (ha && hb) {
         if (sb != sa) return (sb > sa) ? 1 : -1;
-        return strcmp(gb->id, ga->id);
+        return strcmp(ib, ia);
     }
     if (ha != hb) return hb - ha;
-    return strcmp(gb->id, ga->id);
+    return strcmp(ib, ia);
 }
 
-int gallery_list(GalleryItem* items, int max_items) {
+static int ci_substr_gal(const char* hay, const char* needle) {
+    if (!hay || !needle || !needle[0]) return 0;
+    size_t nl = strlen(needle);
+    for (; *hay; hay++) {
+        size_t i = 0;
+        while (i < nl && hay[i] && tolower((unsigned char)hay[i]) == tolower((unsigned char)needle[i])) i++;
+        if (i == nl) return 1;
+    }
+    return 0;
+}
+
+static size_t scan_sorted_gallery_ids(char (**out_ids)[64]) {
+    *out_ids = NULL;
     DIR* d = opendir(g_out_dir);
     if (!d) return 0;
-    int n = 0;
+
+    size_t cap = 512, cnt = 0;
+    char (*ids)[64] = (char (*)[64])malloc(cap * sizeof(*ids));
+    if (!ids) { closedir(d); return 0; }
+
     struct dirent* ent;
-    while ((ent = readdir(d)) != NULL && n < max_items) {
+    while ((ent = readdir(d)) != NULL) {
         const char* nm = ent->d_name;
+        if (nm[0] == '.') continue;
         size_t l = strlen(nm);
         if (l <= 4 || strcmp(nm + l - 4, ".png") != 0 || l - 4 >= 64) continue;
         char id[64];
         memcpy(id, nm, l - 4);
         id[l - 4] = 0;
         if (!gallery_valid_id(id)) continue;
-        if (gallery_get(id, &items[n]) == 0) n++;
+        if (cnt >= cap) {
+            size_t ncap = cap * 2;
+            char (*nids)[64] = (char (*)[64])realloc(ids, ncap * sizeof(*ids));
+            if (!nids) break;
+            ids = nids;
+            cap = ncap;
+        }
+        memcpy(ids[cnt++], id, 64);
     }
     closedir(d);
-    if (n > 1) qsort(items, (size_t)n, sizeof(GalleryItem), cmp_gallery_desc);
+
+    // Include any items currently staged in RAM (not yet written to HDD) so Gallery sees them immediately
+    stage_lock();
+    for (int k = -1; k < GALLERY_STAGE_MAX_ITEMS; k++) {
+        const StagedEntry* e = (k < 0) ? (g_stage_flushing_now ? &g_stage_active_flush : NULL)
+                                       : (g_stage_q[k].active ? &g_stage_q[k] : NULL);
+        if (!e || !e->id[0]) continue;
+        int dup = 0;
+        for (size_t j = 0; j < cnt; j++) {
+            if (strcmp(ids[j], e->id) == 0) { dup = 1; break; }
+        }
+        if (dup) continue;
+        if (cnt >= cap) {
+            size_t ncap = cap * 2;
+            char (*nids)[64] = (char (*)[64])realloc(ids, ncap * sizeof(*ids));
+            if (!nids) break;
+            ids = nids;
+            cap = ncap;
+        }
+        memcpy(ids[cnt++], e->id, 64);
+    }
+    stage_unlock();
+
+    if (cnt > 1) qsort(ids, cnt, sizeof(*ids), cmp_id_desc);
+    *out_ids = ids;
+    return cnt;
+}
+
+int gallery_list_page_ex(GalleryItem* items, int offset, int limit, const char* query,
+                         const char* folder_filter, int starred_only, int* out_total) {
+    if (out_total) *out_total = 0;
+    if (!items || limit <= 0) return 0;
+    if (offset < 0) offset = 0;
+
+    char (*ids)[64] = NULL;
+    size_t cnt = scan_sorted_gallery_ids(&ids);
+    if (!ids || cnt == 0) { free(ids); return 0; }
+
+    int has_q = (query && query[0] != 0);
+    int has_f = (folder_filter && folder_filter[0] != 0);
+    int want_unsorted = has_f && strcmp(folder_filter, "__unsorted__") == 0;
+    int want_starred = starred_only || (has_f && strcmp(folder_filter, "__starred__") == 0);
+    if (has_f && strcmp(folder_filter, "__starred__") == 0) has_f = 0;
+
+    int n = 0;
+    if (!has_q && !has_f && !want_starred) {
+        if (out_total) *out_total = (int)cnt;
+        for (size_t i = (size_t)offset; i < cnt && n < limit; i++) {
+            if (gallery_get(ids[i], &items[n]) == 0) n++;
+        }
+    } else {
+        int matched = 0;
+        for (size_t i = 0; i < cnt; i++) {
+            GalleryItem tmp;
+            if (gallery_get(ids[i], &tmp) != 0) continue;
+            if (want_starred && !tmp.starred) continue;
+            if (has_f) {
+                if (want_unsorted) {
+                    if (tmp.folder[0] != 0) continue;
+                } else if (!ci_eq_gal(tmp.folder, folder_filter)) {
+                    continue;
+                }
+            }
+            if (has_q) {
+                char sbuf[32];
+                snprintf(sbuf, sizeof(sbuf), "%llu", (unsigned long long)tmp.seed);
+                if (!ci_substr_gal(tmp.prompt, query) && !ci_substr_gal(tmp.model, query) &&
+                    !ci_substr_gal(tmp.lora, query) && !ci_substr_gal(tmp.folder, query) &&
+                    !ci_substr_gal(tmp.id, query) && strstr(sbuf, query) == NULL) {
+                    continue;
+                }
+            }
+            if (matched >= offset && n < limit) {
+                items[n++] = tmp;
+            }
+            matched++;
+        }
+        if (out_total) *out_total = matched;
+    }
+    free(ids);
     return n;
+}
+
+int gallery_list_page(GalleryItem* items, int offset, int limit, const char* query, int* out_total) {
+    return gallery_list_page_ex(items, offset, limit, query, NULL, 0, out_total);
+}
+
+int gallery_list(GalleryItem* items, int max_items) {
+    return gallery_list_page_ex(items, 0, max_items, NULL, NULL, 0, NULL);
 }
 
 uint8_t* gallery_load_png(const char* id, size_t* out_size) {
     if (!gallery_valid_id(id)) return NULL;
+    uint8_t* staged = NULL;
+    if (stage_find_copy_png(id, 0, &staged, out_size)) return staged;
     char fp[320];
     snprintf(fp, sizeof(fp), "%s/%s.png", g_out_dir, id);
     return read_all_file(fp, out_size);
 }
 
+uint8_t* gallery_load_thumb_png(const char* id, size_t* out_size) {
+    if (!gallery_valid_id(id)) return NULL;
+    uint8_t* staged = NULL;
+    if (stage_find_copy_png(id, 1, &staged, out_size)) return staged;
+    char tfp[360];
+    snprintf(tfp, sizeof(tfp), "%s/%s.png", g_thumbs_dir, id);
+    uint8_t* cached = read_all_file(tfp, out_size);
+    if (cached) return cached;
+
+    size_t fsz = 0;
+    uint8_t* full = gallery_load_png(id, &fsz);
+    if (!full) return NULL;
+    uint32_t w = 0, h = 0;
+    uint8_t* rgb = png_decode_rgb(full, fsz, &w, &h);
+    if (!rgb) {
+        if (out_size) *out_size = fsz;
+        return full;
+    }
+    free(full);
+    uint8_t* tpng = build_thumb_png(id, rgb, w, h, out_size);
+    free(rgb);
+    return tpng;
+}
+
 int gallery_delete(const char* id) {
     if (!gallery_valid_id(id)) return -1;
-    char fp[320];
+    char fp[360];
     snprintf(fp, sizeof(fp), "%s/%s.png", g_out_dir, id);
     int r = unlink(fp);
     snprintf(fp, sizeof(fp), "%s/%s.meta", g_out_dir, id);
     unlink(fp);
+    snprintf(fp, sizeof(fp), "%s/%s.png", g_thumbs_dir, id);
+    unlink(fp);
+    g_gal_rev++;
     return r;
+}
+
+// ---- Gallery Folders, Starred Favorites & Stored-ZIP Builder ------------------------------------
+
+static int cmp_folder_asc(const void* a, const void* b) {
+    return strcmp(((const GalleryFolder*)a)->name, ((const GalleryFolder*)b)->name);
+}
+
+static int load_registered_folders(char out[][64], int max_f) {
+    size_t sz = 0;
+    uint8_t* buf = read_all_file(g_folders_file, &sz);
+    if (!buf) return 0;
+    int n = 0;
+    char* line = (char*)buf;
+    while (*line && n < max_f) {
+        char* nl = strchr(line, '\n');
+        if (nl) *nl = 0;
+        char cl[64];
+        if (gallery_clean_folder_name(line, cl, sizeof(cl)) > 0) {
+            int dup = 0;
+            for (int i = 0; i < n; i++) if (ci_eq_gal(out[i], cl)) { dup = 1; break; }
+            if (!dup) snprintf(out[n++], 64, "%s", cl);
+        }
+        if (!nl) break;
+        line = nl + 1;
+    }
+    free(buf);
+    return n;
+}
+
+static void save_registered_folders(char list[][64], int n) {
+    char buf[GALLERY_MAX_FOLDERS * 66 + 8];
+    size_t pos = 0;
+    for (int i = 0; i < n && pos + 68 < sizeof(buf); i++) {
+        if (list[i][0]) pos += (size_t)snprintf(buf + pos, sizeof(buf) - pos, "%s\n", list[i]);
+    }
+    buf[pos] = 0;
+    ensure_dir(g_out_dir);
+    write_all_file(g_folders_file, buf, pos);
+}
+
+int gallery_create_folder(const char* name, char* clean_out, size_t max) {
+    char cl[64];
+    if (gallery_clean_folder_name(name, cl, sizeof(cl)) <= 0) return -1;
+    if (clean_out && max) snprintf(clean_out, max, "%s", cl);
+
+    char reg[GALLERY_MAX_FOLDERS][64];
+    int n = load_registered_folders(reg, GALLERY_MAX_FOLDERS);
+    for (int i = 0; i < n; i++) {
+        if (ci_eq_gal(reg[i], cl)) {
+            if (clean_out && max) snprintf(clean_out, max, "%s", reg[i]);
+            return 0;
+        }
+    }
+    if (n >= GALLERY_MAX_FOLDERS) return -1;
+    snprintf(reg[n++], 64, "%s", cl);
+    save_registered_folders(reg, n);
+    g_gal_rev++;
+    return 0;
+}
+
+int gallery_delete_folder(const char* name, int delete_images) {
+    char cl[64];
+    if (gallery_clean_folder_name(name, cl, sizeof(cl)) <= 0) return -1;
+
+    char reg[GALLERY_MAX_FOLDERS][64];
+    int n = load_registered_folders(reg, GALLERY_MAX_FOLDERS);
+    int out_n = 0;
+    for (int i = 0; i < n; i++) {
+        if (!ci_eq_gal(reg[i], cl)) {
+            if (out_n != i) memcpy(reg[out_n], reg[i], 64);
+            out_n++;
+        }
+    }
+    save_registered_folders(reg, out_n);
+
+    char (*ids)[64] = NULL;
+    size_t cnt = scan_sorted_gallery_ids(&ids);
+    for (size_t i = 0; i < cnt; i++) {
+        GalleryItem it;
+        if (gallery_get(ids[i], &it) == 0 && ci_eq_gal(it.folder, cl)) {
+            if (delete_images) {
+                gallery_delete(ids[i]);
+            } else {
+                it.folder[0] = 0;
+                write_meta_item(ids[i], &it);
+            }
+        }
+    }
+    free(ids);
+    g_gal_rev++;
+    return 0;
+}
+
+int gallery_list_folders(GalleryFolder* out, int max_folders, int* out_unsorted, int* out_starred, int* out_total) {
+    if (out_unsorted) *out_unsorted = 0;
+    if (out_starred) *out_starred = 0;
+    if (out_total) *out_total = 0;
+    if (!out || max_folders <= 0) return 0;
+
+    char reg[GALLERY_MAX_FOLDERS][64];
+    int n_reg = load_registered_folders(reg, GALLERY_MAX_FOLDERS);
+    int nf = 0;
+    for (int i = 0; i < n_reg && nf < max_folders; i++) {
+        snprintf(out[nf].name, sizeof(out[nf].name), "%s", reg[i]);
+        out[nf].count = 0;
+        nf++;
+    }
+
+    char (*ids)[64] = NULL;
+    size_t cnt = scan_sorted_gallery_ids(&ids);
+    if (out_total) *out_total = (int)cnt;
+    int unsorted = 0, starred = 0;
+    for (size_t i = 0; i < cnt; i++) {
+        GalleryItem it;
+        if (gallery_get(ids[i], &it) != 0) continue;
+        if (it.starred) starred++;
+        if (!it.folder[0]) {
+            unsorted++;
+        } else {
+            int idx = -1;
+            for (int k = 0; k < nf; k++) {
+                if (ci_eq_gal(out[k].name, it.folder)) { idx = k; break; }
+            }
+            if (idx >= 0) out[idx].count++;
+            else if (nf < max_folders) {
+                snprintf(out[nf].name, sizeof(out[nf].name), "%s", it.folder);
+                out[nf].count = 1;
+                nf++;
+            }
+        }
+    }
+    free(ids);
+    if (out_unsorted) *out_unsorted = unsorted;
+    if (out_starred) *out_starred = starred;
+    if (nf > 1) qsort(out, (size_t)nf, sizeof(GalleryFolder), cmp_folder_asc);
+    return nf;
+}
+
+int gallery_set_folder(const char* id, const char* folder) {
+    GalleryItem it;
+    if (gallery_get(id, &it) != 0) return -1;
+    char cl[64] = {0};
+    if (folder && folder[0]) {
+        if (gallery_clean_folder_name(folder, cl, sizeof(cl)) <= 0) return -1;
+        gallery_create_folder(cl, cl, sizeof(cl));
+    }
+    snprintf(it.folder, sizeof(it.folder), "%s", cl);
+    if (write_meta_item(id, &it) != 0) return -1;
+    g_gal_rev++;
+    return 0;
+}
+
+int gallery_set_folder_batch(const char (*ids)[64], int n_ids, const char* folder) {
+    if (!ids || n_ids <= 0) return -1;
+    char cl[64] = {0};
+    if (folder && folder[0]) {
+        if (gallery_clean_folder_name(folder, cl, sizeof(cl)) <= 0) return -1;
+        gallery_create_folder(cl, cl, sizeof(cl));
+    }
+    int moved = 0;
+    for (int i = 0; i < n_ids; i++) {
+        GalleryItem it;
+        if (gallery_get(ids[i], &it) != 0) continue;
+        snprintf(it.folder, sizeof(it.folder), "%s", cl);
+        if (write_meta_item(ids[i], &it) == 0) moved++;
+    }
+    if (moved > 0) g_gal_rev++;
+    return moved;
+}
+
+int gallery_set_starred(const char* id, int starred) {
+    GalleryItem it;
+    if (gallery_get(id, &it) != 0) return -1;
+    it.starred = starred ? 1 : 0;
+    if (write_meta_item(id, &it) != 0) return -1;
+    g_gal_rev++;
+    return 0;
+}
+
+static void zip_put16(uint8_t* p, uint16_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
+static void zip_put32(uint8_t* p, uint32_t v) {
+    p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24);
+}
+
+// Fast zero-compression PKZIP Store archive builder (PNGs are already compressed; <50ms on PS4!)
+uint8_t* gallery_build_zip(const char (*ids)[64], int n_ids, const char* folder_filter, size_t* out_zip_size) {
+    if (out_zip_size) *out_zip_size = 0;
+
+    char (*alloc_ids)[64] = NULL;
+    const char (*use_ids)[64] = ids;
+    int count = n_ids;
+
+    if ((!ids || n_ids <= 0) && folder_filter && folder_filter[0]) {
+        char (*all)[64] = NULL;
+        size_t tot = scan_sorted_gallery_ids(&all);
+        if (!all || tot == 0) { free(all); return NULL; }
+        alloc_ids = (char (*)[64])malloc(tot * sizeof(*alloc_ids));
+        if (!alloc_ids) { free(all); return NULL; }
+        count = 0;
+        int want_starred = (strcmp(folder_filter, "__starred__") == 0);
+        int want_unsorted = (strcmp(folder_filter, "__unsorted__") == 0);
+        for (size_t i = 0; i < tot; i++) {
+            GalleryItem it;
+            if (gallery_get(all[i], &it) != 0) continue;
+            int ok = want_starred ? it.starred
+                   : (want_unsorted ? (it.folder[0] == 0) : ci_eq_gal(it.folder, folder_filter));
+            if (ok) memcpy(alloc_ids[count++], all[i], 64);
+        }
+        free(all);
+        use_ids = (const char (*)[64])alloc_ids;
+    }
+    if (!use_ids || count <= 0) { free(alloc_ids); return NULL; }
+    if (count > 256) count = 256;
+
+    typedef struct {
+        char fname[128];
+        uint32_t crc, sz, local_off;
+    } ZipRec;
+    ZipRec* recs = (ZipRec*)calloc((size_t)count, sizeof(ZipRec));
+    if (!recs) { free(alloc_ids); return NULL; }
+
+    size_t cap = 4 * 1024 * 1024;
+    const size_t MAX_ZIP_BYTES = 192u * 1024u * 1024u; // Safe 192 MiB RAM ceiling on PS4
+    uint8_t* zbuf = (uint8_t*)malloc(cap);
+    if (!zbuf) { free(recs); free(alloc_ids); return NULL; }
+
+    size_t pos = 0;
+    int packed = 0;
+    for (int i = 0; i < count; i++) {
+        if (!gallery_valid_id(use_ids[i])) continue;
+        size_t psz = 0;
+        uint8_t* png = gallery_load_png(use_ids[i], &psz);
+        if (!png || psz == 0) { free(png); continue; }
+        GalleryItem it;
+        char prefix[72] = {0};
+        if (gallery_get(use_ids[i], &it) == 0 && it.folder[0]) {
+            snprintf(prefix, sizeof(prefix), "%s/", it.folder);
+        }
+        char fn[128];
+        snprintf(fn, sizeof(fn), "%s%s.png", prefix, use_ids[i]);
+        uint16_t fn_len = (uint16_t)strlen(fn);
+
+        size_t need = 30u + fn_len + psz + (size_t)(packed + 2) * 180u + 64u;
+        if (pos + need > MAX_ZIP_BYTES) { free(png); break; }
+        while (pos + need > cap) {
+            size_t ncap = cap * 2;
+            if (ncap > MAX_ZIP_BYTES) ncap = MAX_ZIP_BYTES;
+            uint8_t* nb = (uint8_t*)realloc(zbuf, ncap);
+            if (!nb) { free(png); goto finish_cd; }
+            zbuf = nb;
+            cap = ncap;
+        }
+
+        uint32_t crc = png_crc32(png, psz);
+        uint32_t loff = (uint32_t)pos;
+        zip_put32(zbuf + pos, 0x04034b50u);
+        zip_put16(zbuf + pos + 4, 20);
+        zip_put16(zbuf + pos + 6, 0);
+        zip_put16(zbuf + pos + 8, 0); // Store (0 = uncompressed)
+        zip_put16(zbuf + pos + 10, 0);
+        zip_put16(zbuf + pos + 12, 0x0021);
+        zip_put32(zbuf + pos + 14, crc);
+        zip_put32(zbuf + pos + 18, (uint32_t)psz);
+        zip_put32(zbuf + pos + 22, (uint32_t)psz);
+        zip_put16(zbuf + pos + 26, fn_len);
+        zip_put16(zbuf + pos + 28, 0);
+        pos += 30;
+        memcpy(zbuf + pos, fn, fn_len);
+        pos += fn_len;
+        memcpy(zbuf + pos, png, psz);
+        pos += psz;
+        free(png);
+
+        snprintf(recs[packed].fname, sizeof(recs[0].fname), "%s", fn);
+        recs[packed].crc = crc;
+        recs[packed].sz = (uint32_t)psz;
+        recs[packed].local_off = loff;
+        packed++;
+    }
+
+finish_cd:
+    free(alloc_ids);
+    if (packed == 0) { free(recs); free(zbuf); return NULL; }
+
+    uint32_t cd_off = (uint32_t)pos;
+    for (int i = 0; i < packed; i++) {
+        uint16_t fn_len = (uint16_t)strlen(recs[i].fname);
+        zip_put32(zbuf + pos, 0x02014b50u);
+        zip_put16(zbuf + pos + 4, 20);
+        zip_put16(zbuf + pos + 6, 20);
+        zip_put16(zbuf + pos + 8, 0);
+        zip_put16(zbuf + pos + 10, 0);
+        zip_put16(zbuf + pos + 12, 0);
+        zip_put16(zbuf + pos + 14, 0x0021);
+        zip_put32(zbuf + pos + 16, recs[i].crc);
+        zip_put32(zbuf + pos + 20, recs[i].sz);
+        zip_put32(zbuf + pos + 24, recs[i].sz);
+        zip_put16(zbuf + pos + 28, fn_len);
+        zip_put16(zbuf + pos + 30, 0);
+        zip_put16(zbuf + pos + 32, 0);
+        zip_put16(zbuf + pos + 34, 0);
+        zip_put16(zbuf + pos + 36, 0);
+        zip_put32(zbuf + pos + 38, 0);
+        zip_put32(zbuf + pos + 42, recs[i].local_off);
+        pos += 46;
+        memcpy(zbuf + pos, recs[i].fname, fn_len);
+        pos += fn_len;
+    }
+    uint32_t cd_sz = (uint32_t)(pos - cd_off);
+    zip_put32(zbuf + pos, 0x06054b50u);
+    zip_put16(zbuf + pos + 4, 0);
+    zip_put16(zbuf + pos + 6, 0);
+    zip_put16(zbuf + pos + 8, (uint16_t)packed);
+    zip_put16(zbuf + pos + 10, (uint16_t)packed);
+    zip_put32(zbuf + pos + 12, cd_sz);
+    zip_put32(zbuf + pos + 16, cd_off);
+    zip_put16(zbuf + pos + 20, 0);
+    pos += 22;
+
+    free(recs);
+    if (out_zip_size) *out_zip_size = pos;
+    return zbuf;
 }
 
 // ---- User Presets -------------------------------------------------------------------------------
@@ -405,6 +1179,8 @@ static void parse_preset_buf(char* buf, UserPreset* p) {
             else if (strcmp(k, "cfg") == 0) p->cfg = (float)atof(v);
             else if (strcmp(k, "upscale") == 0) p->upscale = atoi(v);
             else if (strcmp(k, "eco") == 0) p->eco = atoi(v);
+            else if (strcmp(k, "nsfw") == 0) p->nsfw = atoi(v) ? 1 : 0;
+            else if (strcmp(k, "is_speed") == 0) p->is_speed = atoi(v) ? 1 : 0;
         }
         if (!nl) break;
         line = nl + 1;
@@ -455,13 +1231,14 @@ int presets_save(const UserPreset* p, char* out_id, size_t out_id_max) {
     snprintf(nm, sizeof(nm), "%s", p->name); strip_newlines(nm);
     snprintf(pr, sizeof(pr), "%s", p->prompt); strip_newlines(pr);
     snprintf(ng, sizeof(ng), "%s", p->negative); strip_newlines(ng);
-    char buf[2200];
+    char buf[2300];
     int n = snprintf(buf, sizeof(buf),
                      "name=%s\nmodel=%s\nwidth=%u\nheight=%u\nsteps=%u\ncfg=%.2f\nsampler=%s\n"
-                     "upscale=%d\neco=%d\nprompt=%s\nnegative=%s\n",
+                     "upscale=%d\neco=%d\nnsfw=%d\nis_speed=%d\nprompt=%s\nnegative=%s\n",
                      nm, p->model, p->width ? p->width : 768u, p->height ? p->height : 1024u,
                      p->steps ? p->steps : 20u, (double)(p->cfg > 0 ? p->cfg : 7.0f),
-                     p->sampler[0] ? p->sampler : "Euler a", p->upscale, p->eco, pr, ng);
+                     p->sampler[0] ? p->sampler : "Euler a", p->upscale, p->eco,
+                     p->nsfw ? 1 : 0, p->is_speed ? 1 : 0, pr, ng);
     char fp[320];
     snprintf(fp, sizeof(fp), "%s/%s.cfg", g_presets_dir, id);
     if (write_all_file(fp, buf, (size_t)(n > 0 ? n : 0)) != 0) return -1;
@@ -652,135 +1429,14 @@ static int cmp_char_asc(const void* a, const void* b) {
 
 static void seed_default_characters(void) {
     char marker[320];
-    snprintf(marker, sizeof(marker), "%s/.seeded_v1", g_chars_dir);
+    snprintf(marker, sizeof(marker), "%s/.seeded_v3", g_chars_dir);
     if (path_exists_local(marker)) return;
 
-    static const CharacterItem DEFAULTS[] = {
-        // Vocaloid (concise Danbooru tags — Illustrious already knows default outfits!)
-        { "hatsune_miku", "Hatsune Miku", "Vocaloid",
-          "1girl, solo, hatsune miku, aqua eyes, closed mouth, smile, sfw",
-          "lowres, bad eyes, nsfw" },
-        { "kagamine_rin", "Kagamine Rin", "Vocaloid",
-          "1girl, kagamine rin, short blonde hair, big white hair ribbon, blue eyes, white sailor top, black shorts, cheerful smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "megurine_luka", "Megurine Luka", "Vocaloid",
-          "1girl, megurine luka, long wavy pink hair, blue eyes, black sleeveless dress with gold trim, elegant smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        // Anime Classics & Modern Hits
-        { "frieren", "Frieren", "Frieren",
-          "1girl, frieren, long white twin tails, elf ears, green eyes, white and gold mage coat, striped scarf, wooden mage staff, calm gentle expression, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "fern_frieren", "Fern", "Frieren",
-          "1girl, fern (sousou no frieren), long straight purple hair, purple eyes, butterfly hair ornament, white dress, long black mage coat, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "rem_rezero", "Rem", "Re:Zero",
-          "1girl, rem (re:zero), short blue hair covering one eye, bright blue eyes, hair ribbon, classic black and white maid uniform, gentle smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "emilia_rezero", "Emilia", "Re:Zero",
-          "1girl, emilia (re:zero), long silver hair, purple eyes, half-elf ears, white hair flower, white and violet fantasy outfit, gentle smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "saber_artoria", "Saber (Artoria)", "Fate",
-          "1girl, artoria pendragon (fate), blonde hair in bun with ahoge, green eyes, blue dress with silver knight breastplate, noble expression, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "rin_tohsaka", "Rin Tohsaka", "Fate",
-          "1girl, tohsaka rin, long black twin tails with black ribbons, aqua eyes, red turtleneck sweater with white cross, black pleated skirt, confident smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "asuka_langley", "Asuka Langley", "Evangelion",
-          "1girl, souryuu asuka langley, long orange-red hair, blue eyes, red neural hair clips, school uniform shirt with ribbon, confident expression, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "rei_ayanami", "Rei Ayanami", "Evangelion",
-          "1girl, ayanami rei, short pale blue hair, red eyes, white collared shirt and blue school uniform, serene calm expression, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "violet_evergarden", "Violet Evergarden", "Violet Evergarden",
-          "1girl, violet evergarden, blonde braided hair with red ribbon, blue eyes, white dress, blue cropped jacket, emerald brooch, gentle expression, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "yor_forger", "Yor Forger", "Spy x Family",
-          "1girl, yor forger, long straight black hair, red eyes, gold hairband, cozy red knit sweater, warm gentle smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "anya_forger", "Anya Forger", "Spy x Family",
-          "1girl, anya forger, short pink hair, green eyes, black cone hair ornaments, black and gold Eden Academy school uniform, cheerful grin, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "makima_csm", "Makima", "Chainsaw Man",
-          "1girl, makima (chainsaw man), long braided coral-red hair, yellow ringed eyes, crisp white dress shirt, black necktie, tan trench coat, calm smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "power_csm", "Power", "Chainsaw Man",
-          "1girl, power (chainsaw man), long strawberry blonde hair, small red horns, cross-patterned eyes, white dress shirt, dark blue open jacket, energetic grin, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "megumin", "Megumin", "KonoSuba",
-          "1girl, megumin, short brown hair, bright red eyes, large pointed wizard hat, crimson mage dress and red cape, wooden staff, confident smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "aqua_konosuba", "Aqua", "KonoSuba",
-          "1girl, aqua (konosuba), long blue hair, blue eyes, loop hair ornament, blue and white fantasy adventurer outfit, cheerful expression, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "bocchi_hitori", "Hitori Gotoh (Bocchi)", "Bocchi the Rock",
-          "1girl, gotoh hitori, long pink hair, aqua eyes, blue and yellow cube hair ornament, pink tracksuit jacket, holding electric guitar, shy smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "nezuko", "Nezuko Kamado", "Demon Slayer",
-          "1girl, kamado nezuko, long wavy black hair with orange tips, bright pink eyes, pink hemp-leaf patterned kimono, dark brown haori coat, gentle eyes, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "zero_two", "Zero Two", "Darling in the Franxx",
-          "1girl, zero two (darling in the franxx), long pink hair, small red horns, white headband, green eyes, red military jacket with white trim, playful smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "mai_sakurajima", "Mai Sakurajima", "Bunny Girl Senpai",
-          "1girl, sakurajima mai, long straight dark hair, blue eyes, small bunny hairpin, school blazer over white shirt and ribbon, gentle smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "kurumi_tokisaki", "Kurumi Tokisaki", "Date A Live",
-          "1girl, tokisaki kurumi, black twin tails, heterochromia red and gold clock eye, gothic red and black frilled dress, elegant smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        // VTubers (Hololive)
-        { "usada_pekora", "Usada Pekora", "Hololive",
-          "1girl, usada pekora, light blue braided twin tails with carrot ornaments, white bunny ears, red eyes, blue and white bunny-ear jacket, cheerful smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "gawr_gura", "Gawr Gura", "Hololive",
-          "1girl, gawr gura, short silver-white hair with blue streaks, blue eyes, blue shark-themed hoodie jacket, cheerful bright smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "hoshimachi_suisei", "Hoshimachi Suisei", "Hololive",
-          "1girl, hoshimachi suisei, blue hair side ponytail, star hair ornament, blue eyes, starry blue beret, plaid idol jacket and bow, sparkling smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "houshou_marine", "Houshou Marine", "Hololive",
-          "1girl, houshou marine, long wavy crimson-red hair, heterochromia gold and red eyes, ornate pirate hat, red and white nautical jacket, cheerful wink, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        // Games (HoYoverse, NieR, FFVII, Nintendo)
-        { "raiden_shogun", "Raiden Shogun", "Genshin Impact",
-          "1girl, raiden shogun, long braided violet hair, purple eyes, floral hair ornament, ornate purple and gold kimono robe, serene regal expression, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "hu_tao", "Hu Tao", "Genshin Impact",
-          "1girl, hu tao (genshin impact), long dark brown twin tails, red flower-shaped pupils, black mandarin hat with plum blossom, dark brown coat, playful smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "furina", "Furina", "Genshin Impact",
-          "1girl, furina (genshin impact), short white hair with blue streaks, heterochromia blue eyes, miniature blue top hat, ornate royal blue and white vest, dramatic smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "ganyu", "Ganyu", "Genshin Impact",
-          "1girl, ganyu (genshin impact), long pale blue hair, red-black curved horns, violet eyes, white and blue fantasy outfit with gold bell, calm gentle smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "firefly_hsr", "Firefly", "Honkai: Star Rail",
-          "1girl, firefly (honkai: star rail), long silver hair with black headband, blue-pink eyes, cream blazer jacket, green pleated skirt, warm gentle smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "2b_nier", "2B", "NieR:Automata",
-          "1girl, 2b (nier:automata), short silver bob hair, black headband, ornate gothic black dress with white embroidery and feather collar, katana, cool composed look, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "tifa_ff7", "Tifa Lockhart", "Final Fantasy VII",
-          "1girl, tifa lockhart, long straight black hair, red eyes, white sporty top, black pleated skirt, suspenders, fingerless gloves, confident smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "aerith_ff7", "Aerith Gainsborough", "Final Fantasy VII",
-          "1girl, aerith gainsborough, long brown braided hair with pink ribbon, emerald green eyes, pink dress, red bolero jacket, warm kind smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "cloud_ff7", "Cloud Strife", "Final Fantasy VII",
-          "1boy, cloud strife, spiky blonde hair, bright blue mako eyes, dark navy sleeveless turtleneck, metal shoulder pauldron, buster sword on back, heroic expression, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "link_zelda", "Link (Champion)", "Zelda",
-          "1boy, link, blonde hair, blue eyes, pointed Hylian ears, blue Champion tunic with white embroidery, leather belt, Master Sword and shield, heroic anime style, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-        { "zelda_princess", "Princess Zelda", "Zelda",
-          "1girl, princess zelda, long golden blonde hair, green eyes, pointed Hylian ears, royal blue and gold fantasy tunic, serene gentle smile, fully clothed, sfw",
-          "bad eyes, deformed hands, nsfw" },
-    };
-    for (size_t i = 0; i < sizeof(DEFAULTS) / sizeof(DEFAULTS[0]); i++) {
-        char fp[320];
-        snprintf(fp, sizeof(fp), "%s/%s.cfg", g_chars_dir, DEFAULTS[i].id);
-        if (!path_exists_local(fp)) characters_save(&DEFAULTS[i], NULL, 0);
+    gd_init_preset_seeds();
+    for (size_t i = 0; i < sizeof(SEED_CHARS) / sizeof(SEED_CHARS[0]); i++) {
+        characters_save(&SEED_CHARS[i], NULL, 0);
     }
-    write_all_file(marker, "1\n", 2);
+    write_all_file(marker, "3\n", 2);
 }
 
 void characters_init(const char* chars_dir) {
@@ -875,7 +1531,7 @@ int model_preset_save(const char* models_root, const char* model_name,
     snprintf(ng, sizeof(ng), "%s", negative ? negative : ""); strip_newlines(ng);
     char buf[1600];
     int n = snprintf(buf, sizeof(buf),
-                     "arch=%s\nwidth=%u\nheight=%u\nsteps=%u\ncfg=%.2f\nsampler=%s\nupscale=%d\n"
+                     "custom=1\narch=%s\nwidth=%u\nheight=%u\nsteps=%u\ncfg=%.2f\nsampler=%s\nupscale=%d\n"
                      "description=%s\nprompt=%s\nnegative=%s\n",
                      is_sd15 ? "sd15" : "sdxl", width, height, steps, (double)cfg,
                      (sampler && sampler[0]) ? sampler : "Euler a", upscale, desc, pr, ng);

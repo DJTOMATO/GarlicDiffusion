@@ -95,9 +95,10 @@ int main(int argc, char** argv) {
     }
     gallery_delete(gid);
     gallery_delete("img_999999");
-    UserPreset up[PRESETS_MAX_ITEMS];
+    UserPreset* up = (UserPreset*)malloc(sizeof(UserPreset) * PRESETS_MAX_ITEMS);
     int np = presets_list(up, PRESETS_MAX_ITEMS);
-    if (np < 18) { fprintf(stderr, "FAIL: default presets seed (np=%d)\n", np); return 1; }
+    if (np < 70) { fprintf(stderr, "FAIL: default presets seed (np=%d)\n", np); return 1; }
+    free(up);
 
     styles_init("build/test_gal_styles");
     StyleItem st[STYLES_MAX_ITEMS];
@@ -105,15 +106,120 @@ int main(int argc, char** argv) {
     if (ns < 20) { fprintf(stderr, "FAIL: default styles seed (ns=%d)\n", ns); return 1; }
 
     characters_init("build/test_gal_chars");
-    CharacterItem ch[CHARS_MAX_ITEMS];
+    CharacterItem* ch = (CharacterItem*)malloc(sizeof(CharacterItem) * CHARS_MAX_ITEMS);
     int nc = characters_list(ch, CHARS_MAX_ITEMS);
-    if (nc < 35) { fprintf(stderr, "FAIL: default characters seed (nc=%d)\n", nc); return 1; }
+    free(ch);
+    if (nc < 240) { fprintf(stderr, "FAIL: default characters seed (nc=%d, expected >=240)\n", nc); return 1; }
     CharacterItem custom_c = { "test_custom_char", "Test Hero", "Custom", "1boy, test hero", "blurry" };
     if (characters_save(&custom_c, NULL, 0) != 0 || characters_delete("test_custom_char") != 0) {
         fprintf(stderr, "FAIL: characters_save/delete roundtrip\n");
         return 1;
     }
     printf("Seeded Presets (%d) + Styles (%d) + Characters (%d) PASS!\n", np, ns, nc);
+
+    // Verify 1024x1344 Illustrious preset auto-detection + Speed preset + Dupe cleaner + Wildcards + Folders + ZIP
+    {
+        ModelPreset mp, sp;
+        sdxl_load_preset("build/nonexistent_dir", "Hassaku_XL_v31_dmd2", 0, &mp);
+        if (mp.width != 1024 || mp.height != 1344 || mp.steps != 6 || fabsf(mp.cfg - 1.4f) > 0.05f || mp.sampler != 2) {
+            fprintf(stderr, "FAIL: sdxl_load_preset Illustrious 1024x1344 (got %ux%u %u steps cfg=%.2f smp=%d)\n",
+                    mp.width, mp.height, mp.steps, (double)mp.cfg, mp.sampler);
+            return 1;
+        }
+        sdxl_load_preset("build/nonexistent_dir", "Animagine_XL_4_dmd2", 0, &mp);
+        if (mp.width != 1024 || mp.height != 1344 || mp.steps != 5 || fabsf(mp.cfg - 1.1f) > 0.05f || mp.sampler != 2 || strncmp(mp.prompt, "1girl,", 6) != 0) {
+            fprintf(stderr, "FAIL: sdxl_load_preset Animagine_XL_4_dmd2 (got %ux%u %u steps cfg=%.2f smp=%d prompt='%s')\n",
+                    mp.width, mp.height, mp.steps, (double)mp.cfg, mp.sampler, mp.prompt);
+            return 1;
+        }
+        sdxl_load_preset("build/nonexistent_dir", "NoobAI_XL_1.1_dmd2", 0, &mp);
+        if (mp.width != 1024 || mp.height != 1344 || mp.steps != 6 || fabsf(mp.cfg - 1.2f) > 0.05f || mp.sampler != 2 || strstr(mp.prompt, "newest") == NULL) {
+            fprintf(stderr, "FAIL: sdxl_load_preset NoobAI_XL_1.1_dmd2 (got %ux%u %u steps cfg=%.2f smp=%d)\n",
+                    mp.width, mp.height, mp.steps, (double)mp.cfg, mp.sampler);
+            return 1;
+        }
+        sdxl_load_preset("build/nonexistent_dir", "Counterfeit_V25", 1, &mp);
+        if (mp.width != 512 || mp.height != 768 || mp.steps != 20 || mp.sampler != 3 || mp.upscale != 1) {
+            fprintf(stderr, "FAIL: sdxl_load_preset Counterfeit_V25\n");
+            return 1;
+        }
+        sdxl_load_speed_preset("WAI_Illustrious_v17_dmd2", 0, &sp);
+        if (sp.steps != 5 || sp.sampler != 2) {
+            fprintf(stderr, "FAIL: sdxl_load_speed_preset DMD2\n");
+            return 1;
+        }
+
+        // Verify prompt dupe cleaner
+        char dedup[512] = {0};
+        sdxl_clean_prompt_dupes("masterpiece, 1girl, Hatsune Miku, hatsune_miku, (blue eyes:1.2), blue eyes, <lora:miku:0.75>, <lora:miku:0.75>, solo",
+                                dedup, sizeof(dedup));
+        if (strstr(dedup, "(blue eyes:1.2)") == NULL || strstr(dedup, "hatsune_miku") != NULL) {
+            fprintf(stderr, "FAIL: sdxl_clean_prompt_dupes got '%s'\n", dedup);
+            return 1;
+        }
+
+        // Verify inline {a|b|c} + 500-word SFW & NSFW randomizer + SFW guard
+        char exp1[1024] = {0}, exp2[1024] = {0}, ng_sfw[512] = "blurry", ng_nsfw[512] = "blurry";
+        sdxl_expand_wildcards("1girl, {red dress|blue dress}, __scene__", 11111ull, 0, 1u | 2u, exp1, sizeof(exp1));
+        sdxl_expand_wildcards("1girl, adult woman, __ecchi__", 22222ull, 1, 128u | 256u, exp2, sizeof(exp2));
+        if (strchr(exp1, '{') != NULL || strstr(exp1, "__scene__") != NULL || strlen(exp2) < 25) {
+            fprintf(stderr, "FAIL: sdxl_expand_wildcards exp1='%s' exp2='%s'\n", exp1, exp2);
+            return 1;
+        }
+        sdxl_apply_quality_shield("WAI_Illustrious_v17_dmd2", 0, 1, 0, exp1, sizeof(exp1), ng_sfw, sizeof(ng_sfw));
+        sdxl_apply_quality_shield("WAI_Illustrious_v17_dmd2", 0, 1, 1, exp2, sizeof(exp2), ng_nsfw, sizeof(ng_nsfw));
+        if (strstr(ng_sfw, "nsfw") == NULL || strstr(ng_nsfw, "nsfw") != NULL || strstr(exp1, "masterpiece") == NULL) {
+            fprintf(stderr, "FAIL: sdxl_apply_quality_shield sfw='%s' nsfw='%s'\n", ng_sfw, ng_nsfw);
+            return 1;
+        }
+        // Verify Animagine XL 4.0 appends quality tags at the END (character/framing first)
+        char anim_p[512] = "1girl, hatsune miku, full body", anim_n[512] = "blurry";
+        sdxl_apply_quality_shield("Animagine_XL_4_dmd2", 0, 1, 0, anim_p, sizeof(anim_p), anim_n, sizeof(anim_n));
+        if (strncmp(anim_p, "1girl, hatsune miku", 19) != 0 || strstr(anim_p, "high score") == NULL) {
+            fprintf(stderr, "FAIL: sdxl_apply_quality_shield Animagine tag order got '%s'\n", anim_p);
+            return 1;
+        }
+
+        // Verify Gallery Folders, Starred Favorites, and Stored-PKZIP archive builder
+        gallery_init("build/test_gal_folders", "build/test_gal_presets");
+        char cf[64] = {0}, id1[64] = {0}, id2[64] = {0};
+        if (gallery_create_folder("Miku Batch 01!", cf, sizeof(cf)) != 0 || strcmp(cf, "Miku Batch 01") != 0) {
+            fprintf(stderr, "FAIL: gallery_create_folder got '%s'\n", cf);
+            return 1;
+        }
+        GalleryItem fm = {0};
+        snprintf(fm.model, sizeof(fm.model), "WAI_v17");
+        snprintf(fm.prompt, sizeof(fm.prompt), "1girl, hatsune miku");
+        snprintf(fm.folder, sizeof(fm.folder), "%s", cf);
+        fm.width = 64; fm.height = 64; fm.steps = 6; fm.cfg = 1.4f; fm.seed = 777;
+        gallery_save(png, png_sz, &fm, id1, sizeof(id1));
+        fm.folder[0] = 0; fm.seed = 888;
+        gallery_save(png, png_sz, &fm, id2, sizeof(id2));
+        gallery_set_starred(id2, 1);
+
+        GalleryFolder fls[8];
+        int uns = 0, star = 0, all = 0;
+        int nfl = gallery_list_folders(fls, 8, &uns, &star, &all);
+        if (nfl < 1 || star < 1 || all < 2) {
+            fprintf(stderr, "FAIL: gallery_list_folders nfl=%d star=%d all=%d\n", nfl, star, all);
+            return 1;
+        }
+        char mv_ids[1][64];
+        snprintf(mv_ids[0], 64, "%s", id2);
+        if (gallery_set_folder_batch(mv_ids, 1, cf) != 1) {
+            fprintf(stderr, "FAIL: gallery_set_folder_batch\n");
+            return 1;
+        }
+        size_t zsz = 0;
+        uint8_t* zbuf = gallery_build_zip(NULL, 0, cf, &zsz);
+        if (!zbuf || zsz <= png_sz * 2 || memcmp(zbuf, "PK\x03\x04", 4) != 0) {
+            fprintf(stderr, "FAIL: gallery_build_zip zsz=%zu\n", zsz);
+            return 1;
+        }
+        free(zbuf);
+        gallery_delete_folder(cf, 1);
+        printf("v1.14 Presets + Dupe Cleaner + 500-Word Wildcards + Shield + Folders + PKZIP PASS!\n");
+    }
     model_dl_init("diffusion/models", "build/test_repo.cfg");
     model_dl_set_repo("https://huggingface.co/testuser/garlic-diffusion-models/");
     char rchk[128] = {0};
@@ -122,9 +228,91 @@ int main(int argc, char** argv) {
         fprintf(stderr, "FAIL: model_dl_set_repo normalize (got '%s')\n", rchk);
         return 1;
     }
-    if (model_dl_refresh_catalog() != 1) {
-        fprintf(stderr, "FAIL: model_dl manifest parse\n");
+    if (model_dl_refresh_catalog() != 1 || lora_refresh_catalog() != 1) {
+        fprintf(stderr, "FAIL: model_dl / lora_dl manifest parse\n");
         return 1;
+    }
+    if (!app_version_is_newer("1.15", "1.16") || !app_version_is_newer("01.14", "1.15") ||
+        app_version_is_newer("1.15", "1.15") || app_version_is_newer("1.15", "1.14") ||
+        !app_version_is_newer("1.15", "v2.0.0")) {
+        fprintf(stderr, "FAIL: app_version_is_newer\n");
+        return 1;
+    }
+    if (app_update_check_now() != 0) {
+        fprintf(stderr, "FAIL: app_update_check_now host stub\n");
+        return 1;
+    }
+    {
+        AppUpdateStatus us;
+        app_update_get_status(&us);
+        if (!us.checked || !us.update_available || strcmp(us.current_ver, GD_APP_VERSION) != 0) {
+            fprintf(stderr, "FAIL: app_update_get_status (checked=%d avail=%d cur=%s rem=%s)\n",
+                    us.checked, us.update_available, us.current_ver, us.remote_ver);
+            return 1;
+        }
+        printf("v1.15 Obfuscated Seeds/Pools + OTA Version Checker (%s -> %s) PASS!\n", us.current_ver, us.remote_ver);
+    }
+
+    // Verify >128 gallery items sort newest-first without truncation + thumbnail generation!
+    {
+        gallery_init("build/test_gal_big", "build/test_gal_presets");
+        char last_saved[64] = {0};
+        for (int i = 0; i < 150; i++) {
+            GalleryItem bm = {0};
+            snprintf(bm.model, sizeof(bm.model), "TestModel");
+            snprintf(bm.prompt, sizeof(bm.prompt), "item_%d", i);
+            snprintf(bm.sampler, sizeof(bm.sampler), "LCM");
+            bm.width = 64; bm.height = 64; bm.steps = 6; bm.cfg = 1.4f; bm.seed = (uint64_t)(1000 + i);
+            if (gallery_save_ex(png, png_sz, (i == 149) ? rgb : NULL, 64, 64, &bm, last_saved, sizeof(last_saved)) != 0) {
+                fprintf(stderr, "FAIL: gallery_save_ex %d\n", i);
+                return 1;
+            }
+        }
+        GalleryItem* big = (GalleryItem*)malloc(sizeof(GalleryItem) * GALLERY_MAX_ITEMS);
+        int nbig = gallery_list(big, GALLERY_MAX_ITEMS);
+        if (nbig < 150 || strcmp(big[0].id, last_saved) != 0) {
+            fprintf(stderr, "FAIL: >128 gallery_list (nbig=%d, first=%s, expected=%s)\n",
+                    nbig, nbig > 0 ? big[0].id : "", last_saved);
+            return 1;
+        }
+        // Verify server-side gallery_list_page pagination + search query!
+        GalleryItem pg[24];
+        int pg_tot = 0;
+        int np1 = gallery_list_page(pg, 0, 24, NULL, &pg_tot);
+        int np2 = gallery_list_page(pg, 24, 24, NULL, &pg_tot);
+        if (np1 != 24 || np2 != 24 || pg_tot != nbig || strcmp(pg[0].id, big[24].id) != 0) {
+            fprintf(stderr, "FAIL: gallery_list_page pagination (np1=%d np2=%d tot=%d)\n", np1, np2, pg_tot);
+            return 1;
+        }
+        int q_tot = 0;
+        int nq = gallery_list_page(pg, 0, 24, "item_149", &q_tot);
+        if (nq != 1 || q_tot != 1 || strcmp(pg[0].id, last_saved) != 0) {
+            fprintf(stderr, "FAIL: gallery_list_page search query (nq=%d q_tot=%d)\n", nq, q_tot);
+            return 1;
+        }
+        size_t tsz = 0;
+        uint8_t* thumb = gallery_load_thumb_png(last_saved, &tsz);
+        uint32_t tw = 0, th = 0;
+        if (!thumb || png_probe_dims(thumb, tsz, &tw, &th) != 0 || tw != 64 || th != 64) {
+            fprintf(stderr, "FAIL: gallery_load_thumb_png\n");
+            return 1;
+        }
+        free(thumb);
+        for (int i = 0; i < nbig; i++) gallery_delete(big[i].id);
+        free(big);
+        printf(">128 Gallery sort-first (%d items) + Thumbnail cache PASS!\n", nbig);
+    }
+
+    // Verify <lora:name:weight> prompt extraction & stripping
+    {
+        char cpr[256] = {0}, lspec[256] = {0};
+        sdxl_extract_loras("1girl, <lora:hifumi-newgame-01:0.85>, smile, <lora:add_detail:0.5>",
+                           "takimoto_hifumi", 0.70f, cpr, sizeof(cpr), lspec, sizeof(lspec));
+        if (strstr(cpr, "<lora:") != NULL || strcmp(lspec, "takimoto_hifumi:0.70,hifumi-newgame-01:0.85,add_detail:0.50") != 0) {
+            fprintf(stderr, "FAIL: sdxl_extract_loras cpr='%s' spec='%s'\n", cpr, lspec);
+            return 1;
+        }
+        printf("LoRA prompt tag extraction & stacking ('%s') PASS!\n", lspec);
     }
     // Regression test: sdxl_init with NULL model_dir (GPU-only startup phase before model fallback)
     {
@@ -162,6 +350,38 @@ int main(int argc, char** argv) {
             return 1;
         }
         printf("PSD1 completeness validator PASS (truncated=-3, upscaler=0)!\n");
+    }
+    // Verify each individual Batch Word Randomizer bitflag produces distinct category tags!
+    {
+        char r_pose[512], r_expr[512], r_scene[512], r_light[512], r_outf[512], r_det[512], r_cam[512], r_combo[512];
+        sdxl_expand_wildcards("1girl", 12345ull, 0, 1u << 0, r_pose, sizeof(r_pose));
+        sdxl_expand_wildcards("1girl", 12345ull, 0, 1u << 1, r_expr, sizeof(r_expr));
+        sdxl_expand_wildcards("1girl", 12345ull, 0, 1u << 2, r_scene, sizeof(r_scene));
+        sdxl_expand_wildcards("1girl", 12345ull, 0, 1u << 3, r_light, sizeof(r_light));
+        sdxl_expand_wildcards("1girl", 12345ull, 0, 1u << 4, r_outf, sizeof(r_outf));
+        sdxl_expand_wildcards("1girl", 12345ull, 0, 1u << 5, r_det, sizeof(r_det));
+        sdxl_expand_wildcards("1girl", 12345ull, 0, 1u << 6, r_cam, sizeof(r_cam));
+        sdxl_expand_wildcards("1girl", 12345ull, 1, (1u << 6) | (1u << 7), r_combo, sizeof(r_combo));
+        const char* outs[7] = {r_pose, r_expr, r_scene, r_light, r_outf, r_det, r_cam};
+        for (int i = 0; i < 7; i++) {
+            if (strlen(outs[i]) <= 6) {
+                fprintf(stderr, "FAIL: randomizer flag %d produced empty expansion: %s\n", i, outs[i]);
+                return 1;
+            }
+            for (int j = i + 1; j < 7; j++) {
+                if (strcmp(outs[i], outs[j]) == 0) {
+                    fprintf(stderr, "FAIL: randomizer flags %d and %d produced identical output: %s\n", i, j, outs[i]);
+                    return 1;
+                }
+            }
+        }
+        // Verify RAND_ECCHI no longer masks out RAND_CAMERA when both are checked!
+        const char* cam_part = r_cam + 7; // skip "1girl, "
+        if (!strstr(r_combo, cam_part)) {
+            fprintf(stderr, "FAIL: RAND_ECCHI masked out RAND_CAMERA (%s not in %s)\n", cam_part, r_combo);
+            return 1;
+        }
+        printf("Per-category independent Batch Word Randomizer PASS (pose='%s' | scene='%s')!\n", r_pose, r_scene);
     }
     printf("Gallery + PNG decode + rgb_resize + %d seeded presets PASS!\n", np);
 

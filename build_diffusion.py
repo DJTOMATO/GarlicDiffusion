@@ -47,12 +47,13 @@ CFLAGS = [
 ENV = dict(os.environ, DOTNET_ROLL_FORWARD="Major", OO_PS4_TOOLCHAIN=str(OO),
            DOTNET_SYSTEM_GLOBALIZATION_INVARIANT="1")
 
-TITLE, VERSION, TITLE_ID = "GarlicDiffusion", "1.10", "PSAI00003"
+TITLE, VERSION, TITLE_ID = "GarlicDiffusion", "01.16", "PSAI00003"
 CONTENT_ID = f"IV0000-{TITLE_ID}_00-PS4LOCALAIDIFF03"
 REMOTE = "/data/pkg/Garlic-Diffusion.pkg"
 
 SOURCES = [
     DIFF / "src" / "clip_tok.c",
+    DIFF / "src" / "face_detect.c",
     DIFF / "src" / "gallery.c",
     DIFF / "src" / "model_dl.c",
     DIFF / "src" / "sdxl.c",
@@ -62,7 +63,7 @@ SOURCES = [
 LIBS = [
     "-lc", "-lm", "-lkernel", "-lSceGnmDriver", "-lSceVideoOut", "-lScePad",
     "-lSceUserService", "-lSceSysmodule", "-lSceImeDialog", "-lSceCommonDialog",
-    "-lSceSystemService", "-lSceNet", "-lSceSsl", "-lSceHttp",
+    "-lSceSystemService", "-lSceAppInstUtil", "-lSceNet", "-lSceSsl", "-lSceHttp",
 ]
 
 
@@ -213,7 +214,7 @@ def main():
     sfo = "sce_sys/param.sfo"
     pkgtool("sfo_new", sfo)
     for key, typ, size, value in [
-        ("APP_TYPE", "Integer", 4, "1"),
+        ("APP_TYPE", "Integer", 4, "1"),  # Paid Standalone Full App (prevents CE-39929-2 Freemium SKU error)
         ("APP_VER", "Utf8", 8, VERSION),
         ("ATTRIBUTE", "Integer", 4, "8388608"),  # PS4 Base + PS4 Pro Neo mode enabled!
         ("CATEGORY", "Utf8", 4, "gd"),
