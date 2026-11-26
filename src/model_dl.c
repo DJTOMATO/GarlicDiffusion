@@ -90,6 +90,12 @@ static void ensure_dir_dl(const char* path) {
 
 static void seed_builtin_catalog(void) {
     static const CatalogModel BUILTIN[] = {
+        { "vae_enc_sdxl", "VAE Encoder Add-on (SDXL Fix Face / img2img)", "sdxl", 130,
+          "Recommended add-on · Enables full AI img2img Face Fix for all SDXL / Illustrious models",
+          "vae_enc_sdxl.psd1", "" },
+        { "vae_enc_sd15", "VAE Encoder Add-on (SD 1.5 Fix Face / img2img)", "sd15", 130,
+          "Recommended add-on · Enables full AI img2img Face Fix for all SD 1.5 models",
+          "vae_enc_sd15.psd1", "" },
         { "WAI_Illustrious_v17_dmd2", "WAI-Illustrious v17 DMD2 (Fast SDXL)", "sdxl", 3716,
           "Latest WAI v17 anime · 6 steps CFG 1.4 LCM (~50s Pro) · Standalone SDXL",
           "unet.psd1,clip_l.psd1,clip_g.psd1,vae.psd1,preset.cfg", "" },
@@ -1357,8 +1363,118 @@ int lora_dl_queue_all(const char* arch_filter) {
     return queued;
 }
 
+int vae_enc_is_installed(int is_sd15) {
+    const char* fn = is_sd15 ? "vae_enc_sd15.psd1" : "vae_enc_sdxl.psd1";
+    char p1[320], p2[320];
+    snprintf(p1, sizeof(p1), "/data/garlic-diffusion/%s", fn);
+    snprintf(p2, sizeof(p2), "%s/%s", g_models_root, fn);
+    return (sdxl_check_pack(p1, NULL, NULL) == 0 || sdxl_check_pack(p2, NULL, NULL) == 0) ? 1 : 0;
+}
+
+typedef struct {
+    int is_sd15;
+    char filename[48];
+    char url[384];
+} VaeEncDlTask;
+
+static void* vae_enc_dl_thread_fn(void* arg) {
+    VaeEncDlTask* t = (VaeEncDlTask*)arg;
+    ensure_dir_dl("/data/garlic-diffusion");
+    char dst[320], err[256] = {0};
+    snprintf(dst, sizeof(dst), "/data/garlic-diffusion/%s", t->filename);
+
+    dl_lock();
+    g_dl.file_idx = 1;
+    g_dl.file_total = 1;
+    snprintf(g_dl.cur_file, sizeof(g_dl.cur_file), "%s", t->filename);
+    snprintf(g_dl.stage, sizeof(g_dl.stage), "Downloading %s (Fix Face / img2img)...", t->filename);
+    dl_unlock();
+
+    int rc = http_fetch_url(t->url, dst, NULL, 0, 1, err, sizeof(err));
+
+    dl_lock();
+    g_dl.active = 0;
+    if (rc == 0) {
+        g_dl.finished++;
+        g_dl.error[0] = 0;
+        snprintf(g_dl.stage, sizeof(g_dl.stage), "Installed %s! Full AI Fix Face is now active.", t->filename);
+        glog("vae_enc_dl: completed %s -> %s", t->filename, dst);
+    } else if (rc == 1) {
+        snprintf(g_dl.error, sizeof(g_dl.error), "Download cancelled");
+        snprintf(g_dl.stage, sizeof(g_dl.stage), "Download stopped");
+    } else {
+        snprintf(g_dl.error, sizeof(g_dl.error), "%s", err[0] ? err : "VAE encoder download failed");
+        snprintf(g_dl.stage, sizeof(g_dl.stage), "Download stopped");
+        glog("vae_enc_dl: failed %s: %s", t->filename, g_dl.error);
+    }
+    dl_unlock();
+    free(t);
+    return NULL;
+}
+
+int vae_enc_dl_start(int is_sd15) {
+    dl_lock();
+    if (g_dl.active) { dl_unlock(); return -2; }
+    VaeEncDlTask* t = (VaeEncDlTask*)calloc(1, sizeof(VaeEncDlTask));
+    if (!t) { dl_unlock(); return -1; }
+    t->is_sd15 = is_sd15;
+    snprintf(t->filename, sizeof(t->filename), "%s", is_sd15 ? "vae_enc_sd15.psd1" : "vae_enc_sdxl.psd1");
+    const char* repo = g_hf_repo[0] ? g_hf_repo : "DJTomato/ps4-diffusion-models";
+    snprintf(t->url, sizeof(t->url), "https://huggingface.co/%s/resolve/main/%s", repo, t->filename);
+
+    g_dl.active = 1;
+    g_lora_dl_is_lora = 0;
+    g_dl.cancel_req = 0;
+    g_dl.error[0] = 0;
+    g_dl.bytes_done = 0;
+    g_dl.bytes_total = 0;
+    g_dl.speed_mbs = 0.0;
+    g_dl.file_idx = 1;
+    g_dl.file_total = 1;
+    g_dl.queue_len = 0;
+    snprintf(g_dl.model_id, sizeof(g_dl.model_id), "%s", is_sd15 ? "vae_enc_sd15" : "vae_enc_sdxl");
+    snprintf(g_dl.repo, sizeof(g_dl.repo), "%s", repo);
+    snprintf(g_dl.cur_file, sizeof(g_dl.cur_file), "%s", t->filename);
+    snprintf(g_dl.stage, sizeof(g_dl.stage), "Connecting to download %s...", t->filename);
+    dl_unlock();
+
+    OrbisPthread th;
+    OrbisPthreadAttr attr;
+    scePthreadAttrInit(&attr);
+    scePthreadAttrSetstacksize(&attr, 256 * 1024);
+    scePthreadAttrSetdetachstate(&attr, 1);
+    if (scePthreadCreate(&th, &attr, vae_enc_dl_thread_fn, t, "gdiff_vdl") != 0) {
+        scePthreadAttrDestroy(&attr);
+        free(t);
+        dl_lock(); g_dl.active = 0; snprintf(g_dl.error, sizeof(g_dl.error), "failed to start VAE encoder download"); dl_unlock();
+        return -1;
+    }
+    scePthreadAttrDestroy(&attr);
+    return 0;
+}
+
+int vae_enc_ensure_sync(int is_sd15) {
+    if (vae_enc_is_installed(is_sd15)) return 0;
+    ensure_dir_dl("/data/garlic-diffusion");
+    const char* fn = is_sd15 ? "vae_enc_sd15.psd1" : "vae_enc_sdxl.psd1";
+    const char* repo = g_hf_repo[0] ? g_hf_repo : "DJTomato/ps4-diffusion-models";
+    char url[384], dst[320], err[256] = {0};
+    snprintf(url, sizeof(url), "https://huggingface.co/%s/resolve/main/%s", repo, fn);
+    snprintf(dst, sizeof(dst), "/data/garlic-diffusion/%s", fn);
+    int rc = http_fetch_url(url, dst, NULL, 0, 0, err, sizeof(err));
+    if (rc == 0 && sdxl_check_pack(dst, NULL, NULL) == 0) {
+        glog("vae_enc_ensure_sync: auto-downloaded %s", dst);
+        return 0;
+    }
+    unlink(dst);
+    glog("vae_enc_ensure_sync: %s unavailable (%s), falling back to Real-ESRGAN face restore", fn, err);
+    return -1;
+}
+
 int model_dl_start(const char* model_id, const char* repo_override, const char* files_override) {
     if (!gallery_valid_id(model_id)) return -1;
+    if (strcmp(model_id, "vae_enc_sdxl") == 0) return vae_enc_dl_start(0);
+    if (strcmp(model_id, "vae_enc_sd15") == 0) return vae_enc_dl_start(1);
     dl_lock();
     if (g_dl.active) { dl_unlock(); return -2; }
 
@@ -1429,6 +1545,18 @@ int lora_dl_queue_all(const char* arch_filter) {
 int lora_dl_is_queued(const char* id_or_filename) {
     (void)id_or_filename;
     return 0;
+}
+int vae_enc_is_installed(int is_sd15) {
+    (void)is_sd15;
+    return 0;
+}
+int vae_enc_dl_start(int is_sd15) {
+    (void)is_sd15;
+    return -1;
+}
+int vae_enc_ensure_sync(int is_sd15) {
+    (void)is_sd15;
+    return -1;
 }
 int lora_refresh_catalog(void) {
     return apply_lora_manifest_json("[{\"id\":\"test_lora\",\"title\":\"Test LoRA\",\"arch\":\"sd15\",\"size_mb\":18,\"default_weight\":0.8,\"desc\":\"ok\",\"filename\":\"test_lora.safetensors\",\"url\":\"https://example.com/test_lora.safetensors\"}]");

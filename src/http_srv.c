@@ -1184,7 +1184,8 @@ static void handle_client(int fd) {
 
             size_t pos = 0;
             pos += (size_t)snprintf(out + pos, 32768 - pos,
-                                    "{\"repo\":\"%s\",\"active_model\":\"%s\",\"installed\":[", repo_e, act_e);
+                                    "{\"repo\":\"%s\",\"active_model\":\"%s\",\"has_vae_enc_sdxl\":%s,\"has_vae_enc_sd15\":%s,\"installed\":[",
+                                    repo_e, act_e, vae_enc_is_installed(0) ? "true" : "false", vae_enc_is_installed(1) ? "true" : "false");
             for (int i = 0; i < ni && pos + 320 < 32768; i++) {
                 char ne[128], de[192];
                 json_escape(inst[i].name, ne, sizeof(ne));

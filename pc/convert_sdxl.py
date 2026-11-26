@@ -224,6 +224,7 @@ def main():
     ap.add_argument("--fp16-variant", action="store_true", help="Download .fp16.safetensors variants on HF")
     ap.add_argument("--no-vae", action="store_true", help="Skip vae.psd1 (shares VAE from sibling model of same arch)")
     ap.add_argument("--with-vae-encoder", action="store_true", help="Also export optional vae_enc.psd1 (for Gallery Fix Face / img2img)")
+    ap.add_argument("--vae-enc-only", action="store_true", help="Only export universal vae_enc_sdxl.psd1 or vae_enc_sd15.psd1")
     ap.add_argument("--keep-cache", action="store_true")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--unet-only", action="store_true", help="Only build unet.psd1 (shares CLIP/VAE on PS4)")
@@ -267,7 +268,11 @@ def main():
         jobs.append(("clip_g.psd1", f"text_encoder_2/model{sfx}",
                      lambda k: k != "text_model.embeddings.position_ids", "q8"))
     jobs.append(("unet.psd1", f"unet/diffusion_pytorch_model{sfx}", lambda k: True, "q8"))
-    if args.unet_only:
+    if args.vae_enc_only:
+        enc_name = "vae_enc_sd15.psd1" if args.arch == "sd15" else "vae_enc_sdxl.psd1"
+        jobs = [(enc_name, f"vae/diffusion_pytorch_model{sfx}",
+                 lambda k: k.startswith("encoder.") or k.startswith("quant_conv."), "f32")]
+    elif args.unet_only:
         jobs = [j for j in jobs if j[0] == "unet.psd1"]
 
     for fname, remote_path, filt, qmode in jobs:

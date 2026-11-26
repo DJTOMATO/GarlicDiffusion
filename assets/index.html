@@ -446,7 +446,7 @@ textarea{min-height:68px;resize:vertical}
         <label for="rnd-cb-32"><input id="rnd-cb-32" type="checkbox" class="rnd-cb" data-rname="Details" value="32" onchange="onRandOptionChange(this)">Details</label>
         <label for="rnd-cb-64"><input id="rnd-cb-64" type="checkbox" class="rnd-cb" data-rname="Camera" value="64" onchange="onRandOptionChange(this)">Camera</label>
         <label for="rnd-cb-128" id="rnd-ecchi-lbl" style="display:none;color:#f9a8d4"><input id="rnd-cb-128" type="checkbox" class="rnd-cb" data-rname="Ecchi 500" value="128" onchange="onRandOptionChange(this)">🌶️ Ecchi 500</label>
-        <label for="rnd-cb-256" id="rnd-exp-lbl" style="display:none;color:#fda4af"><input id="rnd-cb-256" type="checkbox" class="rnd-cb" data-rname="Cog Test" value="256" onchange="onRandOptionChange(this)">🔥 Cog Test</label>
+        <label for="rnd-cb-256" id="rnd-exp-lbl" style="display:none;color:#fda4af"><input id="rnd-cb-256" type="checkbox" class="rnd-cb" data-rname="Explicit" value="256" onchange="onRandOptionChange(this)">🔥 Explicit</label>
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;align-items:center">
         <span style="font-size:10px;color:var(--muted)">Insert wildcard:</span>
@@ -458,7 +458,7 @@ textarea{min-height:68px;resize:vertical}
         <button type="button" class="chip" style="cursor:pointer" onclick="insertWildcardToken('__detail__')">+detail</button>
         <button type="button" class="chip" style="cursor:pointer" onclick="insertWildcardToken('__camera__')">+camera</button>
         <button type="button" id="wc-ecchi-btn" class="chip nsfw" style="cursor:pointer;display:none" onclick="insertWildcardToken('__ecchi__')">+ecchi</button>
-        <button type="button" id="wc-exp-btn" class="chip nsfw" style="cursor:pointer;display:none" onclick="insertWildcardToken('__explicit__')">+cog</button>
+        <button type="button" id="wc-exp-btn" class="chip nsfw" style="cursor:pointer;display:none" onclick="insertWildcardToken('__explicit__')">+explicit</button>
       </div>
     </div>
 
@@ -793,7 +793,7 @@ textarea{min-height:68px;resize:vertical}
     <div class="pbox" style="border-color:rgba(148,163,184,.25)">
       <h2 style="color:var(--muted)">Content Filter &amp; Research Presets</h2>
       <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
-        <b>SFW Mode</b> is active by default (injects SFW negative guard and hides adult presets). Toggle below only if you want unrestricted prompts and adult/Discord-cog test presets:
+        <b>SFW Mode</b> is active by default (injects SFW negative guard and hides adult presets). Toggle below only if you want unrestricted prompts and adult/explicit test presets:
       </div>
       <button class="tab sfw-btn" id="nsfw-btn" onclick="toggleNsfwMode()">🔒 SFW Mode (Default)</button>
     </div>
@@ -1504,7 +1504,7 @@ async function toggleNsfwMode(){
   nsfwAllow=!nsfwAllow;
   applyNsfwUI();
   await pushSettings();
-  toast(nsfwAllow?'🔓 NSFW Allowed: SFW guard removed + Ecchi/Cog-Test presets & 500-word pool unlocked':'🔒 SFW Mode active: SFW negative guard enabled & adult presets hidden');
+  toast(nsfwAllow?'🔓 NSFW Allowed: SFW guard removed + Ecchi/Explicit presets & 500-word pool unlocked':'🔒 SFW Mode active: SFW negative guard enabled & adult presets hidden');
 }
 function getRandMask(){
   let m=0;
@@ -2812,7 +2812,7 @@ function renderPresetSelect(){
     grp('⚡ Adaptive Speed Presets',spd)+
     grp('💎 LoRA-Boosted Showcase',loraList)+
     grp('🌸 Scene & Character Presets',stdList)+
-    grp('🌶️ Ecchi / Gravure & Explicit Cog-Test',nsfwList);
+    grp('🌶️ Ecchi / Gravure & Explicit',nsfwList);
   if(prev!==''&&[...psel.options].some(o=>o.value===prev))psel.value=prev;
 }
 async function loadPresets(){
@@ -3050,18 +3050,23 @@ async function loadModelsMgr(){
     }).join('')||'<div style="color:var(--muted)">No models installed yet — download one below!</div>';
 
     document.getElementById('mcat').innerHTML=(d.catalog||[]).map(c=>{
+      const isVaeEnc=(c.id==='vae_enc_sdxl'||c.id==='vae_enc_sd15');
+      const vaeOk=(c.id==='vae_enc_sdxl'&&d.has_vae_enc_sdxl)||(c.id==='vae_enc_sd15'&&d.has_vae_enc_sd15);
       const ex=instMap.get(c.id);
-      const isOk=ex&&ex.complete;
-      return `<div class="pcard">
+      const isOk=isVaeEnc?vaeOk:(ex&&ex.complete);
+      return `<div class="pcard" style="${isVaeEnc?'border-color:var(--accent2)':''}">
         <h3>${c.title.replace(/</g,'&lt;')}</h3>
         <div class="chips">
           <span class="chip">${c.arch.toUpperCase()}</span>
           <span class="chip">~${c.size_mb} MiB</span>
+          ${isVaeEnc?'<span class="chip hd">★ Recommended Add-on</span>':''}
           ${isOk?'<span class="chip hd">Installed</span>':(ex?'<span class="chip" style="color:#ff7a85">Incomplete</span>':'')}
         </div>
         <p>${(c.desc||'').replace(/</g,'&lt;')}</p>
         <div class="macts">
-          ${isOk?`<button class="btn sec sm" onclick="loadInstalledModel('${c.id}')">Load Model</button>`:`<button class="btn ok sm" ${d.download&&d.download.active?'disabled':''} onclick="downloadCatalogModel('${c.id}')">${ex?'Resume / Repair':'Download to PS4'}</button>`}
+          ${isVaeEnc
+            ? (isOk ? `<button class="btn sec sm" disabled>Ready for Fix Face</button>` : `<button class="btn ok sm" ${d.download&&d.download.active?'disabled':''} onclick="downloadCatalogModel('${c.id}')">Download Add-on</button>`)
+            : (isOk ? `<button class="btn sec sm" onclick="loadInstalledModel('${c.id}')">Load Model</button>` : `<button class="btn ok sm" ${d.download&&d.download.active?'disabled':''} onclick="downloadCatalogModel('${c.id}')">${ex?'Resume / Repair':'Download to PS4'}</button>`)}
         </div></div>`;
     }).join('')||'<div style="color:var(--muted)">No catalog entries.</div>';
 

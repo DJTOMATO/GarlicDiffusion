@@ -302,22 +302,30 @@ static void format_a1111_params(char* out, size_t max, const char* prompt, const
 
 static int is_starter_model_id(const char* id, int neo, const char** badge_out) {
     if (!id) return 0;
+    if (strcmp(id, "vae_enc_sdxl") == 0) {
+        if (badge_out) *badge_out = vae_enc_is_installed(0) ? "[INSTALLED] ADD-ON · " : "RECOMMENDED ADD-ON · ";
+        return 1;
+    }
+    if (strcmp(id, "vae_enc_sd15") == 0) {
+        if (badge_out) *badge_out = vae_enc_is_installed(1) ? "[INSTALLED] ADD-ON · " : "RECOMMENDED ADD-ON · ";
+        return 1;
+    }
     if (neo) {
         if (strcmp(id, "WAI_Illustrious_v17_dmd2") == 0) {
-            if (badge_out) *badge_out = "★ #1 STARTER FOR PS4 PRO · ";
+            if (badge_out) *badge_out = "#1 STARTER FOR PS4 PRO · ";
             return 2;
         }
         if (strcmp(id, "Hassaku_XL_v31_dmd2") == 0 || strcmp(id, "MeinaMix_V11_8step") == 0) {
-            if (badge_out) *badge_out = "★ RECOMMENDED STARTER · ";
+            if (badge_out) *badge_out = "RECOMMENDED STARTER · ";
             return 1;
         }
     } else {
         if (strcmp(id, "MeinaMix_V11_8step") == 0) {
-            if (badge_out) *badge_out = "★ #1 STARTER FOR BASE PS4 · ";
+            if (badge_out) *badge_out = "#1 STARTER FOR BASE PS4 · ";
             return 2;
         }
         if (strcmp(id, "Counterfeit_V25") == 0 || strcmp(id, "GhostMix_V2") == 0) {
-            if (badge_out) *badge_out = "★ RECOMMENDED STARTER · ";
+            if (badge_out) *badge_out = "RECOMMENDED STARTER · ";
             return 1;
         }
     }
@@ -701,7 +709,7 @@ static void sm_dd_item_label(void* ctx, int row, int i, char* out, size_t cap) {
             "Details (60 micro-details)",
             "Camera Framing (35 angles)",
             "Ecchi 500 Pool (Gravure / Alluring)",
-            "Explicit Cog-Test Pool"
+            "Explicit Pool"
         };
         if (i == 0) {
             snprintf(out, cap, "Randomizer Variety Mix: %s   (press X to toggle / clear)", rmask ? "ACTIVE (Clear All)" : "OFF (Enable Mix)");
@@ -1274,12 +1282,12 @@ static void draw_ui(void) {
         // Artwork Quick-Actions Modal on (X) — makes Add to Folder & every action 100% obvious!
         if (g_gal_amodal) {
             g_fill(back, 0, 0, SCREEN_W, SCREEN_H, 0x020611, 185);
-            int mw = 740, mh = 90 + 6 * 54 + 16;
+            int mw = 740, mh = 90 + 7 * 54 + 16;
             int mx = (SCREEN_W - mw) / 2, my = (SCREEN_H - mh) / 2 - 12;
             g_rrect(back, mx, my, mw, mh, 22, C_PANEL, 252);
             g_rrect_line(back, mx, my, mw, mh, 22, 2, C_ACCENT_HI, 255);
             g_draw_str(back, &g_fbold, mx + 30, my + 22, "Artwork Actions", 0xFFFFFF);
-            char act_items[6][128];
+            char act_items[7][128];
             if (g_gal_sel_n > 0)
                 snprintf(act_items[0], sizeof(act_items[0]), "Add / Move %d Selected Images to Folder...", g_gal_sel_n);
             else
@@ -1288,8 +1296,9 @@ static void draw_ui(void) {
             snprintf(act_items[2], sizeof(act_items[2]), "Load Prompt & Settings into Studio");
             snprintf(act_items[3], sizeof(act_items[3]), "Re-Render Variation in Studio (New Seed)");
             snprintf(act_items[4], sizeof(act_items[4]), "AI Upscale Artwork -> %s", UP_MODES[(g_gal_up_mode >= 1 && g_gal_up_mode <= 3) ? g_gal_up_mode : 1]);
-            snprintf(act_items[5], sizeof(act_items[5]), it->starred ? "Unstar Favorite" : "Star as Favorite (★)");
-            for (int k = 0; k < 6; k++) {
+            snprintf(act_items[5], sizeof(act_items[5]), "Fix Face (AI Face & Eye Detailer)");
+            snprintf(act_items[6], sizeof(act_items[6]), it->starred ? "Unstar Favorite" : "Star as Favorite");
+            for (int k = 0; k < 7; k++) {
                 int ry = my + 72 + k * 54;
                 int sel = (k == g_gal_asel);
                 g_rrect(back, mx + 20, ry, mw - 40, 46, 12, sel ? C_SURFACE_HI : C_SURFACE, sel ? 255 : 165);
@@ -1969,14 +1978,29 @@ static void* gpu_worker_main(void* arg) {
                     on_progress(NULL, 0.02f, "Detecting anime face (CPU)...");
                     FaceBox faces[2];
                     int nf = face_detect_anime(srgb, sw, sh, faces, 2);
-                    if (nf <= 0) {
-                        http_srv_lock();
-                        snprintf(g_st.error, sizeof(g_st.error), "No anime face detected in %s", gids[gi]);
-                        http_srv_unlock();
-                        ok = -1;
+                    FaceBox det_face;
+                    if (nf > 0) {
+                        det_face = faces[0];
                     } else {
-                        FaceBox crop_box;
-                        face_box_expand_square(&faces[0], sw, sh, 1.85f, &crop_box);
+                        // Fallback to upper-center anime portrait region when stylized lighting hides skin detector
+                        det_face.w = (int)(sw * 38 / 100);
+                        det_face.h = (int)(sh * 28 / 100);
+                        if (det_face.w < 96) det_face.w = (int)sw / 2;
+                        if (det_face.h < 96) det_face.h = (int)sh / 2;
+                        det_face.x = ((int)sw - det_face.w) / 2;
+                        det_face.y = (int)(sh * 8 / 100);
+                        det_face.score = 0.25f;
+                        glog("fix_face %s: fallback portrait box=(%d,%d,%dx%d)", gids[gi], det_face.x, det_face.y, det_face.w, det_face.h);
+                    }
+                    FaceBox crop_box;
+                    face_box_expand_square(&det_face, sw, sh, 1.85f, &crop_box);
+
+                    if (!sdxl_has_vae_encoder(&eng)) {
+                        on_progress(NULL, 0.06f, "Auto-downloading VAE Encoder for AI Face Fix...");
+                        vae_enc_ensure_sync(eng.is_sd15);
+                    }
+
+                    if (sdxl_has_vae_encoder(&eng)) {
                         uint32_t fsz = (eng.is_sd15 || !eng.neo) ? 512u : 768u;
                         uint8_t* fcrop = face_crop_resize(srgb, sw, sh, &crop_box, fsz, fsz);
                         uint8_t* fref  = fcrop ? (uint8_t*)malloc((size_t)fsz * fsz * 3u) : NULL;
@@ -1993,13 +2017,13 @@ static void* gpu_worker_main(void* arg) {
                             fp.negative = fneg;
                             fp.width = fsz;
                             fp.height = fsz;
-                            fp.steps = g_st.preset_steps ? g_st.preset_steps : (eng.is_sd15 ? 20u : 8u);
+                            fp.steps = g_st.preset_steps ? g_st.preset_steps : (eng.is_sd15 ? 20u : 6u);
                             fp.cfg_scale = g_st.preset_cfg > 0.5f ? g_st.preset_cfg : (eng.is_sd15 ? 6.5f : 1.4f);
                             fp.seed = src_meta.seed ? (src_meta.seed ^ 0xFA5E1234ull) : 424242ull;
                             fp.eco_mode = geco;
                             fp.sampler = g_st.preset_sampler;
-                            glog("fix_face %s: box=(%d,%d,%dx%d) score=%.2f -> %ux%u denoise=%.2f",
-                                 gids[gi], crop_box.x, crop_box.y, crop_box.w, crop_box.h, (double)faces[0].score, fsz, fsz, (double)gden);
+                            glog("fix_face %s (img2img): box=(%d,%d,%dx%d) score=%.2f -> %ux%u denoise=%.2f",
+                                 gids[gi], crop_box.x, crop_box.y, crop_box.w, crop_box.h, (double)det_face.score, fsz, fsz, (double)gden);
                             ok = sdxl_img2img(&eng, &fp, fcrop, gden, fref, on_progress, on_cancel, NULL);
                             if (ok == 0) {
                                 drgb = (uint8_t*)malloc((size_t)sw * sh * 3u);
@@ -2018,6 +2042,36 @@ static void* gpu_worker_main(void* arg) {
                         }
                         free(fcrop);
                         free(fref);
+                    } else if (eng.has_upscaler) {
+                        // Built-in Real-ESRGAN Anime v3 Face-Crop Detail Restore (works out-of-the-box without vae_enc.psd1!)
+                        uint32_t cw = (uint32_t)(crop_box.w > 32 ? crop_box.w : 64);
+                        uint32_t ch = (uint32_t)(crop_box.h > 32 ? crop_box.h : 64);
+                        uint8_t* fcrop = face_crop_resize(srgb, sw, sh, &crop_box, cw, ch);
+                        uint8_t* fup = NULL;
+                        uint32_t fuw = 0, fuh = 0;
+                        if (fcrop) {
+                            glog("fix_face %s (Real-ESRGAN face restore): box=(%d,%d,%ux%u) score=%.2f",
+                                 gids[gi], crop_box.x, crop_box.y, cw, ch, (double)det_face.score);
+                            on_progress(NULL, 0.15f, "Refining anime face & eyes (Real-ESRGAN)...");
+                            ok = sdxl_upscale_rgb(&eng, fcrop, cw, ch, &fup, &fuw, &fuh, 2, geco, on_progress, on_cancel, NULL);
+                            if (ok == 0 && fup) {
+                                drgb = (uint8_t*)malloc((size_t)sw * sh * 3u);
+                                if (drgb) {
+                                    memcpy(drgb, srgb, (size_t)sw * sh * 3u);
+                                    face_blend_back(drgb, sw, sh, fup, fuw, fuh, &crop_box, 0.18f);
+                                    dw = sw; dh = sh;
+                                } else {
+                                    ok = -1;
+                                }
+                            }
+                            free(fup);
+                            free(fcrop);
+                        }
+                    } else {
+                        http_srv_lock();
+                        snprintf(g_st.error, sizeof(g_st.error), "Fix Face needs vae_enc.psd1 or upscaler.psd1");
+                        http_srv_unlock();
+                        ok = -1;
                     }
                 }
                 free(srgb);
@@ -2072,7 +2126,7 @@ static void* gpu_worker_main(void* arg) {
                 snprintf(g_st.stage, sizeof(g_st.stage), "Batch upscaled %d images (latest: %s %ux%u)", done_cnt, last_nid, last_dw, last_dh);
             } else if (done_cnt == 1) {
                 snprintf(g_st.stage, sizeof(g_st.stage), "Saved %s (%ux%u)", last_nid, last_dw, last_dh);
-            } else {
+            } else if (!g_st.error[0]) {
                 snprintf(g_st.error, sizeof(g_st.error), "Gallery operation failed");
             }
             g_st.busy = 0;
@@ -2816,9 +2870,9 @@ int main(void) {
                 if (pressed & ORBIS_PAD_BUTTON_CIRCLE) {
                     g_gal_amodal = 0; ui_dirty = 1;
                 } else if (nav & ORBIS_PAD_BUTTON_DOWN) {
-                    g_gal_asel = (g_gal_asel + 1) % 6; ui_dirty = 1;
+                    g_gal_asel = (g_gal_asel + 1) % 7; ui_dirty = 1;
                 } else if (nav & ORBIS_PAD_BUTTON_UP) {
-                    g_gal_asel = (g_gal_asel + 5) % 6; ui_dirty = 1;
+                    g_gal_asel = (g_gal_asel + 6) % 7; ui_dirty = 1;
                 } else if ((pressed & ORBIS_PAD_BUTTON_CROSS) && g_gal_count > 0) {
                     const GalleryItem* it = &g_gal[g_gal_idx];
                     g_gal_amodal = 0;
@@ -2871,6 +2925,17 @@ int main(void) {
                         http_srv_unlock();
                         g_in_gallery = 0; toast[0] = 0;
                     } else if (g_gal_asel == 5) {
+                        http_srv_lock();
+                        g_job.gal_ids_n = 1;
+                        snprintf(g_job.gal_ids[0], sizeof(g_job.gal_ids[0]), "%s", it->id);
+                        snprintf(g_job.gal_id, sizeof(g_job.gal_id), "%s", it->id);
+                        g_job.gal_denoise = 0.42f;
+                        g_job.gal_op = 5;
+                        g_job.cancel_req = 0;
+                        http_srv_unlock();
+                        g_in_gallery = 0;
+                        snprintf(toast, sizeof(toast), "Refining anime face & eyes on PS4 GPU...");
+                    } else if (g_gal_asel == 6) {
                         int nxt_star = !it->starred;
                         gallery_set_starred(it->id, nxt_star);
                         snprintf(toast, sizeof(toast), nxt_star ? "Starred artwork!" : "Removed star");
@@ -3201,7 +3266,7 @@ int main(void) {
                     int n_rnd = ns_b ? 9 : 7;
                     int base = 1 + n_rnd;
                     int tot_opts = tv_batch_opts_count(ns_b);
-                    static const char* const RSHORT[9] = {"Pose", "Expression", "Scene", "Lighting", "Outfit", "Details", "Camera", "Ecchi 500", "Cog Test"};
+                    static const char* const RSHORT[9] = {"Pose", "Expression", "Scene", "Lighting", "Outfit", "Details", "Camera", "Ecchi", "Explicit"};
                     if (sel == 0) {
                         http_srv_lock();
                         uint32_t def_m = RAND_POSE | RAND_EXPR | RAND_SCENE | RAND_LIGHT | RAND_DETAIL | (ns_b ? RAND_ECCHI : 0u);

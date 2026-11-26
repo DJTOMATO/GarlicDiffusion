@@ -22,8 +22,10 @@ All notable changes to **GarlicDiffusion** (Native SD 1.5 & SDXL on PS4 / PS4 Pr
 - **LCM Late-Step Eye/Detail Stabilization:** Enabled variance-preserving late-step `gamma` tapering starting at **`5+ steps`** (previously `>= 7`) so 5-step and 6-step DMD2 presets benefit from cleaner pupils and facial details.
 - **Honest Out-of-the-Box Benchmark (`pc/run_miku_benchmark.py`):** Removed hidden step/CFG overrides and benchmark-only LoRA stacks; now defaults to a fresh 2-seed run using each checkpoint's exact app defaults (`--resume` optional).
 
-### Gallery Recreation & Full Settings Restore
+### Gallery Recreation, Fix Face & Full Settings Restore
 - **"Load to Studio" & "Re-Render Variation (New Seed)" (TV + Web UI):** Now automatically switch to the original image's checkpoint (when installed) and restore **every** stored setting (`model`, `prompt`, `<lora:...>` tags, `negative`, native base `width × height` even for upscaled images, `steps`, `cfg`, `sampler`, `upscale`, `eco`, and `seed`) without being overwritten by model switch defaults.
+- **Fix Face (TV + Web UI):** Added **`Fix Face (AI Face & Eye Detailer)`** to the PS4 TV Gallery Artwork Actions modal, fixed the error-masking bug (`Gallery operation failed`), added automatic download & Recommended Add-on entries for universal `vae_enc_sdxl.psd1` / `vae_enc_sd15.psd1`, plus built-in **Real-ESRGAN Anime v3 Face-Crop Restoration** fallback when offline.
+- **Active Hardware Thermal Guard (Turbo Safety):** Added real-time `CPU`/`SoC` temperature monitoring inside `block_breather()` and the diffusion loop (`src/sdxl.c`). Automatically steps down CU masks at `>=80 °C` / `>=84 °C` and pauses to actively cool down at `>=86–88 °C` (`<=81–82 °C`) so even Turbo mode can never trigger a PS4 overheating shutdown.
 
 ---
 

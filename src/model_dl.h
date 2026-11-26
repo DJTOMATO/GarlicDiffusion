@@ -101,6 +101,11 @@ int lora_dl_start(const char* id_or_name, const char* url_override, const char* 
 int lora_dl_queue_all(const char* arch_filter);
 int lora_dl_is_queued(const char* id_or_filename);
 
+// ---- Universal VAE Encoder Add-ons (for AI Fix Face & img2img) ----------------------------------
+int vae_enc_is_installed(int is_sd15);
+int vae_enc_dl_start(int is_sd15);
+int vae_enc_ensure_sync(int is_sd15);
+
 // ---- GitHub OTA Update Checker & /data/pkg Downloader -------------------------------------------
 typedef struct {
     int checked;

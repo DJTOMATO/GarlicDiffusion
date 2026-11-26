@@ -1,5 +1,23 @@
 [
   {
+    "id": "vae_enc_sdxl",
+    "title": "VAE Encoder Add-on (SDXL Fix Face / img2img)",
+    "arch": "sdxl",
+    "size_mb": 130,
+    "desc": "Recommended add-on · Enables full AI img2img Face Fix for all SDXL / Illustrious checkpoints",
+    "files": "vae_enc_sdxl.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
+    "id": "vae_enc_sd15",
+    "title": "VAE Encoder Add-on (SD 1.5 Fix Face / img2img)",
+    "arch": "sd15",
+    "size_mb": 130,
+    "desc": "Recommended add-on · Enables full AI img2img Face Fix for all SD 1.5 checkpoints",
+    "files": "vae_enc_sd15.psd1",
+    "repo": "DJTomato/ps4-diffusion-models"
+  },
+  {
     "id": "WAI_Illustrious_v17_dmd2",
     "title": "WAI-Illustrious v17 DMD2 (Fast SDXL)",
     "arch": "sdxl",

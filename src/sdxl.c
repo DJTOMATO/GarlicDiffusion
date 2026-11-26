@@ -1351,15 +1351,61 @@ static void push_skip(SdxlEngine* e, uint64_t src, uint32_t HW, uint32_t C, uint
     e->n_skips++;
 }
 
-// Fine-grained inter-block thermal breather + responsive cancel checkpoint
+// Fine-grained inter-block thermal breather + active hardware thermal guard + responsive cancel checkpoint
 static int block_breather(SdxlEngine* e) {
-    if (e->eco_mode <= 0) {
-        if (e->cancel_fn && e->cancel_fn(e->cancel_user)) { gpu_begin(e); return 1; }
+    if (e->cancel_fn && e->cancel_fn(e->cancel_user)) { gpu_begin(e); return 1; }
+#ifndef SDXL_CPU
+    int cpu_c = 0, soc_c = 0;
+    int t_c = sdxl_read_temp_c(&cpu_c, &soc_c);
+    if (soc_c > t_c) t_c = soc_c;
+    if (t_c > e->stats.temp_peak_c) e->stats.temp_peak_c = t_c;
+
+    // Active Thermal Safety Guard: prevent PS4 hardware overheating shutdown (~95C trip) even in Turbo!
+    if (t_c >= 88) {
+        if (gpu_flush(e)) return -1;
+        if (e->eco_mode < 2) {
+            e->eco_mode = 2; // Drop to Quiet (~20CU Pro / ~11CU Base) immediately
+            gpu_begin(e);
+        }
+        glog("thermal_guard: PS4 hot (%dC, cpu=%dC soc=%dC) — pausing to cool to <=82C...", t_c, cpu_c, soc_c);
+        for (int w = 0; w < 50; w++) { // Up to 25s active cooldown
+            if (e->cancel_fn && e->cancel_fn(e->cancel_user)) return 1;
+            sceKernelUsleep(500000u);
+            e->stats.cooldown_ms += 500.0;
+            t_c = sdxl_read_temp_c(&cpu_c, &soc_c);
+            if (soc_c > t_c) t_c = soc_c;
+            if (t_c > 0 && t_c <= 82) break;
+        }
         return 0;
     }
+
+    if (t_c >= 84 && e->eco_mode < 2) {
+        if (gpu_flush(e)) return -1;
+        e->eco_mode = 2; // Auto-throttle Turbo/Balanced -> Quiet
+        gpu_begin(e);
+        sceKernelUsleep(250000u);
+        e->stats.cooldown_ms += 250.0;
+        return 0;
+    }
+    if (t_c >= 80 && e->eco_mode == 0) {
+        if (gpu_flush(e)) return -1;
+        e->eco_mode = 1; // Auto-throttle Turbo -> Balanced before heat builds
+        gpu_begin(e);
+        sceKernelUsleep(60000u);
+        e->stats.cooldown_ms += 60.0;
+        return 0;
+    }
+
+    if (e->eco_mode <= 0) {
+        // Even in Turbo (<80C), flush + tiny 15ms breather prevents sudden VRM/SoC thermal spikes
+        if (gpu_flush(e)) return -1;
+        sceKernelUsleep(15000u);
+        e->stats.cooldown_ms += 15.0;
+        return 0;
+    }
+
     if (gpu_flush(e)) return -1;
     if (e->cancel_fn && e->cancel_fn(e->cancel_user)) return 1;
-#ifndef SDXL_CPU
     uint32_t us = (e->eco_mode == 1) ? 25000u : (e->eco_mode == 2 ? 80000u : 100000u);
     if (e->is_sd15) us >>= 1; // SD 1.5 blocks are ~4x lighter, keep breathers snappy!
     if (!e->neo) us >>= 1;    // Base PS4 (18 CUs, ~110W) runs cooler than Pro (36 CUs, ~160W)
@@ -4035,11 +4081,29 @@ static int sdxl_generate_internal(SdxlEngine* e, const SdxlParams* p, const uint
         e->rt_step_done = s;
         e->rt_steps_total = steps;
         if (s > 0) e->rt_step_avg_sec = (now_sec(e) - tu_start) / (double)s;
-        int cur_t = sdxl_read_temp_c(NULL, NULL);
+        int cur_cpu = 0, cur_soc = 0;
+        int cur_t = sdxl_read_temp_c(&cur_cpu, &cur_soc);
+        if (cur_soc > cur_t) cur_t = cur_soc;
         if (cur_t > e->stats.temp_peak_c) e->stats.temp_peak_c = cur_t;
+#ifndef SDXL_CPU
+        if (cur_t >= 86) {
+            if (e->eco_mode < 2) { e->eco_mode = 2; gpu_begin(e); }
+            for (int w = 0; w < 40; w++) {
+                if (cancel && cancel(user)) { free(lat); free(noise); free(old_denoised); e->rt_phase = 0; e->cancel_fn = NULL; return 1; }
+                char cmsg[128];
+                snprintf(cmsg, sizeof(cmsg), "Thermal Guard: Cooling PS4 (%dC -> 81C)...", cur_t);
+                if (progress) progress(user, 0.05f + 0.85f * ((float)s / (float)steps), cmsg);
+                sceKernelUsleep(500000u);
+                e->stats.cooldown_ms += 500.0;
+                cur_t = sdxl_read_temp_c(&cur_cpu, &cur_soc);
+                if (cur_soc > cur_t) cur_t = cur_soc;
+                if (cur_t > 0 && cur_t <= 81) break;
+            }
+        }
+#endif
         char msg[128];
-        if (cur_t > 0) snprintf(msg, sizeof(msg), "Step %u/%u | %s | %dC", s + 1, steps, sdxl_eco_name_ex(eco, e->neo), cur_t);
-        else snprintf(msg, sizeof(msg), "Step %u/%u | %s", s + 1, steps, sdxl_eco_name_ex(eco, e->neo));
+        if (cur_t > 0) snprintf(msg, sizeof(msg), "Step %u/%u | %s | %dC", s + 1, steps, sdxl_eco_name_ex(e->eco_mode, e->neo), cur_t);
+        else snprintf(msg, sizeof(msg), "Step %u/%u | %s", s + 1, steps, sdxl_eco_name_ex(e->eco_mode, e->neo));
         if (progress) progress(user, 0.05f + 0.85f * ((float)s / (float)steps), msg);
 
         float sigma = sigmas[s];
