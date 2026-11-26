@@ -105,8 +105,8 @@ static const char* sm_power_note(int eco) {
 }
 
 static void sm_power_label(int eco, int neo, char* out, size_t cap) {
-    static const char* const pro[4]  = { "Turbo (36CU)", "Balanced (25CU)", "Quiet (20CU)", "Silent (14CU)" };
-    static const char* const base[4] = { "Turbo (18CU)", "Balanced (14CU)", "Quiet (11CU)", "Silent (7CU)" };
+    static const char* const pro[4]  = { "Turbo (36CU)", "Balanced (25CU)", "Quiet (16CU)", "Silent (12CU)" };
+    static const char* const base[4] = { "Turbo (18CU)", "Balanced (13CU)", "Quiet (8CU)", "Silent (6CU)" };
     if (eco < 0 || eco > 3) eco = 2;
     snprintf(out, cap, "%s  ·  %s", (neo ? pro : base)[eco], sm_power_note(eco));
 }

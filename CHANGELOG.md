@@ -20,7 +20,7 @@ All notable changes to **GarlicDiffusion** (Native SD 1.5 & SDXL on PS4 / PS4 Pr
   - `NoobAI_XL_1.1_dmd2`: Tuned to **`6 steps · CFG 1.2 · LCM`** with NoobAI-native `newest` quality/negative tags.
   - Illustrious DMD2 checkpoints (`WAI v17`, `WAI v14`, `Nova v18`, `Hassaku v3.1`, `Pencil v3.2`, `Plant Milk`): Standardized at **`6 steps · CFG 1.4 · LCM`** across `sdxl.c`, `preset.cfg`, `catalog/models.json`, `models/manifest.json`, `model_dl.c`, and `import_civitai.py`.
 - **LCM Late-Step Eye/Detail Stabilization:** Enabled variance-preserving late-step `gamma` tapering starting at **`5+ steps`** (previously `>= 7`) so 5-step and 6-step DMD2 presets benefit from cleaner pupils and facial details.
-- **Honest Out-of-the-Box Benchmark (`pc/run_miku_benchmark.py`):** Removed hidden step/CFG overrides and benchmark-only LoRA stacks; now defaults to a fresh 2-seed run using each checkpoint's exact app defaults (`--resume` optional).
+
 
 ### Gallery Recreation, Fix Face & Full Settings Restore
 - **"Load to Studio" & "Re-Render Variation (New Seed)" (TV + Web UI):** Now automatically switch to the original image's checkpoint (when installed) and restore **every** stored setting (`model`, `prompt`, `<lora:...>` tags, `negative`, native base `width × height` even for upscaled images, `steps`, `cfg`, `sampler`, `upscale`, `eco`, and `seed`) without being overwritten by model switch defaults.
@@ -33,7 +33,7 @@ All notable changes to **GarlicDiffusion** (Native SD 1.5 & SDXL on PS4 / PS4 Pr
 - 60 FPS non-blocking PS4 TV UI with Easy Mode & Advanced Studio 2-choice welcome screen.
 - GitHub OTA updater (`/data/pkg/Garlic-Diffusion.pkg`) with one-click download and GoldHEN install prep.
 - Gallery Folders (`Create / Move / Delete / Download .zip`), Starred favorites, and >128 newest-first Gallery sorting with fast thumbnails.
-- 500-word SFW + 500-word NSFW-gated batch randomizer, inline `{a|b|c}` wildcards, prompt dupe cleaner, and obfuscated seed headers.
+- 500-word SFW + 500-word NSFW-gated batch randomizer, inline `{a|b|c}` wildcards and prompt dupe cleaner.
 
 ## [v1.10] — Initial Public Release
 - Native PS4 / PS4 Pro GCN compute inference for SD 1.5 & SDXL / Illustrious checkpoints, 0-VRAM Kohya LoRA fusion, and Real-ESRGAN Anime v3 1080p upscaling.

@@ -1514,6 +1514,13 @@ static void on_progress(void* user, float frac, const char* msg) {
         g_st.elapsed_sec = (float)((double)(now_us - g_job_start_us) / 1e6);
     }
     if (eng.mem_size > 0) g_st.gpu_used_mb = (uint32_t)(eng.next >> 20);
+    {
+        int tc = sdxl_read_temp_c(NULL, NULL);
+        if (tc > 0) {
+            g_st.temp_c = tc;
+            if (tc > g_st.temp_peak_c) g_st.temp_peak_c = tc;
+        }
+    }
     g_st.eta_sec = compute_live_eta(bcur ? bcur : 1u, btot ? btot : 1u);
     http_srv_unlock();
 }
@@ -1803,7 +1810,13 @@ static void log_console_info(void) {
     while (*fw == ' ' || *fw == '0') fw++;
     size_t flex = 0;
     ((int32_t(*)(size_t*))sceKernelAvailableFlexibleMemorySize)(&flex);
-    sdxl_read_temp_c(NULL, NULL);
+    int t_boot = sdxl_read_temp_c(NULL, NULL);
+    if (t_boot > 0) {
+        http_srv_lock();
+        g_st.temp_c = t_boot;
+        if (t_boot > g_st.temp_peak_c) g_st.temp_peak_c = t_boot;
+        http_srv_unlock();
+    }
     glog("console: fw %s (0x%08x); PS4 Pro hw=%d Neo=%d; direct %u MiB, flex free %u MiB; TSC %.1f MHz",
          r ? "?" : fw, (unsigned)v.Version, sceKernelHasNeoMode(), sceKernelIsNeoMode(),
          (unsigned)(sceKernelGetDirectMemorySize() >> 20), (unsigned)(flex >> 20),
@@ -2674,6 +2687,21 @@ int main(void) {
             if (hold_ticks >= 18 && ((hold_ticks - 18) % 5) == 0) nav = dir_now;
         }
 
+        // Poll hardware APU temperature every ~2s so Web UI /status stays live even when idle
+        {
+            static uint64_t last_temp_poll_us = 0;
+            uint64_t now_tp = sceKernelGetProcessTime();
+            if (last_temp_poll_us == 0 || (now_tp >= last_temp_poll_us && (now_tp - last_temp_poll_us) >= 2000000ull)) {
+                last_temp_poll_us = now_tp;
+                int tc = sdxl_read_temp_c(NULL, NULL);
+                if (tc > 0) {
+                    http_srv_lock();
+                    g_st.temp_c = tc;
+                    if (tc > g_st.temp_peak_c) g_st.temp_peak_c = tc;
+                    http_srv_unlock();
+                }
+            }
+        }
         // Reload user presets, styles, characters, or rescan models if requested by Web UI
         http_srv_lock();
         int pdirty = g_job.presets_dirty; g_job.presets_dirty = 0;

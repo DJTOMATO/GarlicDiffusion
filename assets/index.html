@@ -400,8 +400,8 @@ textarea{min-height:68px;resize:vertical}
     <div class="row">
       <div><label>GPU Power / Fan</label>
         <select id="eco" name="eco" autocomplete="off">
-          <option value="3">Silent (~14CU · 35% · Coolest)</option>
-          <option value="2" selected>Quiet (~20CU · 58% · Default)</option>
+          <option value="3">Silent (~12CU · 33% · Whisper Cool)</option>
+          <option value="2" selected>Quiet (~16CU · 44% · Default)</option>
           <option value="1">Balanced (~25CU · 70%)</option>
           <option value="0">Turbo (36CU · 100% · Loud)</option>
         </select>
@@ -3146,8 +3146,8 @@ function updateConsoleModeUI(neo){
   document.getElementById('hcon').textContent=neo?'PS4 Pro':'PS4 Base';
   const cur=eco.value;
   eco.innerHTML=neo
-    ? '<option value="3">Silent (~14CU · 35% · Coolest)</option><option value="2">Quiet (~20CU · 58% · Default)</option><option value="1">Balanced (~25CU · 70%)</option><option value="0">Turbo (36CU · 100% · Loud)</option>'
-    : '<option value="3">Silent (~7CU · 38% · Coolest)</option><option value="2">Quiet (~11CU · 58%)</option><option value="1">Balanced (~14CU · 75% · Default)</option><option value="0">Turbo (18CU · 100%)</option>';
+    ? '<option value="3">Silent (~12CU · 33% · Whisper Cool)</option><option value="2">Quiet (~16CU · 44% · Default)</option><option value="1">Balanced (~25CU · 70%)</option><option value="0">Turbo (36CU · 100% · Loud)</option>'
+    : '<option value="3">Silent (~6CU · 33% · Whisper Cool)</option><option value="2">Quiet (~8CU · 44% · Default)</option><option value="1">Balanced (~13CU · 72% · Default)</option><option value="0">Turbo (18CU · 100%)</option>';
   eco.value=cur||(neo?'2':'1');
 }
 

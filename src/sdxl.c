@@ -16,6 +16,7 @@
 #endif
 
 #ifndef SDXL_CPU
+#include <pthread.h>
 #include <unistd.h>
 #include <orbis/GnmDriver.h>
 #include <orbis/libkernel.h>
@@ -23,6 +24,32 @@
 int sceKernelIsNeoMode(void);
 int sceKernelGetCpuTemperature(int* temp);
 int sceKernelGetSocSensorTemperature(int sensor, int* temp);
+
+typedef struct {
+    uint32_t cr_uid;
+    uint32_t cr_ruid;
+    uint32_t cr_rgid;
+    uint32_t cr_groups;
+    uint64_t cr_paid;
+    uint64_t cr_caps[2];
+    void* cr_prison;
+    void* fd_cdir;
+    void* fd_jdir;
+    void* fd_rdir;
+} GdJailbreakBackup;
+
+static int64_t gd_goldhen_cmd(uint64_t cmd, void* data) {
+    uint64_t rax = 0;
+    uint8_t cf = 0;
+    __asm__ volatile(
+        "syscall\n\t"
+        "setc %1\n\t"
+        : "+a"(rax), "=qm"(cf)
+        : "D"((uint64_t)500), "S"(cmd), "d"((uint64_t)(uintptr_t)data)
+        : "rcx", "r11", "memory"
+    );
+    return cf ? -(int64_t)rax : (int64_t)rax;
+}
 
 #define SH_START_X 0x204
 #define SH_NUM_THREAD_X 0x207
@@ -62,44 +89,102 @@ const char* sdxl_eco_name_ex(int eco_mode, int neo) {
     if (!neo) {
         switch (eco_mode) {
             case 0: return "Turbo (18CU)";
-            case 1: return "Balanced (14CU)";
-            case 2: return "Quiet (11CU)";
-            default: return "Silent (7CU)";
+            case 1: return "Balanced (13CU)";
+            case 2: return "Quiet (8CU)";
+            default: return "Silent (6CU)";
         }
     }
     switch (eco_mode) {
         case 0: return "Turbo (36CU)";
         case 1: return "Balanced (25CU)";
-        case 2: return "Quiet (20CU)";
-        default: return "Silent (14CU)";
+        case 2: return "Quiet (16CU)";
+        default: return "Silent (12CU)";
     }
 }
 
 const char* sdxl_eco_name(int eco_mode) { return sdxl_eco_name_ex(eco_mode, 1); }
 
-// Direct libkernel temperature query (quietly skips if sandboxed)
+// Hardware CPU/SoC temperature query: tries direct libkernel first, then GoldHEN SDK syscall(500)
+// temporary jailbreak/unjailbreak (~5us, mutex-protected, cached 1s) so sandboxed PKGs read live temps.
 int sdxl_read_temp_c(int* cpu_c, int* soc_c) {
     if (cpu_c) *cpu_c = 0;
     if (soc_c) *soc_c = 0;
 #ifndef SDXL_CPU
-    static int probed = 0, available = 0;
-    if (probed && !available) return 0;
-    int c = 0, s = 0;
-    int rc_c = sceKernelGetCpuTemperature(&c);
-    int rc_s = sceKernelGetSocSensorTemperature(0, &s);
-    if (!probed) {
-        probed = 1;
-        available = (rc_c == 0 && c > 0) || (rc_s == 0 && s > 0);
-        if (available) glog("temp sensor: cpu=%dC soc=%dC", c, s);
-        else glog("temp sensor: unavailable in userland sandbox (using hardware CU power scaling)");
+    static pthread_mutex_t t_mtx = PTHREAD_MUTEX_INITIALIZER;
+    static int mode = -1; // -1=unprobed, 0=unavailable, 1=direct, 2=goldhen_sdk
+    static uint64_t last_us = 0;
+    static int cached_cpu = 0, cached_soc = 0;
+
+    pthread_mutex_lock(&t_mtx);
+    uint64_t now_us = sceKernelGetProcessTime();
+    if (mode == 0) {
+        pthread_mutex_unlock(&t_mtx);
+        return 0;
     }
-    if (rc_c != 0) c = 0;
-    if (rc_s != 0) s = 0;
+    if (mode > 0 && last_us > 0 && now_us >= last_us && (now_us - last_us) < 1000000ull) {
+        int c = cached_cpu, s = cached_soc;
+        pthread_mutex_unlock(&t_mtx);
+        if (cpu_c) *cpu_c = c;
+        if (soc_c) *soc_c = s;
+        return s > c ? s : c;
+    }
+
+    int c = 0, s = 0;
+    int rc_c = -1, rc_s = -1;
+    if (mode == -1 || mode == 1) {
+        rc_c = sceKernelGetCpuTemperature(&c);
+        rc_s = sceKernelGetSocSensorTemperature(0, &s);
+        if ((rc_c == 0 && c > 0) || (rc_s == 0 && s > 0)) {
+            if (mode == -1) {
+                mode = 1;
+                glog("temp sensor (direct): cpu=%dC soc=%dC", c, s);
+            }
+        } else if (mode == -1) {
+            // Try GoldHEN SDK syscall(500): VERSION(0), JAILBREAK(2), UNJAILBREAK(3)
+            int64_t ver = gd_goldhen_cmd(0, NULL);
+            if (ver > 0) {
+                GdJailbreakBackup jb;
+                memset(&jb, 0, sizeof(jb));
+                if (gd_goldhen_cmd(2, &jb) == 0) {
+                    rc_c = sceKernelGetCpuTemperature(&c);
+                    rc_s = sceKernelGetSocSensorTemperature(0, &s);
+                    gd_goldhen_cmd(3, &jb);
+                }
+            }
+            if ((rc_c == 0 && c > 0) || (rc_s == 0 && s > 0)) {
+                mode = 2;
+                glog("temp sensor (GoldHEN SDK 0x%x): cpu=%dC soc=%dC", (unsigned)ver, c, s);
+            } else {
+                mode = 0;
+                glog("temp sensor: unavailable (direct rc=%d/%d, goldhen ver=%lld)", rc_c, rc_s, (long long)ver);
+            }
+        }
+    } else if (mode == 2) {
+        GdJailbreakBackup jb;
+        memset(&jb, 0, sizeof(jb));
+        if (gd_goldhen_cmd(2, &jb) == 0) {
+            rc_c = sceKernelGetCpuTemperature(&c);
+            rc_s = sceKernelGetSocSensorTemperature(0, &s);
+            gd_goldhen_cmd(3, &jb);
+        }
+    }
+
+    if (rc_c != 0 || c <= 0 || c > 125) c = 0;
+    if (rc_s != 0 || s <= 0 || s > 125) s = 0;
     if (c <= 0 && s > 0) c = s;
     if (s <= 0 && c > 0) s = c;
+    if (c > 0 || s > 0) {
+        cached_cpu = c;
+        cached_soc = s;
+        last_us = now_us;
+    } else {
+        c = cached_cpu;
+        s = cached_soc;
+    }
+    pthread_mutex_unlock(&t_mtx);
     if (cpu_c) *cpu_c = c;
     if (soc_c) *soc_c = s;
-    return s > 0 ? s : c;
+    return s > c ? s : c;
 #else
     return 0;
 #endif
@@ -367,9 +452,9 @@ static void gpu_begin(SdxlEngine* e) {
     // Symmetric checkerboard CU masks replicated across SH0 [15:0] and SH1 [31:16] on every SE:
     // spreads thermal load evenly across the entire APU die (no hot-side concentration, safe under CU harvesting).
     uint32_t mask = 0xFFFFFFFFu;          // Mode 0 Turbo:      100% CUs (36 Pro / 18 Base)
-    if (e->eco_mode == 1) mask = 0x02DB02DBu;      // Mode 1 Balanced:   ~70% CUs (~26 Pro / ~13 Base)
-    else if (e->eco_mode == 2) mask = 0x01550155u; // Mode 2 Quiet:      ~50% CUs (~18 Pro / ~9 Base)
-    else if (e->eco_mode >= 3) mask = 0x02490249u; // Mode 3 Ultra-Cool: ~38% CUs (~14 Pro / ~7 Base)
+    if (e->eco_mode == 1) mask = 0x02DB02DBu;      // Mode 1 Balanced:   ~70% CUs (~25 Pro / ~13 Base)
+    else if (e->eco_mode == 2) mask = 0x02490249u; // Mode 2 Quiet:      ~44% CUs (~16 Pro / ~8 Base — calm fan even in summer)
+    else if (e->eco_mode >= 3) mask = 0x01110111u; // Mode 3 Silent:     ~33% CUs (~12 Pro / ~6 Base — whisper quiet)
     uint32_t se_pair[2] = {mask, mask};
     uint32_t zero3[3] = {0, 0, 0};
     set_sh1(e, SH_RESOURCE_LIMITS, 0);
@@ -1410,6 +1495,32 @@ static int block_breather(SdxlEngine* e) {
         return 0;
     }
 
+    // Mode-specific Active Thermal Ceiling: keeps Quiet/Silent fan whisper-calm even in hot summer!
+    if (e->eco_mode >= 3 && t_c >= 74) {
+        if (gpu_flush(e)) return -1;
+        for (int w = 0; w < 30; w++) {
+            if (e->cancel_fn && e->cancel_fn(e->cancel_user)) return 1;
+            sceKernelUsleep(500000u);
+            e->stats.cooldown_ms += 500.0;
+            t_c = sdxl_read_temp_c(&cpu_c, &soc_c);
+            if (soc_c > t_c) t_c = soc_c;
+            if (t_c > 0 && t_c <= 70) break;
+        }
+        return 0;
+    }
+    if (e->eco_mode == 2 && t_c >= 78) {
+        if (gpu_flush(e)) return -1;
+        for (int w = 0; w < 24; w++) {
+            if (e->cancel_fn && e->cancel_fn(e->cancel_user)) return 1;
+            sceKernelUsleep(500000u);
+            e->stats.cooldown_ms += 500.0;
+            t_c = sdxl_read_temp_c(&cpu_c, &soc_c);
+            if (soc_c > t_c) t_c = soc_c;
+            if (t_c > 0 && t_c <= 74) break;
+        }
+        return 0;
+    }
+
     if (e->eco_mode <= 0) {
         // Even in Turbo (<80C), flush + tiny 15ms breather prevents sudden VRM/SoC thermal spikes
         if (gpu_flush(e)) return -1;
@@ -1420,7 +1531,9 @@ static int block_breather(SdxlEngine* e) {
 
     if (gpu_flush(e)) return -1;
     if (e->cancel_fn && e->cancel_fn(e->cancel_user)) return 1;
-    uint32_t us = (e->eco_mode == 1) ? 15000u : (e->eco_mode == 2 ? 35000u : 55000u);
+    uint32_t us = (e->eco_mode == 1) ? 25000u : (e->eco_mode == 2 ? 85000u : 140000u);
+    if (e->eco_mode == 2 && t_c >= 75) us = 180000u;
+    else if (e->eco_mode >= 3 && t_c >= 71) us = 250000u;
     if (e->is_sd15) us >>= 1; // SD 1.5 blocks are ~4x lighter, keep breathers snappy!
     if (!e->neo) us >>= 1;    // Base PS4 (18 CUs, ~110W) runs cooler than Pro (36 CUs, ~160W)
     sceKernelUsleep(us);
