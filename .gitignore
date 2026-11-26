@@ -1,7 +1,9 @@
-# Local model weights & download cache (hosted on Hugging Face)
+# Local model/LoRA weights & download cache (hosted on Hugging Face)
 models/
+loras/
 cache/
 hf_stage/
+.local_seeds/
 *.psd1
 *.safetensors
 *.pth
@@ -9,6 +11,10 @@ hf_stage/
 !assets/clip_tok.bin
 !assets/kernels.bin
 !assets/upscaler.psd1
+
+# Local agent/scratch notes
+implementation_plan.md
+pending
 
 # Build outputs
 build/
@@ -21,3 +27,6 @@ build/
 __pycache__/
 *.pyc
 .DS_Store
+sync_to_git.bat
+build_and_push.bat
+DISCORD_SETUP.md
