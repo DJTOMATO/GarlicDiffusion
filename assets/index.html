@@ -48,7 +48,18 @@ header{display:flex;align-items:center;justify-content:space-between;padding:11p
 /* Studio */
 #pg-studio{flex-wrap:wrap}
 .side{width:425px;max-width:100%;padding:14px 17px;background:var(--panel);border-right:1px solid var(--border);overflow-y:auto}
-.stage-wrap{flex:1;min-width:320px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px;gap:12px}
+#pg-studio.controls-hidden .side{display:none!important}
+#pg-studio.controls-hidden #img{max-height:76vh}
+.stage-wrap{flex:1;min-width:320px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:10px 14px 16px;gap:12px}
+.stage-topbar{width:100%;max-width:none;background:rgba(8,21,44,.94);border:1px solid var(--border);border-radius:11px;padding:10px 14px;display:grid;grid-template-columns:minmax(340px,1.4fr) minmax(270px,1.15fr) minmax(220px,0.85fr);gap:10px 14px;align-items:start}
+#pg-studio.easy-mode .stage-topbar{grid-template-columns:1fr;max-width:680px}
+#pg-studio.easy-mode .adv-stage-ctl{display:none!important}
+@media(max-width:1180px){.stage-topbar{grid-template-columns:1fr}}
+.stage-topbar label{margin:0 0 3px;font-size:11px}
+.stage-topbar select,.stage-topbar input{padding:5px 7px;font-size:12.5px}
+.stage-topbar .tiers{margin-top:0;display:flex;gap:5px;flex-wrap:nowrap}
+.stage-topbar .tier-btn{flex:1 1 auto;white-space:nowrap;padding:5px 7px;font-size:11px}
+.stage-canvas{flex:1;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
 label{display:block;font-size:11.5px;color:var(--muted);margin:9px 0 4px;font-weight:600;letter-spacing:.2px}
 textarea,input,select{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-family:inherit;font-size:13px}
 textarea{min-height:68px;resize:vertical}
@@ -172,9 +183,11 @@ textarea{min-height:68px;resize:vertical}
     <span id="harch" class="badge">SDXL</span>
     <span class="g-pill"><span id="hdot" class="g-dot"></span><span id="hmdl">Connecting...</span></span>
     <span class="g-pill" id="hvram-pill" style="display:none"><span id="hvram">VRAM</span><span class="g-vbar"><span id="hvfill" class="g-vfill"></span></span></span>
+    <span class="g-pill" id="htemp-pill" style="display:none" title="Live PS4 APU Temperature (CPU/SoC)">🌡️ <span id="htemp">0°C</span></span>
   </div>
   <div class="tabs">
     <button class="tab ota-pill" id="ota-btn" onclick="openOtaModal()" style="display:none" title="New GarlicDiffusion update available on GitHub!">⬆️ Update</button>
+    <button class="tab" id="ctl-hide-btn" onclick="toggleStudioControls()" title="Hide or show left sidebar">🎛️ Hide Sidebar</button>
     <button class="tab mode-easy" id="mode-btn" onclick="toggleUiMode()" title="Switch between Easy Mode and Advanced Studio">🌱 Easy Mode</button>
     <button class="tab active" id="tb-studio" onclick="showTab('studio')">Studio</button>
     <button class="tab" id="tb-gallery" onclick="showTab('gallery')">Gallery (<span id="gcnt">0</span>)</button>
@@ -248,9 +261,23 @@ textarea{min-height:68px;resize:vertical}
       <div>
         <label style="margin-top:4px">4. Speed vs Quality (Auto-Locks Optimal Settings)</label>
         <div class="ez-choice">
-          <button type="button" class="ez-btn spd" data-ezq="fast" onclick="setEasyQuality('fast')">⚡ Fast</button>
+          <button type="button" class="ez-btn spd" data-ezq="fast" onclick="setEasyQuality('fast')" title="Testing draft only — lower quality, fast composition preview">⚡ Testing Draft</button>
           <button type="button" class="ez-btn active" data-ezq="best" onclick="setEasyQuality('best')">👑 Best Quality</button>
           <button type="button" class="ez-btn" data-ezq="hd" onclick="setEasyQuality('hd')">✨ Best + 1080p HD</button>
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:7px;padding:5px 8px;background:#071226;border:1px solid var(--border);border-radius:7px">
+          <label style="margin:0;display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:#52e3ab;font-size:11px" title="Automatically adds model quality tags and hand/finger/eye anatomy protection">
+            <input id="ez-autoq" type="checkbox" checked style="width:auto;margin:0;accent-color:#3ddc97" onchange="onEasyToggleChanged('autoq',this.checked)">
+            <span>🛡️ Hand/Eye Shield</span>
+          </label>
+          <label style="margin:0;display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:#7ec2ff;font-size:11px" title="Automatically detects &amp; refines small anime faces/eyes (ADetailer crop pass)">
+            <input id="ez-autoff" type="checkbox" checked style="width:auto;margin:0;accent-color:#3fa9f5" onchange="onEasyToggleChanged('autoff',this.checked)">
+            <span>✨ Face Fix</span>
+          </label>
+          <label style="margin:0;display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:#f5c86b;font-size:11px" title="Enable or disable RealESRGAN 1080p upscaling">
+            <input id="ez-ups" type="checkbox" checked style="width:auto;margin:0;accent-color:#f5c86b" onchange="onEasyToggleChanged('ups',this.checked)">
+            <span>🔍 1080p Upscale</span>
+          </label>
         </div>
       </div>
 
@@ -341,7 +368,7 @@ textarea{min-height:68px;resize:vertical}
       <button type="button" class="fpill" onclick="applyFraming('portrait')" title="Insert close-up portrait & eye detail tags">👤 Portrait</button>
       <button type="button" class="fpill" onclick="applyFraming('upper')" title="Insert upper-body cowboy shot & hand tags">👚 Upper Body</button>
       <button type="button" class="fpill" onclick="applyFraming('full')" title="Insert full-body head-to-toe tags + portrait aspect">🧍 Full Body</button>
-      <button type="button" class="fpill" onclick="applyFraming('wide')" title="Insert wide cinematic framing + 16:9 widescreen">🏞️ Wide 16:9</button>
+      <button type="button" class="fpill" id="fp-wide" onclick="applyFraming('wide')" title="Insert wide cinematic framing + 16:9 widescreen">🏞️ Wide 16:9</button>
     </div>
     <div id="qprompt-box" class="inline-box" style="margin-bottom:6px">
       <div style="display:flex;gap:6px">
@@ -350,7 +377,7 @@ textarea{min-height:68px;resize:vertical}
         <button class="btn sec sm" style="width:auto" onclick="toggleQuickPromptSave()">✕</button>
       </div>
     </div>
-    <textarea id="pr" name="positive_prompt" autocomplete="off" oninput="onPromptEdited()">masterpiece, best quality, 1girl, silver hair, blue eyes, glowing sakura petals, night sky, anime style</textarea>
+    <textarea id="pr" name="positive_prompt" autocomplete="off" style="min-height:112px" oninput="onPromptEdited()">masterpiece, best quality, 1girl, silver hair, blue eyes, glowing sakura petals, night sky, anime style</textarea>
 
     <label style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap">
       <span>Negative Prompt <span id="ng-tok-badge" class="tok-badge">0 / 150 neg</span></span>
@@ -365,74 +392,7 @@ textarea{min-height:68px;resize:vertical}
         </label>
       </span>
     </label>
-    <textarea id="ng" name="negative_prompt" autocomplete="off" style="min-height:54px" oninput="onPromptEdited()">lowres, bad anatomy, bad hands, extra digits, fewer digits, blurry, worst quality, low quality</textarea>
-
-    <label>Quick Resolution / Upscale Tier</label>
-    <div class="tiers">
-      <button type="button" class="tier-btn" onclick="applyQualityTier('draft')" title="Fastest rough preview">⚡ Draft</button>
-      <button type="button" class="tier-btn" onclick="applyQualityTier('mid')" title="Native balanced portrait">⚖️ Mid</button>
-      <button type="button" class="tier-btn" onclick="applyQualityTier('illus')" title="Best native SDXL/Illustrious detail (1024x1344)">👑 1024×1344</button>
-      <button type="button" class="tier-btn" onclick="applyQualityTier('hd')" title="Crisp portrait + 1080p RealESRGAN">✨ 1080p</button>
-      <button type="button" class="tier-btn" onclick="applyQualityTier('wide')" title="16:9 Widescreen 1920x1080 wallpaper">🖥️ 16:9</button>
-      <button type="button" class="tier-btn" onclick="applyQualityTier('4k')" title="4K UHD RealESRGAN (PS4 Pro)">💎 4K</button>
-    </div>
-
-    <div class="row">
-      <div style="flex:1.5"><label>Resolution <a href="#" onclick="swapAspect();return false" style="float:right;color:#8cc8ff;text-decoration:none" title="Swap Portrait ↔ Landscape">⇄ Swap</a></label>
-        <select id="sz" name="sz" autocomplete="off" onchange="checkUpscaleGuard();updateProfileHighlight()"></select>
-      </div>
-      <div style="flex:0.8"><label>Steps</label><input id="st" name="steps" autocomplete="off" type="number" value="7" min="4" max="40" onchange="updateProfileHighlight()"></div>
-    </div>
-    <div id="up-warn" class="warn-note"></div>
-
-    <div class="row">
-      <div><label>CFG Scale</label><input id="cfg" name="cfg" autocomplete="off" type="number" value="1.4" step="0.1" min="1" max="15" onchange="updateProfileHighlight()"></div>
-      <div><label>Sampler</label>
-        <select id="smp" name="smp" autocomplete="off" onchange="updateProfileHighlight()">
-          <option value="LCM">LCM (DMD2 Optimal)</option>
-          <option value="DPM++ 2M Karras">DPM++ 2M Karras (20+ stp)</option>
-          <option value="Euler">Euler (8-Step)</option>
-          <option value="Euler a">Euler a</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="row">
-      <div><label>GPU Power / Fan</label>
-        <select id="eco" name="eco" autocomplete="off">
-          <option value="3">Silent (~12CU · 33% · Whisper Cool)</option>
-          <option value="2" selected>Quiet (~16CU · 44% · Default)</option>
-          <option value="1">Balanced (~25CU · 70%)</option>
-          <option value="0">Turbo (36CU · 100% · Loud)</option>
-        </select>
-      </div>
-      <div><label>AI Upscaler (RealESRGAN)</label>
-        <select id="ups" name="ups" autocomplete="off" onchange="checkUpscaleGuard();updateProfileHighlight()">
-          <option value="0">Off (Native)</option>
-          <option value="1">1080p Anime HD</option>
-          <option value="2">2x Anime HD</option>
-          <option value="3">4K UHD (up to 3840×2160)</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="row">
-      <div>
-        <label>Seed (0 = random)
-          <span style="float:right;display:flex;gap:5px">
-            <a href="#" onclick="sd.value=0;return false" style="color:#52e3ab;text-decoration:none" title="Random seed each render">🎲</a>
-            <a href="#" onclick="lockLastSeed();return false" style="color:#fbbf24;text-decoration:none" title="Lock last rendered seed">🔒</a>
-          </span>
-        </label>
-        <input id="sd" name="seed" autocomplete="off" type="number" value="0" min="0">
-      </div>
-      <div><label>Batch (1–100)</label><input id="bc" name="batch" autocomplete="off" type="number" value="1" min="1" max="100"></div>
-    </div>
-
-    <label>Save Batch Into Gallery Folder <a href="#" onclick="promptCreateFolder(true);return false" style="float:right;color:#c4b5fd;text-decoration:none">+ New Folder</a></label>
-    <select id="bfolder" autocomplete="off" onchange="pushSettings()">
-      <option value="">(Unsorted / Gallery Root)</option>
-    </select>
+    <textarea id="ng" name="negative_prompt" autocomplete="off" style="min-height:92px" oninput="onPromptEdited()">lowres, bad anatomy, bad hands, extra digits, fewer digits, blurry, worst quality, low quality</textarea>
 
     <div class="rand-box">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">
@@ -468,25 +428,100 @@ textarea{min-height:68px;resize:vertical}
       </div>
     </div>
 
-    <label style="display:flex;align-items:center;gap:8px;margin:8px 0 8px;cursor:pointer;font-size:12px;color:#f5b971;user-select:none">
+    <label style="display:flex;align-items:center;gap:8px;margin:8px 0 4px;cursor:pointer;font-size:12px;color:#f5b971;user-select:none">
       <input id="sdwn" type="checkbox" style="width:auto;margin:0;accent-color:#f59e0b" onchange="toggleShutdownAfter(this.checked)">
       <span>Shut down PS4 once batch finishes</span>
     </label>
     </div>
-
-    <button id="go" class="btn full" onclick="gen()" title="Shortcut: Ctrl + Enter">Generate Image (Ctrl+Enter)</button>
-    <button id="can" class="btn stop full" onclick="cancel()" style="display:none">Cancel Generation</button>
-
-    <div class="bar"><div id="fill" class="fill"></div></div>
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-      <div id="stage">Idle</div>
-      <div id="eta" style="font-size:12px;font-weight:700;color:var(--accent2);white-space:nowrap"></div>
-    </div>
-    <div id="tstat"></div>
-    <div id="st-storage" class="stg-pill"></div>
   </div>
 
   <div class="stage-wrap">
+    <div class="stage-topbar">
+      <div class="adv-stage-ctl" style="display:flex;flex-direction:column;gap:6px">
+        <div>
+          <label>Quick Resolution / Upscale Tier</label>
+          <div class="tiers">
+            <button type="button" class="tier-btn" onclick="applyQualityTier('draft')" title="Fastest rough preview">⚡ Draft</button>
+            <button type="button" class="tier-btn" onclick="applyQualityTier('mid')" title="Native balanced resolution">⚖️ Mid</button>
+            <button type="button" class="tier-btn" id="tier-illus" onclick="applyQualityTier('illus')" title="Best native SDXL/Illustrious detail (1024x1344)">👑 1024×1344</button>
+            <button type="button" class="tier-btn" onclick="applyQualityTier('hd')" title="Crisp + 1080p RealESRGAN upscale">✨ 1080p</button>
+            <button type="button" class="tier-btn" id="tier-wide" onclick="applyQualityTier('wide')" title="16:9 Widescreen 1920x1080 wallpaper">🖥️ 16:9</button>
+            <button type="button" class="tier-btn" onclick="applyQualityTier('4k')" title="4K UHD RealESRGAN (PS4 Pro)">💎 4K</button>
+          </div>
+        </div>
+        <div class="row">
+          <div style="flex:1.6"><label>Resolution <a href="#" onclick="swapAspect();return false" style="float:right;color:#8cc8ff;text-decoration:none" title="Swap Portrait ↔ Landscape">⇄ Swap</a></label>
+            <select id="sz" name="sz" autocomplete="off" onchange="checkUpscaleGuard();updateProfileHighlight()"></select>
+          </div>
+          <div style="flex:0.7"><label>Steps</label><input id="st" name="steps" autocomplete="off" type="number" value="7" min="4" max="40" onchange="updateProfileHighlight()"></div>
+        </div>
+        <div class="row">
+          <div style="flex:0.75"><label>CFG Scale</label><input id="cfg" name="cfg" autocomplete="off" type="number" value="1.4" step="0.1" min="1" max="15" onchange="updateProfileHighlight()"></div>
+          <div style="flex:1.4"><label>Sampler</label>
+            <select id="smp" name="smp" autocomplete="off" onchange="updateProfileHighlight()">
+              <option value="LCM">LCM (DMD2 Optimal)</option>
+              <option value="DPM++ 2M Karras">DPM++ 2M Karras (20+ stp)</option>
+              <option value="Euler">Euler (8-Step)</option>
+              <option value="Euler a">Euler a</option>
+            </select>
+          </div>
+        </div>
+        <div id="up-warn" class="warn-note"></div>
+      </div>
+
+      <div class="adv-stage-ctl" style="display:flex;flex-direction:column;gap:6px">
+        <div class="row">
+          <div><label>GPU Power / Fan</label>
+            <select id="eco" name="eco" autocomplete="off">
+              <option value="3">Silent (~12CU · 33% · Whisper Cool)</option>
+              <option value="2" selected>Quiet (~16CU · 44% · Default)</option>
+              <option value="1">Balanced (~25CU · 70%)</option>
+              <option value="0">Turbo (36CU · 100% · Loud)</option>
+            </select>
+          </div>
+          <div><label>AI Upscaler (RealESRGAN)</label>
+            <select id="ups" name="ups" autocomplete="off" onchange="checkUpscaleGuard();updateProfileHighlight()">
+              <option value="0">Off (Native)</option>
+              <option value="1">1080p Anime HD</option>
+              <option value="2">2x Anime HD</option>
+              <option value="3">4K UHD (up to 3840×2160)</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Seed (0 = random)
+              <span style="float:right;display:flex;gap:5px">
+                <a href="#" onclick="sd.value=0;return false" style="color:#52e3ab;text-decoration:none" title="Random seed each render">🎲</a>
+                <a href="#" onclick="lockLastSeed();return false" style="color:#fbbf24;text-decoration:none" title="Lock last rendered seed">🔒</a>
+              </span>
+            </label>
+            <input id="sd" name="seed" autocomplete="off" type="number" value="0" min="0">
+          </div>
+          <div><label>Batch (1–100)</label><input id="bc" name="batch" autocomplete="off" type="number" value="1" min="1" max="100"></div>
+        </div>
+        <div>
+          <label>Save Batch Into Folder <a href="#" onclick="promptCreateFolder(true);return false" style="float:right;color:#c4b5fd;text-decoration:none">+ New</a></label>
+          <select id="bfolder" autocomplete="off" onchange="pushSettings()">
+            <option value="">(Unsorted / Gallery Root)</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:5px">
+        <button id="go" class="btn full" style="margin-top:0" onclick="gen()" title="Shortcut: Ctrl + Enter">Generate Image (Ctrl+Enter)</button>
+        <button id="can" class="btn stop full" style="margin-top:0;display:none" onclick="cancel()">Cancel Generation</button>
+        <div class="bar" style="margin:4px 0 2px"><div id="fill" class="fill"></div></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <div id="stage">Idle</div>
+          <div id="eta" style="font-size:12px;font-weight:700;color:var(--accent2);white-space:nowrap"></div>
+        </div>
+        <div id="tstat" style="margin-top:0"></div>
+        <div id="st-storage" class="stg-pill"></div>
+      </div>
+    </div>
+
+    <div class="stage-canvas">
     <img id="img" onclick="openLatestInGallery()">
     <div id="ph" style="color:#8ea4c8;max-width:520px;text-align:center;line-height:1.55;background:rgba(10,22,46,.65);border:1px solid var(--border);border-radius:12px;padding:16px 20px">
       <div style="font-weight:700;color:#fff;font-size:14px;margin-bottom:5px">✨ Ready to Create Anime Art on PS4 GPU</div>
@@ -504,6 +539,7 @@ textarea{min-height:68px;resize:vertical}
       <a id="dl" class="btn sec sm" style="text-decoration:none" download="garlic_diffusion.png">Download PNG</a>
     </div>
     <div id="filmstrip" class="filmstrip"></div>
+    </div>
   </div>
 </div>
 
@@ -983,7 +1019,7 @@ textarea{min-height:68px;resize:vertical}
 
 <div class="app-foot">
   <span><b>GarlicDiffusion v1.16</b> · GPLv3 (No Warranty) · Built upon <a href="https://github.com/leonardo-alegria/garlic-llm" target="_blank" style="color:#66b8ff;text-decoration:none">Garlic LLM</a></span>
-  <span>Use Quiet/Silent mode for long sessions · Ensure clear PS4 ventilation · Use at your own risk</span>
+  <span>Use Quiet/Silent mode for long sessions · Ensure clear PS4 ventilation · Use at your own risk · Report bugs on <a href="https://github.com/DJTOMATO/GarlicDiffusion/issues" target="_blank" rel="noopener" style="color:#66b8ff;text-decoration:none">GitHub</a> / <a href="https://discord.gg/Gbyq3kpGjc" target="_blank" rel="noopener" style="color:#99aaff;text-decoration:none">Discord</a></span>
 </div>
 <div id="toast"></div>
 
@@ -1011,11 +1047,64 @@ const SDXL_SIZES=[
   ['768x768','768×768 (Fast SDXL Square)']
 ];
 const SD15_SIZES=[
-  ['512x768','512×768 (Optimal SD 1.5 Portrait → 1080p)'],
-  ['768x512','768×512 (Optimal SD 1.5 Landscape → 1080p)'],
-  ['896x512','896×512 (Optimal SD 1.5 16:9 → 1080p)'],
-  ['512x512','512×512 (Fast SD 1.5 Square)']
+  ['512x512','512×512 (Optimal SD 1.5 Square · Best Faces)'],
+  ['512x768','512×768 (SD 1.5 Portrait · Experimental)'],
+  ['768x512','768×512 (SD 1.5 Landscape · Experimental)']
 ];
+
+let studioControlsHidden=false;
+function applyStudioLayoutUI(){
+  const pg=document.getElementById('pg-studio');
+  if(!pg)return;
+  pg.classList.toggle('controls-hidden',!!studioControlsHidden);
+  const hb=document.getElementById('ctl-hide-btn');
+  if(hb)hb.textContent=studioControlsHidden?'🎛️ Show Sidebar':'🎛️ Hide Sidebar';
+}
+function toggleStudioControls(){
+  studioControlsHidden=!studioControlsHidden;
+  applyStudioLayoutUI();
+}
+applyStudioLayoutUI();
+
+function isPresetSafeForArch(p,is15){
+  if(!is15)return true;
+  const nm=(p.name||'').toLowerCase();
+  const prt=(p.prompt||'').toLowerCase();
+  const mdl=(p.model||'').toLowerCase();
+  if(nm.includes('16:9')||nm.includes('widescreen')||nm.includes('4k'))return false;
+  const w=+(p.width||0),h=+(p.height||0);
+  if(w>0&&h>0&&w>h+128)return false;
+  // Exclude presets tied to SDXL checkpoints or SDXL-only LoRAs; generic scene presets auto-map to 512x512!
+  if(mdl&&(mdl.includes('xl')||mdl.includes('illustrious')||mdl.includes('wai')||mdl.includes('noob')||mdl.includes('animagine')||mdl.includes('hassaku')||mdl.includes('nova')||mdl.includes('pencil')||mdl.includes('walnut')||mdl.includes('plant')))return false;
+  if(nm.includes('lora')&&!nm.includes('sd 1.5')&&!nm.includes('sd1.5'))return false;
+  if(prt.includes('<lora:')&&!nm.includes('sd 1.5')&&!nm.includes('sd1.5')&&!prt.includes('sd15')&&!prt.includes('hifumi'))return false;
+  return true;
+}
+function syncArchControlsUI(arch){
+  const is15=(arch==='sd15');
+  const ezWide=document.querySelector('.ez-btn[data-ezf="wide"]');
+  if(ezWide)ezWide.style.display=is15?'none':'';
+  const ezHd=document.querySelector('.ez-btn[data-ezq="hd"]');
+  if(ezHd)ezHd.style.display=is15?'none':'';
+  const ezBest=document.querySelector('.ez-btn[data-ezq="best"]');
+  if(ezBest)ezBest.textContent=is15?'👑 Best + 1080p':'👑 Best Quality';
+  if(is15&&easyQuality==='hd'){
+    easyQuality='best';
+    document.querySelectorAll('.ez-btn[data-ezq]').forEach(b=>b.classList.toggle('active',b.dataset.ezq===easyQuality));
+  }
+  const fpWide=document.getElementById('fp-wide');
+  if(fpWide)fpWide.style.display=is15?'none':'';
+  const tIllus=document.getElementById('tier-illus');
+  if(tIllus)tIllus.style.display=is15?'none':'';
+  const tWide=document.getElementById('tier-wide');
+  if(tWide)tWide.style.display=is15?'none':'';
+  if(is15&&easyFraming==='wide'){
+    easyFraming='upper';
+    document.querySelectorAll('.ez-btn[data-ezf]').forEach(b=>b.classList.toggle('active',b.dataset.ezf===easyFraming));
+  }
+  renderPresetSelect();
+  renderEasyPresetOptions();
+}
 
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(t._tm);t._tm=setTimeout(()=>t.style.display='none',2800);}
 function fmtEta(sec){
@@ -1046,13 +1135,10 @@ function ensureSizeOption(val){
 }
 function remapSizeForArch(val,isSd15,neo){
   const [w,h]=(val||'832x1216').split('x').map(Number);
-  if(!w||!h)return isSd15?'512x768':'832x1216';
+  if(!w||!h)return isSd15?'512x512':'832x1216';
   const ratio=w/h;
   if(isSd15){
-    if(w<=896&&h<=896)return val;
-    if(ratio>1.45)return '896x512';
-    if(ratio>1.1)return '768x512';
-    if(ratio<0.9)return '512x768';
+    if(w===512&&h===512)return '512x512';
     return '512x512';
   }else{
     if(w>=768||h>=768){
@@ -1078,7 +1164,7 @@ function checkUpscaleGuard(){
   const is15=(lastStatus&&lastStatus.arch==='sd15');
   if(is15&&(w>896||h>896)){
     el.style.display='block';
-    el.innerHTML=`⚠️ <b>${w}×${h}</b> exceeds SD 1.5's native 512–768px window and can cause twin heads/torsos. <a href="#" onclick="sz.value='512x768';ups.value='1';checkUpscaleGuard();return false" style="color:#52e3ab;font-weight:700">Fix: 512×768 + 1080p</a>`;
+    el.innerHTML=`⚠️ <b>${w}×${h}</b> exceeds SD 1.5's native 512px window and can cause twin heads/torsos. <a href="#" onclick="sz.value='512x512';ups.value='1';checkUpscaleGuard();return false" style="color:#52e3ab;font-weight:700">Fix: 512×512 + 1080p</a>`;
   }else if(u===1&&Math.max(w,h)>=1344){
     el.style.display='block';
     el.innerHTML=`💡 <b>${w}×${h}</b> is already sharper than 1080p! <a href="#" onclick="ups.value='0';checkUpscaleGuard();return false" style="color:#52e3ab;font-weight:700">Use Native (Faster)</a> or <a href="#" onclick="ups.value='2';checkUpscaleGuard();return false" style="color:#8cc8ff;font-weight:700">2x HD</a>`;
@@ -1115,6 +1201,8 @@ function applyUiMode(mode,persist){
   uiModeInitialized=true;
   const side=document.querySelector('#pg-studio .side');
   if(side)side.classList.toggle('easy-active',uiMode===0);
+  const pgSt=document.getElementById('pg-studio');
+  if(pgSt)pgSt.classList.toggle('easy-mode',uiMode===0);
   const mb=document.getElementById('mode-btn');
   if(mb){
     mb.className='tab '+(uiMode===0?'mode-easy':'mode-adv');
@@ -1280,7 +1368,8 @@ function renderEasyCharOptions(){
 function renderEasyPresetOptions(){
   const sel=document.getElementById('ez-psel');if(!sel)return;
   const prev=sel.value;
-  const vis=presetItems.map((p,i)=>({p,i})).filter(({p})=>!p.is_speed&&(nsfwAllow||!isPresetNsfw(p)));
+  const is15=!!((lastStatus&&lastStatus.arch==='sd15')||curArch==='sd15');
+  const vis=presetItems.map((p,i)=>({p,i})).filter(({p})=>!p.is_speed&&(nsfwAllow||!isPresetNsfw(p))&&isPresetSafeForArch(p,is15));
   sel.innerHTML='<option value="">— Optional: Pick a Curated Scene —</option>'+
     vis.map(({p,i})=>`<option value="${i}">${p.name.replace(/</g,'&lt;')}</option>`).join('');
   if(prev!==''&&[...sel.options].some(o=>o.value===prev))sel.value=prev;
@@ -1297,6 +1386,7 @@ function capStackedLorasInText(txt,isDmd){
   const out=txt.replace(re,(_,n,w)=>`<lora:${n}:${(parseFloat(w)*scale).toFixed(2)}>`);
   return {text:out,capped:true};
 }
+const EASY_QUALITY_STRIP=['masterpiece','best quality','amazing quality','very aesthetic','absurdres','highres','newest','high score','great score'];
 function cleanSceneForEasy(raw,hasChar){
   if(!raw)return '';
   const is15=!!(lastStatus&&lastStatus.arch==='sd15');
@@ -1314,6 +1404,7 @@ function cleanSceneForEasy(raw,hasChar){
     if(!t)return false;
     const low=t.toLowerCase();
     if(ALL_FRAMING_TAGS.includes(low))return false;
+    if(EASY_QUALITY_STRIP.includes(low))return false;
     if(isAnim&&(low==='better_eyes'||low==='civittop50anime'))return false;
     if(hasChar&&EASY_CHAR_CONFLICTS.some(c=>low.includes(c)))return false;
     return true;
@@ -1345,10 +1436,24 @@ function setEasyFraming(kind){
   document.querySelectorAll('[data-ezf]').forEach(b=>b.classList.toggle('active',b.getAttribute('data-ezf')===kind));
   syncEasyToStudio();
 }
+let easyUpscaleOverride=null;
 function setEasyQuality(q){
   easyQuality=q;
+  easyUpscaleOverride=null;
   document.querySelectorAll('[data-ezq]').forEach(b=>b.classList.toggle('active',b.getAttribute('data-ezq')===q));
   syncEasyToStudio();
+}
+function onEasyToggleChanged(which,val){
+  if(which==='autoq'){
+    const el=document.getElementById('autoq');if(el)el.checked=!!val;
+    pushSettings();updateTokenCounter();updateEasySummary();
+  }else if(which==='autoff'){
+    const el=document.getElementById('autoff');if(el)el.checked=!!val;
+    pushSettings();updateEasySummary();
+  }else if(which==='ups'){
+    easyUpscaleOverride=!!val;
+    syncEasyToStudio();pushSettings();
+  }
 }
 function rollEasySurprise(){
   const keepIdx=getEasySelectedCharIdx();
@@ -1381,9 +1486,21 @@ function updateEasySummary(){
   const upTxt=+ups.value===1?' + 1080p RealESRGAN':(+ups.value===3?' + 4K UHD':'');
   const cIdx=getEasySelectedCharIdx();
   const cLbl=(cIdx!==''&&charItems[+cIdx])?` · Char: <b>${charItems[+cIdx].name.replace(/</g,'&lt;')}</b>`:'';
-  el.innerHTML=`🛡️ Auto-Tuned: <b>${sz.value}</b> · <b>${st.value} steps</b> · <b>CFG ${cfg.value}</b> · <b>${smp.value}</b>${upTxt}${cLbl} · Hand/Eye Shield ON`;
+  const aqOn=!!document.getElementById('autoq')?.checked;
+  const ffOn=!!document.getElementById('autoff')?.checked;
+  el.innerHTML=`🛡️ Auto-Tuned: <b>${sz.value}</b> · <b>${st.value} steps</b> · <b>CFG ${cfg.value}</b> · <b>${smp.value}</b>${upTxt}${cLbl} · Shield ${aqOn?'ON':'OFF'} · FaceFix ${ffOn?'ON':'OFF'}`;
 }
 function syncEasyToStudio(){
+  const is15=!!((lastStatus&&lastStatus.arch==='sd15')||curArch==='sd15');
+  const neo=!(lastStatus&&lastStatus.neo===0);
+  if(is15&&easyFraming==='wide'){
+    easyFraming='upper';
+    document.querySelectorAll('.ez-btn[data-ezf]').forEach(b=>b.classList.toggle('active',b.dataset.ezf===easyFraming));
+  }
+  if(is15&&easyQuality==='hd'){
+    easyQuality='best';
+    document.querySelectorAll('.ez-btn[data-ezq]').forEach(b=>b.classList.toggle('active',b.dataset.ezq===easyQuality));
+  }
   const f=FRAMING_SETS[easyFraming]||FRAMING_SETS.full;
   const ezSel=document.getElementById('ez-chsel');
   const cIdx=getEasySelectedCharIdx();
@@ -1403,27 +1520,40 @@ function syncEasyToStudio(){
   if(lsel&&lsel.value){lsel.value='';onLoraChange(true);}
   const isDmd=(curModel||'').toLowerCase().includes('dmd');
   pr.value=capStackedLorasInText(dedupeTagString(parts.join(', ')),isDmd).text;
-  let baseNg=stripTagSet(ng.value||'','cropped legs, feet out of frame');
+  // Always start from the active model's clean preset negative (with EasyNegative first on SD 1.5)
+  // so stale scenic negatives like "people, human" never leak into character renders!
+  const defNg=is15
+    ?'EasyNegative, (worst quality, low quality:1.4), lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad eyes, blurry, text, watermark'
+    :'lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad eyes, asymmetrical eyes, blurry, worst quality, low quality';
+  let baseNg=(lastPreset&&lastPreset.negative)?lastPreset.negative:defNg;
+  baseNg=stripTagSet(baseNg,'cropped legs, feet out of frame, people, human');
+  if(is15&&!baseNg.toLowerCase().includes('easynegative'))baseNg='EasyNegative, '+baseNg;
   if(f.neg)baseNg=dedupeTagString((baseNg?baseNg+', ':'')+f.neg);
   ng.value=dedupeTagString(baseNg);
-  document.getElementById('autoq').checked=true;
+  const ezAq=document.getElementById('ez-autoq');
+  const ezFf=document.getElementById('ez-autoff');
+  const ezUp=document.getElementById('ez-ups');
+  if(ezAq)ezAq.checked=!!document.getElementById('autoq')?.checked;
+  if(ezFf)ezFf.checked=!!document.getElementById('autoff')?.checked;
 
-  const is15=!!(lastStatus&&lastStatus.arch==='sd15');
-  const neo=!(lastStatus&&lastStatus.neo===0);
+  let wantUps=0;
   if(easyQuality==='fast'&&lastSpeedPreset){
-    st.value=lastSpeedPreset.steps;cfg.value=lastSpeedPreset.cfg;smp.value=lastSpeedPreset.sampler;ups.value='0';
-    ensureSizeOption(easyFraming==='wide'?(is15?'896x512':'1024x576'):(lastSpeedPreset.width+'x'+lastSpeedPreset.height));
+    st.value=lastSpeedPreset.steps;cfg.value=lastSpeedPreset.cfg;smp.value=lastSpeedPreset.sampler;wantUps=0;
+    ensureSizeOption(is15?'512x512':(easyFraming==='wide'?'1024x576':(lastSpeedPreset.width+'x'+lastSpeedPreset.height)));
   }else if(easyQuality==='hd'){
     if(lastPreset){st.value=lastPreset.steps;cfg.value=lastPreset.cfg;smp.value=lastPreset.sampler;}
-    ups.value='1';
-    ensureSizeOption(easyFraming==='wide'?(is15?'896x512':'1280x704'):(is15?'512x768':(neo?'832x1216':'768x1024')));
+    wantUps=1;
+    ensureSizeOption(is15?'512x512':(easyFraming==='wide'?'1280x704':(neo?'832x1216':'768x1024')));
   }else{
     if(lastPreset){
       st.value=lastPreset.steps;cfg.value=lastPreset.cfg;smp.value=lastPreset.sampler;
-      ups.value=String(easyFraming==='wide'?1:(lastPreset.upscale||0));
-      ensureSizeOption(easyFraming==='wide'?(is15?'896x512':'1280x704'):(lastPreset.width+'x'+lastPreset.height));
+      wantUps=easyFraming==='wide'?1:(lastPreset.upscale||0);
+      ensureSizeOption(is15?'512x512':(easyFraming==='wide'?'1280x704':(lastPreset.width+'x'+lastPreset.height)));
     }
   }
+  if(easyUpscaleOverride!==null)wantUps=easyUpscaleOverride?1:0;
+  ups.value=String(wantUps);
+  if(ezUp)ezUp.checked=wantUps>0;
   onPromptEdited();checkUpscaleGuard();updateProfileHighlight();updateEasySummary();
 }
 
@@ -1709,9 +1839,9 @@ function applyFraming(kind){
   const neo=!(lastStatus&&lastStatus.neo===0);
   if(kind==='full'){
     const [w,h]=(sz.value||'').split('x').map(Number);
-    if(w>=h)sz.value=is15?'512x768':(neo?'832x1216':'768x1024');
+    if(w>=h)sz.value=is15?'512x512':(neo?'832x1216':'768x1024');
   }else if(kind==='wide'){
-    sz.value=is15?'896x512':'1280x704';
+    sz.value=is15?'512x512':'1280x704';
   }
   checkUpscaleGuard();onPromptEdited();
   toast('Applied '+kind+' framing!');
@@ -1762,8 +1892,14 @@ function syncSettingsFromStatus(d,forceAll){
   const c=d&&d.current;if(!c)return;
   const setIfIdle=(el,val)=>{if(el&&(forceAll||document.activeElement!==el))el.value=val;};
   if(d.nsfw_allow!==undefined&&forceAll){nsfwAllow=!!d.nsfw_allow;applyNsfwUI();}
-  if(d.auto_quality!==undefined&&forceAll)document.getElementById('autoq').checked=!!d.auto_quality;
-  if(d.auto_face_fix!==undefined&&forceAll)document.getElementById('autoff').checked=!!d.auto_face_fix;
+  if(d.auto_quality!==undefined&&forceAll){
+    document.getElementById('autoq').checked=!!d.auto_quality;
+    const ezAq=document.getElementById('ez-autoq');if(ezAq)ezAq.checked=!!d.auto_quality;
+  }
+  if(d.auto_face_fix!==undefined&&forceAll){
+    document.getElementById('autoff').checked=!!d.auto_face_fix;
+    const ezFf=document.getElementById('ez-autoff');if(ezFf)ezFf.checked=!!d.auto_face_fix;
+  }
   if(c.prompt!==undefined)setIfIdle(pr,c.prompt);
   if(c.negative!==undefined)setIfIdle(ng,c.negative);
   if(c.width&&c.height&&(forceAll||document.activeElement!==sz))ensureSizeOption(c.width+'x'+c.height);
@@ -2232,20 +2368,20 @@ function applyQualityTier(tier){
     sz.value=isSd15?'512x512':'768x768';st.value=spdSteps;ups.value='0';
     toast('Applied Fast Draft tier');
   }else if(tier==='mid'){
-    sz.value=isSd15?'512x768':'832x1216';st.value=optSteps;ups.value='0';
-    toast('Applied Balanced Native Portrait');
+    sz.value=isSd15?'512x512':'832x1216';st.value=optSteps;ups.value='0';
+    toast(isSd15?'Applied Native 512×512 SD 1.5 Square':'Applied Balanced Native Portrait');
   }else if(tier==='illus'){
-    if(isSd15){sz.value='512x768';st.value=optSteps;ups.value='1';toast('SD 1.5 Anatomy-Safe 512×768 + 1080p RealESRGAN');}
+    if(isSd15){sz.value='512x512';st.value=optSteps;ups.value='1';toast('SD 1.5 Native 512×512 + 1080p RealESRGAN');}
     else if(!isNeo){sz.value='768x1024';st.value=optSteps;ups.value='1';toast('Base PS4 768×1024 + 1080p RealESRGAN');}
     else{sz.value='1024x1344';st.value=optSteps;ups.value='0';toast('Applied 1024×1344 Best Illustrious/SDXL Detail');}
   }else if(tier==='hd'){
-    sz.value=isSd15?'512x768':'832x1216';st.value=optSteps;ups.value='1';
+    sz.value=isSd15?'512x512':'832x1216';st.value=optSteps;ups.value='1';
     toast('Applied Crisp 1080p AI Upscale tier');
   }else if(tier==='wide'){
-    sz.value=isSd15?'896x512':'1280x704';st.value=optSteps;ups.value='1';
-    toast('Applied 16:9 Full HD 1080p Wallpaper tier');
+    sz.value=isSd15?'512x512':'1280x704';st.value=optSteps;ups.value='1';
+    toast(isSd15?'SD 1.5 uses native 512×512 + 1080p upscale':'Applied 16:9 Full HD 1080p Wallpaper tier');
   }else if(tier==='4k'){
-    sz.value=isSd15?'896x512':'1280x704';st.value=optSteps;ups.value='3';
+    sz.value=isSd15?'512x512':'1280x704';st.value=optSteps;ups.value='3';
     toast('Applied 4K UHD tier (RealESRGAN up to 3840×2160)');
   }
   checkUpscaleGuard();updateProfileHighlight();
@@ -2652,6 +2788,12 @@ function openModal(idx){
   syncModalStarBtn(!!it.starred);
   const mfs=document.getElementById('mfolder-sel');
   if(mfs){populateFolderSelects();mfs.value=it.folder||'';}
+  const tBreak=(it.unet_sec>0.05)
+    ? `UNet ${it.unet_sec.toFixed(1)}s${it.eff_tflops?` (${it.eff_tflops.toFixed(2)} TF)`:''} · VAE ${(it.vae_sec||0).toFixed(1)}s`
+      +(it.upscale_sec>0.05?` · Upscale ${it.upscale_sec.toFixed(1)}s`:'')
+      +(it.face_fix_sec>0.05?` · FaceFix ${it.face_fix_sec.toFixed(1)}s`:'')
+      +` · Rest ${(it.cooldown_sec||0).toFixed(1)}s`
+    : '';
   document.getElementById('mchips').innerHTML=
     `<span class="chip ${it.upscaled?'hd':''}">${it.width}x${it.height}</span>`+
     `<span class="chip">${it.model||'unknown'}</span>`+
@@ -2659,7 +2801,8 @@ function openModal(idx){
     `<span class="chip">Seed ${it.seed}</span>`+
     (it.folder?`<span class="chip fld">📁 ${it.folder.replace(/</g,'&lt;')}</span>`:'')+
     (it.lora?`<span class="chip" style="color:#f59adb;border-color:#5a2d5c">LoRA: ${it.lora.replace(/</g,'&lt;')}</span>`:'')+
-    (it.sec?`<span class="chip">${it.sec.toFixed(1)}s</span>`:'');
+    (it.sec?`<span class="chip">${it.sec.toFixed(1)}s</span>`:'')+
+    (tBreak?`<span class="chip" style="color:#9cc4f8;border-color:#264575">${tBreak}</span>`:'');
   document.getElementById('mdl-dl').href=`/gallery/${it.id}.png`;
   document.getElementById('mdl-dl').download=`${it.id}.png`;
   document.getElementById('rz-w').value=it.width;
@@ -2811,7 +2954,8 @@ document.addEventListener('keydown',e=>{
 function isPresetNsfw(p){return !!(p&&(p.nsfw||p.nsfw_only));}
 function renderPresetSelect(){
   const prev=psel.value;
-  const vis=presetItems.map((p,i)=>({p,i})).filter(({p})=>nsfwAllow||!isPresetNsfw(p));
+  const is15=!!((lastStatus&&lastStatus.arch==='sd15')||curArch==='sd15');
+  const vis=presetItems.map((p,i)=>({p,i})).filter(({p})=>(nsfwAllow||!isPresetNsfw(p))&&isPresetSafeForArch(p,is15));
   const spd=vis.filter(({p})=>p.is_speed);
   const nsfwList=vis.filter(({p})=>!p.is_speed&&isPresetNsfw(p));
   const loraList=vis.filter(({p})=>!p.is_speed&&!isPresetNsfw(p)&&(p.prompt||'').includes('<lora:'));
@@ -3174,6 +3318,7 @@ async function poll(){
       buildSizeOptions(curArch,sz.value);
       loadLoras();
     }
+    if(d.arch)syncArchControlsUI(d.arch);
     const canSwitch=(d.gpu_ready!==undefined?d.gpu_ready:d.ready)&&!d.busy&&!d.switching;
     const zCard=document.getElementById('zero-mdl-card');
     const hasNoModels=!!(d.gpu_ready&&(!d.models||d.models.length===0));
@@ -3242,7 +3387,12 @@ async function poll(){
       document.getElementById('hvram').textContent=`VRAM ${d.gpu_used_mb} / ${d.gpu_total_mb} MiB`;
       document.getElementById('hvfill').style.width=Math.min(100,Math.round(100*d.gpu_used_mb/d.gpu_total_mb))+'%';
     }
-    tstat.textContent=d.eff_tflops?`UNet ${d.unet_gpu_sec.toFixed(1)}s (${d.eff_tflops.toFixed(2)} TF) · VAE ${d.vae_sec.toFixed(1)}s`+(d.upscale_sec?` · Upscale ${d.upscale_sec.toFixed(1)}s`:'')+` · Rest ${d.cooldown_sec.toFixed(1)}s`:(d.bench_gemm_tflops?`GPU GEMM: Turbo ${d.bench_mode_tf[0].toFixed(2)} / Bal ${d.bench_mode_tf[1].toFixed(2)} / Quiet ${d.bench_mode_tf[2].toFixed(2)} / Silent ${d.bench_mode_tf[3].toFixed(2)} TF`:'');
+    const tp=document.getElementById('htemp-pill');
+    if(tp&&d.temp_c>0){
+      tp.style.display='inline-flex';
+      document.getElementById('htemp').textContent=`${d.temp_c}°C`+(d.temp_peak_c>d.temp_c?` (pk ${d.temp_peak_c}°C)`:'');
+    }
+    tstat.textContent=d.eff_tflops?`UNet ${d.unet_gpu_sec.toFixed(1)}s (${d.eff_tflops.toFixed(2)} TF) · VAE ${d.vae_sec.toFixed(1)}s`+(d.upscale_sec>0.05?` · Upscale ${d.upscale_sec.toFixed(1)}s`:'')+(d.face_fix_sec>0.05?` · FaceFix ${d.face_fix_sec.toFixed(1)}s`:'')+` · Rest ${d.cooldown_sec.toFixed(1)}s`:(d.bench_gemm_tflops?`GPU GEMM: Turbo ${d.bench_mode_tf[0].toFixed(2)} / Bal ${d.bench_mode_tf[1].toFixed(2)} / Quiet ${d.bench_mode_tf[2].toFixed(2)} / Silent ${d.bench_mode_tf[3].toFixed(2)} TF`:'');
     fill.style.width=Math.round((d.progress||0)*100)+'%';
     stage.style.color=d.error?'#ff7a85':'#b2c4e0';
     stage.textContent=d.error||d.stage||'Ready';

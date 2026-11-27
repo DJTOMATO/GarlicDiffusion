@@ -678,13 +678,16 @@ static void handle_client(int fd) {
                 pos += (size_t)snprintf(out + pos, cap - pos,
                                         "%s{\"id\":\"%s\",\"model\":\"%s\",\"width\":%u,\"height\":%u,"
                                         "\"steps\":%u,\"cfg\":%.2f,\"sampler\":\"%s\",\"seed\":%llu,"
-                                        "\"eco\":%d,\"upscaled\":%d,\"sec\":%.2f,\"bytes\":%zu,"
+                                        "\"eco\":%d,\"upscaled\":%d,\"sec\":%.2f,\"unet_sec\":%.2f,\"vae_sec\":%.2f,"
+                                        "\"upscale_sec\":%.2f,\"face_fix_sec\":%.2f,\"cooldown_sec\":%.2f,\"eff_tflops\":%.3f,\"bytes\":%zu,"
                                         "\"lora\":\"%s\",\"folder\":\"%s\",\"starred\":%s,"
                                         "\"prompt\":\"%s\",\"negative\":\"%s\"}",
                                         i ? "," : "", items[i].id, md, items[i].width, items[i].height,
                                         items[i].steps, (double)items[i].cfg, sm,
                                         (unsigned long long)items[i].seed, items[i].eco, items[i].upscaled,
-                                        items[i].sec, items[i].bytes, lr, fl,
+                                        items[i].sec, items[i].unet_sec, items[i].vae_sec,
+                                        items[i].upscale_sec, items[i].face_fix_sec, items[i].cooldown_sec,
+                                        items[i].eff_tflops, items[i].bytes, lr, fl,
                                         items[i].starred ? "true" : "false", pr, ng);
             }
             if (paged) { out[pos++] = ']'; out[pos++] = '}'; }
@@ -716,7 +719,7 @@ static void handle_client(int fd) {
         const char* id = path + 14;
         GalleryItem it;
         if (gallery_get(id, &it) == 0) {
-            char pr[1500], ng[800], md[128], sm[32], lr[192], fl[96], out[2900];
+            char pr[1500], ng[800], md[128], sm[32], lr[192], fl[96], out[3200];
             json_escape(it.prompt, pr, sizeof(pr));
             json_escape(it.negative, ng, sizeof(ng));
             json_escape(it.model, md, sizeof(md));
@@ -726,11 +729,14 @@ static void handle_client(int fd) {
             int n = snprintf(out, sizeof(out),
                              "{\"id\":\"%s\",\"model\":\"%s\",\"width\":%u,\"height\":%u,"
                              "\"steps\":%u,\"cfg\":%.2f,\"sampler\":\"%s\",\"seed\":%llu,"
-                             "\"eco\":%d,\"upscaled\":%d,\"sec\":%.2f,\"bytes\":%zu,"
+                             "\"eco\":%d,\"upscaled\":%d,\"sec\":%.2f,\"unet_sec\":%.2f,\"vae_sec\":%.2f,"
+                             "\"upscale_sec\":%.2f,\"face_fix_sec\":%.2f,\"cooldown_sec\":%.2f,\"eff_tflops\":%.3f,\"bytes\":%zu,"
                              "\"lora\":\"%s\",\"folder\":\"%s\",\"starred\":%s,"
                              "\"prompt\":\"%s\",\"negative\":\"%s\"}",
                              it.id, md, it.width, it.height, it.steps, (double)it.cfg, sm,
-                             (unsigned long long)it.seed, it.eco, it.upscaled, it.sec, it.bytes,
+                             (unsigned long long)it.seed, it.eco, it.upscaled, it.sec,
+                             it.unet_sec, it.vae_sec, it.upscale_sec, it.face_fix_sec,
+                             it.cooldown_sec, it.eff_tflops, it.bytes,
                              lr, fl, it.starred ? "true" : "false", pr, ng);
             send_resp(fd, 200, "OK", "application/json", out, (size_t)n);
         } else {
@@ -1534,7 +1540,7 @@ static void handle_client(int fd) {
                          "\"update\":{\"checked\":%s,\"available\":%s,\"pkg_ready\":%s,\"current\":\"%s\",\"remote\":\"%s\","
                          "\"size_mb\":%u,\"changelog\":\"%s\",\"dl_active\":%s,\"dl_pct\":%d,\"dl_speed\":%.2f,\"dl_stage\":\"%s\"},"
                          "\"error\":\"%s\",\"width\":%u,\"height\":%u,\"steps\":%u,\"cfg\":%.2f,\"seed\":%llu,"
-                         "\"last_sec\":%.2f,\"unet_gpu_sec\":%.2f,\"vae_sec\":%.2f,\"upscale_sec\":%.2f,\"cooldown_sec\":%.2f,"
+                         "\"last_sec\":%.2f,\"unet_gpu_sec\":%.2f,\"vae_sec\":%.2f,\"upscale_sec\":%.2f,\"face_fix_sec\":%.2f,\"cooldown_sec\":%.2f,"
                          "\"eff_tflops\":%.3f,\"bench_gemm_tflops\":%.3f,\"bench_attn_ms\":%.2f,"
                          "\"bench_mode_tf\":[%.3f,%.3f,%.3f,%.3f],"
                          "\"has_image\":%s,\"image_gen_id\":%u,\"batch_cur\":%u,\"batch_total\":%u,\"shutdown_after\":%s,\"last_gallery_id\":\"%s\","
@@ -1560,7 +1566,7 @@ static void handle_client(int fd) {
                          ota_dl_active ? "true" : "false", ota_dl_pct, udl.speed_mbs, ustg_esc,
                          err_esc, g_st->width, g_st->height, g_st->steps, (double)g_st->cfg,
                          (unsigned long long)g_st->seed, g_st->last_sec,
-                         g_st->unet_gpu_sec, g_st->vae_sec, g_st->upscale_sec, g_st->cooldown_sec,
+                         g_st->unet_gpu_sec, g_st->vae_sec, g_st->upscale_sec, g_st->face_fix_sec, g_st->cooldown_sec,
                          g_st->eff_tflops, g_st->bench_gemm_tflops, g_st->bench_attn_ms,
                          g_st->bench_mode_tf[0], g_st->bench_mode_tf[1],
                          g_st->bench_mode_tf[2], g_st->bench_mode_tf[3],

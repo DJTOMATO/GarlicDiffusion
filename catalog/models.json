@@ -90,24 +90,6 @@
     "repo": "DJTomato/ps4-diffusion-models"
   },
   {
-    "id": "Animagine_XL_4_dmd2",
-    "title": "Animagine XL 4.0 DMD2 (Fast SDXL)",
-    "arch": "sdxl",
-    "size_mb": 3716,
-    "desc": "Clean modern anime · 5 steps CFG 1.1 LCM (~44s Pro) · Standalone SDXL",
-    "files": "clip_g.psd1,clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
-    "repo": "DJTomato/ps4-diffusion-models"
-  },
-  {
-    "id": "NoobAI_XL_1.1_dmd2",
-    "title": "NoobAI-XL 1.1 DMD2 (Fast SDXL)",
-    "arch": "sdxl",
-    "size_mb": 3716,
-    "desc": "Crisp Danbooru anime · 6 steps CFG 1.2 LCM (~50s Pro) · Standalone SDXL",
-    "files": "clip_g.psd1,clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
-    "repo": "DJTomato/ps4-diffusion-models"
-  },
-  {
     "id": "waiNSFWIllustrious_v140_8step",
     "title": "WAI-Illustrious v14 8-Step (Hyper-SD)",
     "arch": "sdxl",
@@ -153,11 +135,11 @@
     "repo": "DJTomato/ps4-diffusion-models"
   },
   {
-    "id": "DreamShaper_8",
-    "title": "DreamShaper 8 (2.5D / Fantasy SD 1.5)",
+    "id": "Anything_V5",
+    "title": "Anything V5 (Classic 2D Anime SD 1.5)",
     "arch": "sd15",
-    "size_mb": 1220,
-    "desc": "Versatile 2.5D fantasy/illustration · 1.5 GiB VRAM · Base PS4 ready",
+    "size_mb": 1031,
+    "desc": "Crisp classic 2D anime · 1.5 GiB VRAM · Auto 1080p RealESRGAN",
     "files": "clip_l.psd1,preset.cfg,unet.psd1,vae.psd1",
     "repo": "DJTomato/ps4-diffusion-models"
   }

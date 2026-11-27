@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Verified Model Catalog &amp; Side-by-Side Comparison — GarlicDiffusion PS4</title>
+<meta name="description" content="Side-by-side PS4 Pro Hatsune Miku benchmark comparison of every verified SDXL DMD2 and SD 1.5 model available for 1-click download in GarlicDiffusion v1.16.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+  <div class="wrap nav-in">
+    <a class="brand" href="index.html"><img src="logo.svg" alt="GarlicDiffusion logo"> <span>Garlic <span style="color:#3fa9f5">Diffusion</span></span> <span class="chip ok">v1.16 PS4</span></a>
+    <div class="nav-links">
+      <a href="index.html">Overview</a>
+      <a href="features.html">Features</a>
+      <a class="active" href="models.html">Models</a>
+      <a href="scenic.html">Scenic Gallery</a>
+      <a href="benchmarks.html">Benchmarks</a>
+      <a href="https://ko-fi.com/djtomato" target="_blank" rel="noopener" style="color:#55e6b0">Ko-fi</a>
+      <a href="https://discord.gg/Gbyq3kpGjc" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/DJTOMATO/GarlicDiffusion" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<main class="wrap">
+  <div class="hero compact">
+    <div class="pill">1-Click In-App Downloads · DJTomato/ps4-diffusion-models · Verified on PS4 Pro v1.16</div>
+    <h1>Verified PS4 Model Catalog</h1>
+    <p class="sub">Every checkpoint below was benchmarked out-of-the-box on a <b>PlayStation 4 Pro (Quiet 20 CU)</b> using its exact built-in GarlicDiffusion v1.16 preset — no hidden LoRA stacks or manual cherry-picking. Only checkpoints that pass visual quality review ship on Hugging Face.</p>
+    <div class="cta">
+      <a class="btn mint" href="https://huggingface.co/DJTomato/ps4-diffusion-models" target="_blank" rel="noopener">Browse Hugging Face Repo</a>
+      <a class="btn ghost" href="benchmarks.html">Full Timing Matrix →</a>
+    </div>
+  </div>
+
+  <!-- MODEL COMPARISON GALLERY (populated with final v1.16 benchmark winners) -->
+  <section id="sdxl-models">
+    <h2>SDXL &amp; Illustrious Checkpoints (Native 1024×1344)</h2>
+    <p class="lead">Pre-quantized to Q8_0 (~2.6–3.7 GiB) with DMD2 4-step or Hyper-SD 8-step distillation for desktop-grade 1.38 MP anime illustrations in ~45–90 seconds on PS4 Pro (automatically scales to <code>768×1024</code> on Base PS4 / Slim).</p>
+    <div class="samples" id="sdxl-catalog-grid">
+      <div class="scard">
+        <img loading="lazy" src="samples/v116_miku_wai_v17_dmd2.jpg" alt="WAI-Illustrious v17 DMD2 Hatsune Miku PS4 Pro v1.16">
+        <div class="smeta">
+          <div>
+            <b>WAI-Illustrious v17 DMD2</b>
+            <div class="subline">#1 Flagship · Concert Stage · 1024×1344 Native · 4 stp · CFG 1.0 · LCM</div>
+          </div>
+          <div class="chips"><span class="chip ok">170.0s (incl. 49.2s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
+        </div>
+      </div>
+      <div class="scard">
+        <img loading="lazy" src="samples/v116_miku_wai_v17_sakura.jpg" alt="WAI-Illustrious v17 DMD2 (Sakura) Hatsune Miku PS4 Pro v1.16">
+        <div class="smeta">
+          <div>
+            <b>WAI-Illustrious v17 DMD2 (Sakura)</b>
+            <div class="subline">Cherry Blossom Night Lanterns · 1024×1344 Native · 4 stp · CFG 1.0 · LCM</div>
+          </div>
+          <div class="chips"><span class="chip ok">169.9s (incl. 49.2s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
+        </div>
+      </div>
+      <div class="scard">
+        <img loading="lazy" src="samples/v116_miku_prefect_v2_dmd2.jpg" alt="Prefect Illustrious XL v2 DMD2 Hatsune Miku PS4 Pro v1.16">
+        <div class="smeta">
+          <div>
+            <b>Prefect Illustrious XL v2 DMD2</b>
+            <div class="subline">Clean Modern Anime Key Visual · 1024×1344 Native · 4 stp · CFG 1.0 · LCM</div>
+          </div>
+          <div class="chips"><span class="chip ok">170.0s (incl. 49.3s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
+        </div>
+      </div>
+      <div class="scard">
+        <img loading="lazy" src="samples/v116_miku_nova_v18_dmd2.jpg" alt="Nova Anime XL v18 DMD2 Hatsune Miku PS4 Pro v1.16">
+        <div class="smeta">
+          <div>
+            <b>Nova Anime XL v18 DMD2</b>
+            <div class="subline">Vibrant Cel-Shaded Contrast · 1024×1344 Native · 4 stp · CFG 1.0 · LCM</div>
+          </div>
+          <div class="chips"><span class="chip ok">169.9s (incl. 49.2s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
+        </div>
+      </div>
+      <div class="scard">
+        <img loading="lazy" src="samples/v116_miku_wai_v14_dmd2.jpg" alt="WAI-Illustrious v14 DMD2 Hatsune Miku PS4 Pro v1.16">
+        <div class="smeta">
+          <div>
+            <b>WAI-Illustrious v14 DMD2</b>
+            <div class="subline">Classic Illustrious Balance · 1024×1344 Native · 4 stp · CFG 1.0 · LCM</div>
+          </div>
+          <div class="chips"><span class="chip ok">169.9s (incl. 49.2s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
+        </div>
+      </div>
+      <div class="scard">
+        <img loading="lazy" src="samples/v116_miku_plant_milk_walnut.jpg" alt="Plant Milk Walnut DMD2 Hatsune Miku PS4 Pro v1.16">
+        <div class="smeta">
+          <div>
+            <b>Plant Milk Walnut DMD2</b>
+            <div class="subline">Soft Painterly / Ghibli Warmth · 1024×1344 Native · 4 stp · CFG 1.0 · LCM</div>
+          </div>
+          <div class="chips"><span class="chip ok">170.0s (incl. 49.2s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
+        </div>
+      </div>
+      <div class="scard">
+        <img loading="lazy" src="samples/v116_miku_obsession_v4_dmd2.jpg" alt="Obsession Illustrious v4 DMD2 Hatsune Miku PS4 Pro v1.16">
+        <div class="smeta">
+          <div>
+            <b>Obsession Illustrious v4 DMD2</b>
+            <div class="subline">Glossy Studio Illustration · 1024×1344 Native · 4 stp · CFG 1.0 · LCM</div>
+          </div>
+          <div class="chips"><span class="chip ok">169.9s (incl. 49.2s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
+        </div>
+      </div>
+      <div class="scard">
+        <img loading="lazy" src="samples/v116_miku_hassaku_v31_dmd2.jpg" alt="Hassaku XL v3.1 DMD2 Hatsune Miku PS4 Pro v1.16">
+        <div class="smeta">
+          <div>
+            <b>Hassaku XL v3.1 DMD2</b>
+            <div class="subline">Dynamic Expressive Poses · 1024×1344 Native · 4 stp · CFG 1.0 · LCM</div>
+          </div>
+          <div class="chips"><span class="chip ok">169.9s (incl. 49.2s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
+        </div>
+      </div>
+      <div class="scard">
+        <img loading="lazy" src="samples/v116_miku_pencil_v32_dmd2.jpg" alt="Illustrious Pencil v3.2 DMD2 Hatsune Miku PS4 Pro v1.16">
+        <div class="smeta">
+          <div>
+            <b>Illustrious Pencil v3.2 DMD2</b>
+            <div class="subline">Warm Artbook Spotlight Style · 1024×1344 Native · 4 stp · CFG 1.0 · LCM</div>
+          </div>
+          <div class="chips"><span class="chip ok">169.9s (incl. 49.2s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
+        </div>
+      </div>
+      <div class="scard">
+        <img loading="lazy" src="samples/v116_miku_wai_v14_8step.jpg" alt="WAI-Illustrious v14 8-Step Hatsune Miku PS4 Pro v1.16">
+        <div class="smeta">
+          <div>
+            <b>WAI-Illustrious v14 8-Step</b>
+            <div class="subline">Hyper-SDXL High Detail (CFG 3.5) · 1024×1344 Native · 8 stp · CFG 3.5 · Euler</div>
+          </div>
+          <div class="chips"><span class="chip ok">409.6s (incl. 91.2s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
+        </div>
+      </div>
+      <div class="scard">
+        <img loading="lazy" src="samples/v116_miku_wai_v14_20step.jpg" alt="WAI-Illustrious v14 (20-Step) Hatsune Miku PS4 Pro v1.16">
+        <div class="smeta">
+          <div>
+            <b>WAI-Illustrious v14 (20-Step)</b>
+            <div class="subline">Non-Distilled Reference Baseline · 1024×1344 Native · 20 stp · CFG 6.0 · DPM++ 2M Karras</div>
+          </div>
+          <div class="chips"><span class="chip ok">847.5s (incl. 133.1s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="sd15-models">
+    <h2>SD 1.5 Checkpoints (Native 512×512 → 1080×1080 Real-ESRGAN)</h2>
+    <p class="lead">Ultra-lightweight (~0.9–1.2 GiB, <b>1.54 GiB VRAM</b>) — ideal for <b>Base PS4 / PS4 Slim</b> and fast iterations. GarlicDiffusion v1.16 generates every SD 1.5 render at anatomy-safe <code>512×512</code> with built-in <b>EasyNegative TI</b> + <b>Auto Face Fix</b> and auto-upscales to crisp <code>1080×1080</code>.</p>
+    <div class="samples" id="sd15-catalog-grid">
+      <div class="scard sq">
+        <img loading="lazy" src="samples/v116_miku_meinamix_v11.jpg" alt="MeinaMix V11 Hatsune Miku PS4 Pro v1.16">
+        <div class="smeta">
+          <div>
+            <b>MeinaMix V11</b>
+            <div class="subline">SD 1.5 Best Overall · Jewel Eyes · 512×512 → 1080×1080 · 20 stp · CFG 6.5 · DPM++ 2M Karras</div>
+          </div>
+          <div class="chips"><span class="chip ok">154.0s (incl. 57.3s FaceFix)</span><span class="chip">1754 MiB VRAM</span></div>
+        </div>
+      </div>
+      <div class="scard sq">
+        <img loading="lazy" src="samples/v116_miku_ghostmix_v2.jpg" alt="GhostMix V2 Hatsune Miku PS4 Pro v1.16">
+        <div class="smeta">
+          <div>
+            <b>GhostMix V2</b>
+            <div class="subline">Luminous Glossy Anime · 512×512 → 1080×1080 · 20 stp · CFG 6.5 · DPM++ 2M Karras</div>
+          </div>
+          <div class="chips"><span class="chip ok">154.1s (incl. 57.3s FaceFix)</span><span class="chip">1754 MiB VRAM</span></div>
+        </div>
+      </div>
+      <div class="scard sq">
+        <img loading="lazy" src="samples/v116_miku_anything_v5.jpg" alt="Anything V5 Hatsune Miku PS4 Pro v1.16">
+        <div class="smeta">
+          <div>
+            <b>Anything V5</b>
+            <div class="subline">Classic Crisp 2D Anime · 512×512 → 1080×1080 · 20 stp · CFG 6.5 · DPM++ 2M Karras</div>
+          </div>
+          <div class="chips"><span class="chip ok">154.0s (incl. 57.3s FaceFix)</span><span class="chip">1754 MiB VRAM</span></div>
+        </div>
+      </div>
+      <div class="scard sq">
+        <img loading="lazy" src="samples/v116_miku_meinamix_8step.jpg" alt="MeinaMix V11 8-Step Hatsune Miku PS4 Pro v1.16">
+        <div class="smeta">
+          <div>
+            <b>MeinaMix V11 8-Step</b>
+            <div class="subline">#1 Base PS4 / Slim Speed Pick · 512×512 → 1080×1080 · 8 stp · CFG 3.5 · Euler</div>
+          </div>
+          <div class="chips"><span class="chip ok">96.7s (incl. 45.7s FaceFix)</span><span class="chip">1754 MiB VRAM</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="picking-guide">
+    <h2>Which Model Should You Download First?</h2>
+    <div class="grid-3">
+      <div class="card">
+        <h3>🏆 #1 Overall (PS4 Pro)</h3>
+        <p><b>WAI-Illustrious v17 DMD2</b> — Native <code>1024×1344</code> in 4 steps (CFG 1.0 LCM). Sharp eyes, clean hands, huge anime character knowledge, and ~1 minute renders in Quiet Mode.</p>
+      </div>
+      <div class="card">
+        <h3>⚡ #1 Fast &amp; Base PS4 / Slim</h3>
+        <p><b>MeinaMix V11 8-Step</b> — Only 872 MiB on disk and 1.54 GiB VRAM. Generates crisp <code>512×512 → 1080×1080</code> anime art in ~35 seconds on Quiet 20 CU.</p>
+      </div>
+      <div class="card">
+        <h3>🎨 Alternative Art Styles</h3>
+        <p>Try <b>Plant Milk Walnut DMD2</b> (warm painterly), <b>Nova Anime XL v18 DMD2</b> (vibrant cel-shaded), <b>Illustrious Pencil v3.2</b> (sketch/artbook), or <b>Hassaku XL v3.1 DMD2</b> (classic glossy anime).</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot-meta">
+    Open-source under <a href="https://github.com/DJTOMATO/GarlicDiffusion/blob/main/LICENSE">GNU GPLv3</a> ·
+    Inspired by <a href="https://garlicllm.dev">Garlic LLM</a> ·
+    <a href="https://ko-fi.com/djtomato">Support on Ko-fi</a> ·
+    <a href="https://github.com/DJTOMATO/GarlicDiffusion/issues">Report Bugs on GitHub</a> ·
+    <a href="https://discord.gg/Gbyq3kpGjc">Discord Support</a><br>
+    Provided "AS IS" without warranty. Use at your own risk. Not affiliated with Sony Interactive Entertainment.
+  </div>
+</footer>
+<script src="lightbox.js"></script>
+</body>
+</html>

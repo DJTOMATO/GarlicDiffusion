@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Studio Features &amp; v1.16 Capabilities — GarlicDiffusion PS4</title>
+<meta name="description" content="Explore GarlicDiffusion v1.16 features on PS4 and PS4 Pro: Easy Mode, Auto Face Fix (ADetailer), Zero-VRAM Kohya LoRA Fusion, Built-In EasyNegative TI, Real-ESRGAN 1080p/4K Upscaling, Thermal Guard, and Discord/A1111 API.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+  <div class="wrap nav-in">
+    <a class="brand" href="index.html"><img src="logo.svg" alt="GarlicDiffusion logo"> <span>Garlic <span style="color:#3fa9f5">Diffusion</span></span> <span class="chip ok">v1.16 PS4</span></a>
+    <div class="nav-links">
+      <a href="index.html">Overview</a>
+      <a class="active" href="features.html">Features</a>
+      <a href="models.html">Models</a>
+      <a href="scenic.html">Scenic Gallery</a>
+      <a href="benchmarks.html">Benchmarks</a>
+      <a href="https://ko-fi.com/djtomato" target="_blank" rel="noopener" style="color:#55e6b0">Ko-fi</a>
+      <a href="https://discord.gg/Gbyq3kpGjc" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/DJTOMATO/GarlicDiffusion" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<main class="wrap">
+  <div class="hero compact">
+    <div class="pill">GarlicDiffusion v1.16 · 100% Offline PS4 / PS4 Pro Studio</div>
+    <h1>Console-Native AI Studio Features</h1>
+    <p class="sub">Everything you expect from a modern desktop Stable Diffusion suite — engineered from scratch in C and bare-metal GCN OpenCL kernels to run natively on your PlayStation 4.</p>
+    <div class="cta">
+      <a class="btn primary" href="models.html">Compare All Models →</a>
+      <a class="btn ghost" href="benchmarks.html">Hardware Benchmarks →</a>
+    </div>
+  </div>
+
+  <!-- 1. AUTO FACE FIX (ADETAILER) -->
+  <section id="face-fix">
+    <h2>1. Automatic Face &amp; Eye Fix (Built-In ADetailer)</h2>
+    <p class="lead">Small faces in full-body renders only occupy a few latent cells during the base pass. GarlicDiffusion v1.16 automatically detects anime faces, crops and re-renders the face at full latent resolution (<code>512×512</code> on SD 1.5 / <code>768×768</code> on SDXL), and seamlessly blends crisp eyes and expressions back into your image — with zero manual masking.</p>
+    <div class="samples-wide" id="facefix-compare">
+      <div class="scard">
+        <img loading="lazy" src="samples/v116_feat_facefix_off.jpg" alt="SDXL Full-Body Hatsune Miku with Auto Face Fix OFF">
+        <div class="smeta">
+          <div>
+            <b>Before — Auto Face Fix OFF</b>
+            <div class="subline" id="ff-off-meta">WAI-Illustrious v17 DMD2 · 1024×1344 Native · 120.7s (UNet 59.7s · VAE 53.5s) · Seed 611953</div>
+          </div>
+          <div class="chips"><span class="chip">Base Pass Only</span><span class="chip">SDXL 1024×1344</span></div>
+        </div>
+      </div>
+      <div class="scard">
+        <img loading="lazy" src="samples/v116_feat_facefix_on.jpg" alt="SDXL Full-Body Hatsune Miku with Auto Face Fix ON">
+        <div class="smeta">
+          <div>
+            <b>After — Auto Face Fix ON (ADetailer 768×768 Crop Pass)</b>
+            <div class="subline" id="ff-on-meta">WAI-Illustrious v17 DMD2 · 1024×1344 + FaceFix · 170.1s (+49.4s FaceFix) · Seed 611953</div>
+          </div>
+          <div class="chips"><span class="chip ok">Sparkling Symmetric Eyes</span><span class="chip">Automatic</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. EASY STUDIO & ADVANCED MODE -->
+  <section id="easy-mode">
+    <h2>2. Easy Mode &amp; Advanced Studio (TV + Browser)</h2>
+    <p class="lead">Start creating in seconds with <b>Easy Mode</b> — pick from <b>290+ built-in anime &amp; game characters</b>, <b>120+ curated scenes</b>, camera framing, and one-click speed/quality tiers with Hand/Eye Shield, Face Fix, and 1080p Upscale toggles. Switch to <b>Advanced Studio</b> anytime for full prompt weighting, negative prompts, LoRA stacking, and custom seeds.</p>
+    <div class="grid-3">
+      <div class="card">
+        <h3>🌱 Guided Easy Studio</h3>
+        <p>Auto-tunes optimal CFG, Steps, Sampler, and anatomy-safe resolution per checkpoint (`512×512 + 1080p` on SD 1.5, native `1024×1344` on SDXL), with built-in <b>EasyNegative</b> Textual Inversion on every SD 1.5 render.</p>
+      </div>
+      <div class="card">
+        <h3>🎲 500-Word Batch Randomizer</h3>
+        <p>Queue unattended batches with inline <code>{a|b|c}</code> wildcards and a 500-word SFW + optional NSFW-gated pose, outfit, lighting, and scenery randomizer — then pick your favorites in the Gallery.</p>
+      </div>
+      <div class="card">
+        <h3>♻️ Full Settings Restore</h3>
+        <p>Every saved PNG embeds complete A1111 metadata. Hit <b>Load to Studio</b> or <b>Re-Render Variation</b> on any Gallery image (TV or Web UI) to auto-switch checkpoints and restore every parameter.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. ZERO-VRAM LORA FUSION & UPSCALING -->
+  <section id="loras-upscale">
+    <h2>3. Zero-VRAM Kohya LoRA Fusion &amp; 1080p / 4K Upscaling</h2>
+    <div class="grid-2">
+      <div class="card">
+        <h3>💎 Zero-VRAM LoRA Fusion (22 Built-In LoRAs)</h3>
+        <p>GarlicDiffusion fuses Kohya <code>.safetensors</code> LoRAs directly into Q8_0 / FP16 weights on the PS4 GPU with <b>0 MiB extra VRAM</b>. Stack multiple LoRAs inline with <code>&lt;lora:name:weight&gt;</code>, queue sequential downloads from the in-app LoRA Manager, and rely on strict safetensors header inspection to block accidental SD 1.5 ↔ SDXL mismatches.</p>
+      </div>
+      <div class="card">
+        <h3>🔍 Bundled Real-ESRGAN Anime v3 (1080p &amp; 4K)</h3>
+        <p>Every SD 1.5 render generates at anatomy-safe <code>512×512</code> and auto-upscales to razor-sharp <b>1080×1080</b> in ~8s on PS4 Pro. On SDXL, upscale portraits to <b>1080×1440</b>, widescreen wallpapers to <b>1920×1080</b>, or push all the way to <b>3840×2160 4K UHD</b>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. HARDWARE PROTECTION, GALLERY & API -->
+  <section id="hardware-api">
+    <h2>4. Hardware Thermal Guard, Gallery Folders &amp; A1111 / Discord API</h2>
+    <div class="grid-3">
+      <div class="card">
+        <h3>🌡️ Active Thermal Guard</h3>
+        <p>Real-time SoC temperature monitoring inside the diffusion loop automatically steps down Compute Unit masks at <code>80–84 °C</code> and pauses to cool at <code>86–88 °C</code> so even Turbo mode stays safe on aging PS4 thermal paste.</p>
+      </div>
+      <div class="card">
+        <h3>📁 Gallery Folders &amp; ZIP Export</h3>
+        <p>Organize hundreds of renders into custom folders, star favorites, fix faces post-render from the Gallery modal, and download whole folders as <code>.zip</code> archives straight from your browser.</p>
+      </div>
+      <div class="card">
+        <h3>🤖 A1111 &amp; Discord Bot API</h3>
+        <p>Exposes Automatic1111-compatible REST endpoints on port <code>8081</code> (<code>/sdapi/v1/txt2img</code>, <code>sd-models</code>, <code>samplers</code>, <code>upscalers</code>) plus 1-click GitHub OTA updates directly to <code>/data/pkg/Garlic-Diffusion.pkg</code>.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot-meta">
+    Open-source under <a href="https://github.com/DJTOMATO/GarlicDiffusion/blob/main/LICENSE">GNU GPLv3</a> ·
+    Inspired by <a href="https://garlicllm.dev">Garlic LLM</a> ·
+    <a href="https://ko-fi.com/djtomato">Support on Ko-fi</a> ·
+    <a href="https://github.com/DJTOMATO/GarlicDiffusion/issues">Report Bugs on GitHub</a> ·
+    <a href="https://discord.gg/Gbyq3kpGjc">Discord Support</a><br>
+    Provided "AS IS" without warranty. Use at your own risk. Not affiliated with Sony Interactive Entertainment.
+  </div>
+</footer>
+<script src="lightbox.js"></script>
+</body>
+</html>

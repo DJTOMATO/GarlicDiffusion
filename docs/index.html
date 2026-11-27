@@ -10,14 +10,15 @@
 <body>
 <nav>
   <div class="wrap nav-in">
-    <a class="brand" href="index.html"><img src="logo.svg" alt="GarlicDiffusion logo"> <span>Garlic <span style="color:#3fa9f5">Diffusion</span></span> <span class="chip ok">v1.10 PS4</span></a>
+    <a class="brand" href="index.html"><img src="logo.svg" alt="GarlicDiffusion logo"> <span>Garlic <span style="color:#3fa9f5">Diffusion</span></span> <span class="chip ok">v1.16 PS4</span></a>
     <div class="nav-links">
       <a class="active" href="index.html">Overview</a>
+      <a href="features.html">Features</a>
+      <a href="models.html">Models</a>
       <a href="scenic.html">Scenic Gallery</a>
-      <a href="benchmarks.html">Benchmarks &amp; Tech</a>
-      <a href="#credits">Credits</a>
+      <a href="benchmarks.html">Benchmarks</a>
       <a href="https://ko-fi.com/djtomato" target="_blank" rel="noopener" style="color:#55e6b0">Ko-fi</a>
-      <a href="https://discord.gg/Gbyq3kpGjc" target="_blank" rel="noopener">Discord / Community</a>
+      <a href="https://discord.gg/Gbyq3kpGjc" target="_blank" rel="noopener">Discord</a>
       <a href="https://github.com/DJTOMATO/GarlicDiffusion" target="_blank" rel="noopener">GitHub</a>
     </div>
   </div>
@@ -38,142 +39,135 @@
 
     <div class="stats-strip">
       <div class="stat-card">
-        <div class="stat-val">17.3s</div>
-        <div class="stat-lbl">Fast Draft Preview</div>
-        <div class="stat-sub">512×512 · 4 steps · Quiet Mode (20 CU)</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-val">46.5s</div>
-        <div class="stat-lbl">Crisp 1080p Anime HD</div>
-        <div class="stat-sub">MeinaMix 8-Step + Real-ESRGAN (1080×1620)</div>
+        <div class="stat-val">28.4s</div>
+        <div class="stat-lbl">Testing Draft Preview</div>
+        <div class="stat-sub">512×512 · 4 steps · Quiet Mode (PS4 Pro)</div>
       </div>
       <div class="stat-card">
         <div class="stat-val">50.9s</div>
-        <div class="stat-lbl">16:9 Full HD SDXL</div>
-        <div class="stat-sub">WAI v17 DMD2 (1920×1080 · 77.0s CFG 1.4)</div>
+        <div class="stat-lbl">Crisp 1080p SD 1.5</div>
+        <div class="stat-sub">MeinaMix 8-Step + Real-ESRGAN (1080×1080)</div>
       </div>
       <div class="stat-card">
-        <div class="stat-val">0 PC</div>
-        <div class="stat-lbl">100% Console-Native</div>
-        <div class="stat-sub">22 GCN Kernels · In-App HTTPS Model Manager</div>
+        <div class="stat-val">68.0s</div>
+        <div class="stat-lbl">16:9 Full HD SDXL</div>
+        <div class="stat-sub">WAI v17 / v14 DMD2 (1920×1080 · 4-Step LCM)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">14</div>
+        <div class="stat-lbl">Verified Models</div>
+        <div class="stat-sub">10 SDXL + 4 SD 1.5 · 1-Click Hugging Face</div>
       </div>
     </div>
   </div>
 
   <!-- HATSUNE MIKU SHOWCASE -->
   <section id="showcase">
-    <h2>Real PS4 Pro Outputs — Hatsune Miku Showcase</h2>
-    <p class="lead">Every image below was rendered and 1080p AI-upscaled <b>100% locally on a PS4 Pro GPU</b> in <b>Quiet (20 CU)</b> or <b>Silent (14 CU)</b> mode. Click any image to inspect full resolution. Looking for landscapes? Visit the <a href="scenic.html"><b>Dedicated Scenic Gallery →</b></a></p>
+    <h2>Real PS4 Pro v1.16 Outputs — Hatsune Miku Showcase</h2>
+    <p class="lead">Every image below was rendered <b>100% locally on a PS4 Pro GPU</b> using GarlicDiffusion v1.16's exact out-of-the-box presets (native <code>1024×1344</code> on SDXL, <code>512×512 → 1080×1080</code> + EasyNegative on SD 1.5) with <b>Auto Face Fix</b>. Click any image to inspect full resolution, or <a href="models.html"><b>compare all 14 verified models →</b></a></p>
 
     <div class="samples-wide" style="margin-bottom:18px">
       <div class="scard wide">
-        <img loading="lazy" src="samples/v17_miku_16x9_1080p.jpg" alt="16:9 Full HD Hatsune Miku Neon Skyline on PS4 Pro">
+        <img loading="lazy" src="samples/v116_miku_v17_16x9_1080p.jpg" alt="16:9 Full HD Hatsune Miku Neon Tokyo Skyline on PS4 Pro v1.16">
         <div class="smeta">
           <div>
-            <b>WAI-Illustrious v17 DMD2 — 16:9 Full HD Neon Skyline</b>
-            <div class="subline">1024×576 → 1920×1080 · 6 steps · CFG 1.4 · LCM · Quiet (20 CU)</div>
+            <b>WAI-Illustrious v17 DMD2 — 16:9 Full HD Neon Tokyo Miku</b>
+            <div class="subline">1024×576 → 1920×1080 · 4 steps · CFG 1.0 · LCM · Quiet Mode</div>
           </div>
-          <div class="chips"><span class="chip ok">77.03s Total (13.5s AI Upscale)</span><span class="chip">SDXL 16:9</span><span class="chip">Seed 880101</span></div>
+          <div class="chips"><span class="chip ok">69.0s Total (17.1s Upscale)</span><span class="chip">SDXL 16:9</span><span class="chip">Seed 224737</span></div>
         </div>
       </div>
       <div class="scard wide">
-        <img loading="lazy" src="samples/meina_miku_16x9_1080p.jpg" alt="16:9 Full HD Hatsune Miku Sunset Coastal Overpass on PS4 Pro">
+        <img loading="lazy" src="samples/v116_scenic_v17_16x9_sanctuary.jpg" alt="16:9 Full HD Floating Sky Sanctuary on PS4 Pro v1.16">
         <div class="smeta">
           <div>
-            <b>MeinaMix V11 8-Step — 16:9 Sunset Ocean Coastline</b>
-            <div class="subline">896×512 → 1890×1080 · 8 steps · CFG 3.5 · Euler · Quiet (20 CU)</div>
+            <b>WAI-Illustrious v17 DMD2 — 16:9 Floating Sky Sanctuary</b>
+            <div class="subline">1024×576 → 1920×1080 · 4 steps · CFG 1.0 · LCM · Quiet Mode</div>
           </div>
-          <div class="chips"><span class="chip ok">56.90s Total (10.0s AI Upscale)</span><span class="chip">SD 1.5 16:9</span><span class="chip">Seed 882502</span></div>
+          <div class="chips"><span class="chip ok">68.2s Total (17.1s Upscale)</span><span class="chip">Scenic 16:9</span><span class="chip">Seed 104730</span></div>
         </div>
       </div>
     </div>
 
     <div class="samples">
       <div class="scard">
-        <img loading="lazy" src="samples/v17_miku_fb_meadow_8stp.jpg" alt="WAI-Illustrious v17 DMD2 Alpine Wildflower Meadow Hatsune Miku 1080p">
+        <img loading="lazy" src="samples/v116_miku_wai_v17_dmd2.jpg" alt="WAI-Illustrious v17 DMD2 Hatsune Miku PS4 Pro v1.16">
         <div class="smeta">
           <div>
-            <b>WAI-Illustrious v17 DMD2 (Alpine Wildflower Meadow)</b>
-            <div class="subline">768×1024 → 1080×1440 · 8 steps · CFG 1.4 · LCM · Balanced (25 CU)</div>
+            <b>WAI-Illustrious v17 DMD2</b>
+            <div class="subline">#1 Flagship · Concert Stage · 1024×1344 Native · 4 stp · CFG 1.0 · LCM</div>
           </div>
-          <div class="chips"><span class="chip ok">98.28s Total (14.7s Upscale)</span><span class="chip">CFG 1.4 Guided</span><span class="chip">1.26 TFLOPS</span></div>
+          <div class="chips"><span class="chip ok">170.0s (incl. 49.2s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
         </div>
       </div>
-
       <div class="scard">
-        <img loading="lazy" src="samples/v17_miku_fb_winter_8stp.jpg" alt="WAI-Illustrious v14 8-Step Snowy Winter Coat Hatsune Miku 1080p">
+        <img loading="lazy" src="samples/v116_miku_wai_v17_sakura.jpg" alt="WAI-Illustrious v17 DMD2 (Sakura) Hatsune Miku PS4 Pro v1.16">
         <div class="smeta">
           <div>
-            <b>WAI-Illustrious v14 8-Step (Winter Promenade Scarf)</b>
-            <div class="subline">768×1024 → 1080×1440 · 8 steps · CFG 3.5 · Euler · Quiet (20 CU)</div>
+            <b>WAI-Illustrious v17 DMD2 (Sakura)</b>
+            <div class="subline">Cherry Blossom Night Lanterns · 1024×1344 Native · 4 stp · CFG 1.0 · LCM</div>
           </div>
-          <div class="chips"><span class="chip ok">121.68s Total (18.5s Upscale)</span><span class="chip">Hyper-SDXL CFG 3.5</span><span class="chip">Seed 770303</span></div>
+          <div class="chips"><span class="chip ok">169.9s (incl. 49.2s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
         </div>
       </div>
-
       <div class="scard">
-        <img loading="lazy" src="samples/miku_wai_v14_dmd2_1080p.jpg" alt="WAI-Illustrious v14 DMD2 Starry Winter Scarf Hatsune Miku 1080p">
+        <img loading="lazy" src="samples/v116_miku_prefect_v2_dmd2.jpg" alt="Prefect Illustrious XL v2 DMD2 Hatsune Miku PS4 Pro v1.16">
         <div class="smeta">
           <div>
-            <b>WAI-Illustrious v14 DMD2 (Starry Winter Scarf)</b>
-            <div class="subline">768×1024 → 1080×1440 · 6 steps · CFG 1.0 · LCM · Quiet (20 CU)</div>
+            <b>Prefect Illustrious XL v2 DMD2</b>
+            <div class="subline">Crisp Key Visual SDXL · 1024×1344 Native · 4 stp · CFG 1.0 · LCM</div>
           </div>
-          <div class="chips"><span class="chip ok">65.52s Total (14.7s Upscale)</span><span class="chip">SDXL 1080p</span><span class="chip">Seed 393902</span></div>
+          <div class="chips"><span class="chip ok">170.0s (incl. 49.3s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
         </div>
       </div>
-
       <div class="scard">
-        <img loading="lazy" src="samples/meina_miku_remake_a.jpg" alt="MeinaMix V11 8-Step Cyber Jacket Hatsune Miku 1080p">
+        <img loading="lazy" src="samples/v116_miku_nova_v18_dmd2.jpg" alt="Nova Anime XL v18 DMD2 Hatsune Miku PS4 Pro v1.16">
         <div class="smeta">
           <div>
-            <b>MeinaMix V11 8-Step (Cyber Jacket Portrait)</b>
-            <div class="subline">512×768 → 1080×1620 · 8 steps · CFG 3.5 · Euler · Quiet (20 CU)</div>
+            <b>Nova Anime XL v18 DMD2</b>
+            <div class="subline">Vibrant Cel-Shaded SDXL · 1024×1344 Native · 4 stp · CFG 1.0 · LCM</div>
           </div>
-          <div class="chips"><span class="chip ok">46.47s Total (8.2s Upscale)</span><span class="chip">SD 1.5 1080p</span><span class="chip">Seed 43001</span></div>
+          <div class="chips"><span class="chip ok">169.9s (incl. 49.2s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
         </div>
       </div>
-
       <div class="scard">
-        <img loading="lazy" src="samples/miku_dreamshaper8_2d_1080p.jpg" alt="DreamShaper 8 2D Anime Library Hatsune Miku 1080p">
+        <img loading="lazy" src="samples/v116_miku_hassaku_v31_dmd2.jpg" alt="Hassaku XL v3.1 DMD2 Hatsune Miku PS4 Pro v1.16">
         <div class="smeta">
           <div>
-            <b>DreamShaper 8 (2D Cel-Shaded Library)</b>
-            <div class="subline">512×768 → 1080×1620 · 20 steps · CFG 7.0 · Euler a · Quiet (20 CU)</div>
+            <b>Hassaku XL v3.1 DMD2</b>
+            <div class="subline">Expressive Idol SDXL · 1024×1344 Native · 4 stp · CFG 1.0 · LCM</div>
           </div>
-          <div class="chips"><span class="chip ok">88.33s Total (8.8s Upscale)</span><span class="chip">SD 1.5 1080p</span><span class="chip">Seed 880905</span></div>
+          <div class="chips"><span class="chip ok">169.9s (incl. 49.2s FaceFix)</span><span class="chip">4250 MiB VRAM</span></div>
         </div>
       </div>
-
-      <div class="scard">
-        <img loading="lazy" src="samples/miku_wai_v17_silent_1080p.jpg" alt="WAI-Illustrious v17 DMD2 Silent 14CU Night Festival Hatsune Miku 1080p">
+      <div class="scard sq">
+        <img loading="lazy" src="samples/v116_miku_meinamix_v11.jpg" alt="MeinaMix V11 (SD 1.5) Hatsune Miku PS4 Pro v1.16">
         <div class="smeta">
           <div>
-            <b>WAI-Illustrious v17 DMD2 (Night Lantern Festival)</b>
-            <div class="subline">768×1024 → 1080×1440 · 6 steps · CFG 1.0 · LCM · Silent (14 CU)</div>
+            <b>MeinaMix V11 (SD 1.5)</b>
+            <div class="subline">512×512 + EasyNegative + 1080p · 512×512 → 1080×1080 · 20 stp · CFG 6.5 · DPM++ 2M Karras</div>
           </div>
-          <div class="chips"><span class="chip ok">98.81s Whisper Silent (14 CU)</span><span class="chip">35% GPU Power</span><span class="chip">Seed 880305</span></div>
+          <div class="chips"><span class="chip ok">154.0s (incl. 57.3s FaceFix)</span><span class="chip">1754 MiB VRAM</span></div>
         </div>
       </div>
-
-      <div class="scard">
-        <img loading="lazy" src="samples/miku_meinamix_silent_1080p.jpg" alt="MeinaMix V11 8-Step Silent 14CU Sakura Park Hatsune Miku 1080p">
+      <div class="scard sq">
+        <img loading="lazy" src="samples/v116_miku_ghostmix_v2.jpg" alt="GhostMix V2 (SD 1.5) Hatsune Miku PS4 Pro v1.16">
         <div class="smeta">
           <div>
-            <b>MeinaMix V11 8-Step (Spring Sakura Cardigan)</b>
-            <div class="subline">512×768 → 1080×1620 · 8 steps · CFG 3.5 · Euler · Silent (14 CU)</div>
+            <b>GhostMix V2 (SD 1.5)</b>
+            <div class="subline">Luminous Anime + 1080p · 512×512 → 1080×1080 · 20 stp · CFG 6.5 · DPM++ 2M Karras</div>
           </div>
-          <div class="chips"><span class="chip ok">68.25s Whisper Silent (14 CU)</span><span class="chip">35% GPU Power</span><span class="chip">Seed 880602</span></div>
+          <div class="chips"><span class="chip ok">154.1s (incl. 57.3s FaceFix)</span><span class="chip">1754 MiB VRAM</span></div>
         </div>
       </div>
-
-      <div class="scard">
-        <img loading="lazy" src="samples/v14_miku_fullbody.jpg" alt="WAI-Illustrious v14 DMD2 Botanical Greenhouse Hatsune Miku 1080p">
+      <div class="scard sq">
+        <img loading="lazy" src="samples/v116_miku_anything_v5.jpg" alt="Anything V5 (SD 1.5) Hatsune Miku PS4 Pro v1.16">
         <div class="smeta">
           <div>
-            <b>WAI-Illustrious v14 DMD2 (Botanical Greenhouse)</b>
-            <div class="subline">768×1024 → 1080×1440 · 6 steps · CFG 1.4 · LCM · Quiet (20 CU)</div>
+            <b>Anything V5 (SD 1.5)</b>
+            <div class="subline">Classic 2D Anime + 1080p · 512×512 → 1080×1080 · 20 stp · CFG 6.5 · DPM++ 2M Karras</div>
           </div>
-          <div class="chips"><span class="chip ok">101.02s Total (18.6s Upscale)</span><span class="chip">CFG 1.4 Guided</span><span class="chip">Seed 880404</span></div>
+          <div class="chips"><span class="chip ok">154.0s (incl. 57.3s FaceFix)</span><span class="chip">1754 MiB VRAM</span></div>
         </div>
       </div>
     </div>
@@ -306,11 +300,7 @@
     </details>
     <details class="faq">
       <summary>Can it overheat or harm my console?</summary>
-      <p>GarlicDiffusion is an ordinary userland homebrew app and contains no exploit. However, diffusion inference drives sustained GPU load on 7–13 year old hardware. That is why GarlicDiffusion defaults to <b>Quiet Mode (20 of 36 CUs on Pro · ~58% GPU power)</b> with automatic inter-block thermal cooldown pauses. Always keep your console's vents unobstructed and use <b>Quiet</b> or <b>Silent (14 CU)</b> mode for long sessions.</p>
-    </details>
-    <details class="faq">
-      <summary>Why did DreamShaper 8 look semi-realistic / 2.5D on anime characters?</summary>
-      <p>Unlike pure 2D anime checkpoints (<code>MeinaMix</code>, <code>WAI-Illustrious</code>, <code>Hassaku XL</code>), <code>DreamShaper 8</code> is trained on painterly 2.5D portraits. Selecting the built-in <b>"2D Anime Fix (For DreamShaper)"</b> Art Style in Studio adds cel-shading tags and suppresses 3D/photorealistic skin shading — while DreamShaper 8 shines naturally on <a href="scenic.html">fantasy landscapes</a>.</p>
+      <p>GarlicDiffusion is an ordinary userland homebrew app and contains no exploit. However, diffusion inference drives sustained GPU load on 7–13 year old hardware. That is why GarlicDiffusion defaults to <b>Quiet Mode (22 of 36 CUs on Pro)</b> with live GoldHEN SoC temperature monitoring and an active thermal safety guard. Always keep your console's vents unobstructed and use <b>Quiet</b> or <b>Silent</b> mode for long sessions.</p>
     </details>
   </section>
 
@@ -375,7 +365,7 @@
           <tr><td><b>Stable Diffusion XL 1.0 &amp; SD 1.5</b></td><td>Stability AI / RunwayML</td><td>CreativeML Open RAIL++-M / RAIL-M</td></tr>
           <tr><td><b>WAI-Illustrious-SDXL (v14 / v17)</b></td><td>WAI / OnomaAI Illustrious</td><td>Fair AI Public License 1.0-SD</td></tr>
           <tr><td><b>DMD2 &amp; Hyper-SD Distillation LoRAs</b></td><td>Tianwei Yin et al. (MIT) / ByteDance</td><td>MIT / CreativeML Open RAIL++-M</td></tr>
-          <tr><td><b>MeinaMix V11 / DreamShaper 8 / GhostMix v2.0</b></td><td>Meina / Lykon / Community</td><td>CreativeML Open RAIL-M</td></tr>
+          <tr><td><b>MeinaMix V11 / GhostMix V2 / Anything V5 / GhostMix v2.0</b></td><td>Meina / Lykon / Community</td><td>CreativeML Open RAIL-M</td></tr>
           <tr><td><b>Real-ESRGAN AnimeVideo v3 (`SRVGGNetCompact`)</b></td><td>Xintao Wang et al.</td><td>BSD-3-Clause</td></tr>
           <tr><td><b>OpenOrbis PS4 Toolchain</b></td><td>OpenOrbis Team</td><td>GNU GPLv3</td></tr>
           <tr><td><b>Selawik UI Font</b></td><td>Microsoft Corporation</td><td>SIL Open Font License 1.1</td></tr>

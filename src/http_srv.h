@@ -83,6 +83,7 @@ typedef struct {
     double unet_gpu_sec;
     double vae_sec;
     double upscale_sec;
+    double face_fix_sec;
     double cooldown_sec;
     double eff_tflops;
     double bench_gemm_tflops;

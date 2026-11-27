@@ -45,6 +45,12 @@ typedef struct {
     int eco;
     int upscaled;
     double sec;
+    double unet_sec;
+    double vae_sec;
+    double upscale_sec;
+    double face_fix_sec;
+    double cooldown_sec;
+    double eff_tflops;
     size_t bytes;
     char lora[128];
     char folder[64];

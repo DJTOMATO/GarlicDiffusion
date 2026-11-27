@@ -230,15 +230,35 @@ static CatalogLora g_lcat[LORA_MAX_CATALOG];
 static int g_lcat_cnt = 0;
 static int preset_idx = 0, res_idx = 4, model_idx = 0;
 
+static int is_preset_safe_for_sd15(const UserPreset* p) {
+    if (!p) return 0;
+    if (strstr(p->name, "16:9") || strstr(p->name, "Widescreen") || strstr(p->name, "4K")) return 0;
+    if (p->width > 0u && p->height > 0u && p->width > p->height + 128u) return 0;
+    if (p->model[0] && (strstr(p->model, "XL") || strstr(p->model, "xl") ||
+                        strstr(p->model, "Illustrious") || strstr(p->model, "WAI") ||
+                        strstr(p->model, "wai") || strstr(p->model, "Noob") ||
+                        strstr(p->model, "Animagine") || strstr(p->model, "Hassaku") ||
+                        strstr(p->model, "Nova") || strstr(p->model, "Pencil") ||
+                        strstr(p->model, "Walnut") || strstr(p->model, "Plant")))
+        return 0;
+    int is_sd15_tag = (strstr(p->name, "SD 1.5") != NULL || strstr(p->name, "SD1.5") != NULL);
+    if (strstr(p->name, "LoRA") && !is_sd15_tag) return 0;
+    if (strstr(p->prompt, "<lora:") && !is_sd15_tag && !strstr(p->prompt, "sd15") && !strstr(p->prompt, "hifumi"))
+        return 0;
+    return 1;
+}
+
 static void refresh_tv_presets(void) {
     g_num_all_presets = presets_list(g_all_presets, PRESETS_MAX_ITEMS);
-    int allow_nsfw = 0;
+    int allow_nsfw = 0, is15 = 0;
     http_srv_lock();
     allow_nsfw = g_job.nsfw_allow;
+    is15 = g_st.is_sd15;
     http_srv_unlock();
     int out_n = 0;
     for (int i = 0; i < g_num_all_presets && out_n < PRESETS_MAX_ITEMS; i++) {
         if (g_all_presets[i].nsfw && !allow_nsfw) continue;
+        if (is15 && !is_preset_safe_for_sd15(&g_all_presets[i])) continue;
         g_presets[out_n++] = g_all_presets[i];
     }
     g_num_presets = out_n;
@@ -417,8 +437,8 @@ static void apply_tv_preset(int idx) {
         g_job.upscale = has_up ? p->upscale : 0;
     } else {
         if (is15) {
-            g_job.width = sq ? 512u : (land ? 768u : 512u);
-            g_job.height = sq ? 512u : (land ? 512u : 768u);
+            g_job.width = 512u;
+            g_job.height = 512u;
         } else {
             uint32_t pw = g_st.preset_w ? g_st.preset_w : 832u;
             uint32_t ph = g_st.preset_h ? g_st.preset_h : 1216u;
@@ -485,7 +505,9 @@ static void clean_easy_scene_tags(const char* src, int has_char, int is_anim, in
 
     static const char* const FRAME_DROP[] = {
         "close-up portrait", "face focus", "upper body", "cowboy shot",
-        "full body", "head to toe", "footwear", "wide angle shot", "expansive scenery"
+        "full body", "head to toe", "footwear", "wide angle shot", "expansive scenery",
+        "masterpiece", "best quality", "amazing quality", "very aesthetic",
+        "absurdres", "highres", "newest", "high score", "great score"
     };
     static const char* const CHAR_CONFLICT[] = {
         "1girl", "1boy", "solo", "hatsune miku", "hatsune_miku", "hifumi takimoto", "takimoto hifumi",
@@ -543,6 +565,7 @@ static void apply_tv_easy_framing_and_quality(void) {
     clean_easy_scene_tags(raw_scene, has_char, is_anim, is15, clean_sc, sizeof(clean_sc));
 
     int fi = (g_easy_framing >= 0 && g_easy_framing <= 3) ? g_easy_framing : 2;
+    if (is15 && fi == 3) { fi = 0; g_easy_framing = 0; } // Never Wide 16:9 on SD 1.5!
     char merged[1024] = {0};
     snprintf(merged, sizeof(merged), "%s", F_TAGS[fi]);
     if (has_char) {
@@ -561,6 +584,15 @@ static void apply_tv_easy_framing_and_quality(void) {
     // Clear stale single-LoRA selector in Easy Mode so mismatched LoRAs never corrupt Animagine / SD 1.5
     g_job.lora[0] = 0;
 
+    // Always reset negative to the active model's clean preset negative (with EasyNegative first on SD 1.5)
+    // so stale scenic negatives like "people, human" never leak into character renders!
+    const char* base_neg = g_st.preset_negative[0]
+        ? g_st.preset_negative
+        : (is15
+            ? "EasyNegative, (worst quality, low quality:1.4), lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad eyes, blurry, text, watermark"
+            : "lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad eyes, asymmetrical eyes, blurry, worst quality, low quality");
+    sdxl_clean_prompt_dupes(base_neg, g_job.negative, sizeof(g_job.negative));
+
     if (fi == 2 && !strstr(g_job.negative, "cropped legs")) {
         char mneg[512];
         snprintf(mneg, sizeof(mneg), "%s%scropped legs, feet out of frame",
@@ -569,6 +601,7 @@ static void apply_tv_easy_framing_and_quality(void) {
     }
 
     int qi = (g_easy_quality >= 0 && g_easy_quality <= 2) ? g_easy_quality : 1;
+    if (is15 && qi == 2) { qi = 1; g_easy_quality = 1; }
     g_job.auto_quality = 1;
     g_st.auto_quality = 1;
     if (qi == 0 && g_st.speed_steps > 0) {
@@ -576,7 +609,8 @@ static void apply_tv_easy_framing_and_quality(void) {
         g_job.cfg = g_st.speed_cfg;
         g_job.sampler = g_st.speed_sampler;
         g_job.upscale = 0;
-        if (fi == 3) { g_job.width = is15 ? 896u : 1024u; g_job.height = is15 ? 512u : 576u; }
+        if (is15) { g_job.width = 512u; g_job.height = 512u; }
+        else if (fi == 3) { g_job.width = 1024u; g_job.height = 576u; }
         else { g_job.width = g_st.speed_w; g_job.height = g_st.speed_h; }
     } else if (qi == 2) {
         if (g_st.preset_steps > 0) {
@@ -585,8 +619,9 @@ static void apply_tv_easy_framing_and_quality(void) {
             g_job.sampler = g_st.preset_sampler;
         }
         g_job.upscale = has_up ? 1 : 0;
-        if (fi == 3) { g_job.width = is15 ? 896u : 1280u; g_job.height = is15 ? 512u : 704u; }
-        else { g_job.width = is15 ? 512u : (neo ? 832u : 768u); g_job.height = is15 ? 768u : (neo ? 1216u : 1024u); }
+        if (is15) { g_job.width = 512u; g_job.height = 512u; }
+        else if (fi == 3) { g_job.width = 1280u; g_job.height = 704u; }
+        else { g_job.width = neo ? 832u : 768u; g_job.height = neo ? 1216u : 1024u; }
     } else {
         if (g_st.preset_steps > 0) {
             g_job.steps = g_st.preset_steps;
@@ -594,13 +629,16 @@ static void apply_tv_easy_framing_and_quality(void) {
             g_job.sampler = g_st.preset_sampler;
             g_job.upscale = has_up ? g_st.preset_upscale : 0;
         }
-        if (fi == 3) {
-            g_job.width = is15 ? 896u : 1280u;
-            g_job.height = is15 ? 512u : 704u;
+        if (is15) {
+            g_job.width = 512u;
+            g_job.height = 512u;
+        } else if (fi == 3) {
+            g_job.width = 1280u;
+            g_job.height = 704u;
             if (has_up && g_job.upscale == 0) g_job.upscale = 1;
         } else {
-            g_job.width = g_st.preset_w ? g_st.preset_w : (is15 ? 512u : 832u);
-            g_job.height = g_st.preset_h ? g_st.preset_h : (is15 ? 768u : 1216u);
+            g_job.width = g_st.preset_w ? g_st.preset_w : 832u;
+            g_job.height = g_st.preset_h ? g_st.preset_h : 1216u;
         }
     }
     uint32_t nw = g_job.width, nh = g_job.height;
@@ -1375,7 +1413,7 @@ static void draw_ui(void) {
     {
         char neg_buf[512], lora_buf[80], bfld_buf[64];
         float lscale_v = 0.8f;
-        int smp_v = 0, ready_v = 0, sd_v = 0, nsfw_v = 0, aq_v = 1;
+        int smp_v = 0, ready_v = 0, sd_v = 0, nsfw_v = 0, aq_v = 1, aff_v = 1, is15_v = 0;
         uint32_t batch_v = 1, rmask_v = 0;
         uint64_t seed_v = 0;
         http_srv_lock();
@@ -1389,8 +1427,10 @@ static void draw_ui(void) {
         rmask_v = g_job.batch_rand_mask;
         nsfw_v = g_job.nsfw_allow;
         aq_v = g_job.auto_quality;
+        aff_v = g_job.auto_face_fix;
         sd_v = g_job.shutdown_after;
         ready_v = g_st.ready;
+        is15_v = g_st.is_sd15;
         http_srv_unlock();
 
         StudioView sv;
@@ -1399,6 +1439,7 @@ static void draw_ui(void) {
         sv.lora_name = lora_buf[0] ? lora_buf : NULL;
         sv.lora_scale = lscale_v;
         sv.neo = neo_v;
+        sv.is_sd15 = is15_v;
         sv.busy = busy;
         sv.ready = ready_v;
         sv.has_upscaler = has_up_v;
@@ -1422,7 +1463,7 @@ static void draw_ui(void) {
         sv.w = w; sv.h = h; sv.steps = steps; sv.cfg = cfg;
         sv.sampler = smp_v; sv.upscale = ups; sv.eco = eco;
         sv.batch = batch_v; sv.rand_mask = rmask_v;
-        sv.batch_folder = bfld_buf; sv.nsfw_allow = nsfw_v; sv.auto_quality = aq_v;
+        sv.batch_folder = bfld_buf; sv.nsfw_allow = nsfw_v; sv.auto_quality = aq_v; sv.auto_face_fix = aff_v;
         sv.shutdown_after = sd_v;
         sv.seed = seed_v; sv.last_seed = sm_last_seed;
         sv.last_sec = lsec; sv.last_tf = tf;
@@ -1888,6 +1929,8 @@ static void* gpu_worker_main(void* arg) {
     if (loaded_ok) {
         g_st.ready = 1;
         g_st.is_sd15 = eng.is_sd15;
+        if (eng.is_sd15 && (g_easy_framing == 2 || g_easy_framing == 3)) g_easy_framing = 1;
+        g_job.presets_dirty = 1;
         g_st.gpu_used_mb = (uint32_t)(eng.next >> 20);
         g_st.progress = 1.0f;
         g_st.error[0] = 0;
@@ -2170,6 +2213,8 @@ static void* gpu_worker_main(void* arg) {
                 }
                 g_st.ready = 1;
                 g_st.is_sd15 = eng.is_sd15;
+                if (eng.is_sd15 && (g_easy_framing == 2 || g_easy_framing == 3)) g_easy_framing = 1;
+                g_job.presets_dirty = 1;
                 g_st.gpu_used_mb = (uint32_t)(eng.next >> 20);
                 g_st.active_lora[0] = 0;
                 g_st.error[0] = 0;
@@ -2372,6 +2417,7 @@ static void* gpu_worker_main(void* arg) {
                 }
                 // Automatic ADetailer Face Fix (img2img crop pass at full output resolution!)
                 // Fixes small full-body faces (8x8 latent SD1.5 -> 64x64 latent, 17x17 SDXL -> 96x96 latent)
+                double face_fix_sec = 0.0;
                 if (rc == 0 && run_job.auto_face_fix) {
                     FaceBox faces[2];
                     int nf = face_detect_anime(rgb, out_w, out_h, faces, 2);
@@ -2383,7 +2429,7 @@ static void* gpu_worker_main(void* arg) {
                         }
                         if (sdxl_has_vae_encoder(&eng)) {
                             FaceBox crop_box;
-                            face_box_expand_square(&faces[0], out_w, out_h, 1.90f, &crop_box);
+                            face_box_expand_square(&faces[0], out_w, out_h, 1.75f, &crop_box);
                             uint32_t fsz = (eng.is_sd15 || !eng.neo) ? 512u : 768u;
                             uint8_t* fcrop = face_crop_resize(rgb, out_w, out_h, &crop_box, fsz, fsz);
                             uint8_t* fref  = fcrop ? (uint8_t*)malloc((size_t)fsz * fsz * 3u) : NULL;
@@ -2395,10 +2441,42 @@ static void* gpu_worker_main(void* arg) {
                                 double base_cool_ms = eng.stats.cooldown_ms;
                                 double base_tflops = eng.stats.effective_tflops;
 
+                                // Strip full-body/clothing/pose tags from face crop prompt so the crop
+                                // doesn't try to recompose a body or shift the head!
+                                char face_id[512] = {0};
+                                {
+                                    static const char* const BODY_DROP[] = {
+                                        "full body", "head to toe", "standing", "cowboy shot", "upper body",
+                                        "boots", "footwear", "thighhighs", "skirt", "legs", "feet",
+                                        "idol pose", "dynamic", "concert stage", "detailed hands", "5 fingers",
+                                        "detached sleeves", "necktie"
+                                    };
+                                    const char* s = clean_prompt;
+                                    while (*s && strlen(face_id) < 340) {
+                                        while (*s == ' ' || *s == ',') s++;
+                                        if (!*s) break;
+                                        const char* cm = strchr(s, ',');
+                                        size_t tl = cm ? (size_t)(cm - s) : strlen(s);
+                                        while (tl > 0 && s[tl - 1] == ' ') tl--;
+                                        char tok[128];
+                                        if (tl >= sizeof(tok)) tl = sizeof(tok) - 1;
+                                        memcpy(tok, s, tl); tok[tl] = 0;
+                                        int drop = 0;
+                                        for (size_t k = 0; k < sizeof(BODY_DROP) / sizeof(BODY_DROP[0]); k++) {
+                                            if (ci_sub_match(tok, BODY_DROP[k])) { drop = 1; break; }
+                                        }
+                                        if (!drop && tok[0]) {
+                                            if (face_id[0]) strncat(face_id, ", ", sizeof(face_id) - strlen(face_id) - 1);
+                                            strncat(face_id, tok, sizeof(face_id) - strlen(face_id) - 1);
+                                        }
+                                        s = cm ? (cm + 1) : (s + tl);
+                                    }
+                                }
+
                                 char fprompt[1280];
                                 snprintf(fprompt, sizeof(fprompt),
-                                         "close-up portrait, masterpiece, best quality, detailed face, detailed anime eyes, symmetric pupils, sparkling catchlights, clean lineart, %s",
-                                         clean_prompt);
+                                         "close-up portrait, face focus, masterpiece, best quality, detailed face, detailed anime eyes, symmetric pupils, sparkling catchlights, gentle smile, clean lineart%s%s",
+                                         face_id[0] ? ", " : "", face_id);
                                 SdxlParams fp;
                                 fp.prompt = fprompt;
                                 fp.negative = iter_neg;
@@ -2406,21 +2484,23 @@ static void* gpu_worker_main(void* arg) {
                                 fp.height = fsz;
                                 float fden;
                                 if (eng.is_sd15) {
-                                    fp.steps = (p.sampler == 1 && p.steps <= 10u) ? 10u : 16u;
-                                    fp.cfg_scale = p.cfg_scale;
+                                    // Stronger denoise (0.55) so SD 1.5 actually redraws symmetric eyes & mouth
+                                    // cleanly instead of preserving distorted low-res features.
+                                    fp.steps = (p.sampler == 1 && p.steps <= 10u) ? 12u : 18u;
+                                    fp.cfg_scale = (p.sampler == 1 && p.steps <= 10u) ? 4.0f : 7.0f;
                                     fp.sampler = p.sampler;
-                                    fden = 0.40f;
+                                    fden = 0.55f;
                                 } else if (p.sampler == 2) {
-                                    // DMD2 native 4-step at denoise 0.42 -> runs exact trained timesteps [499, 249] (~12s!)
+                                    // DMD2 native 4-step at denoise 0.45 -> runs exact trained timesteps [499, 249] (~12s!)
                                     fp.steps = 4u;
                                     fp.cfg_scale = 1.0f;
                                     fp.sampler = 2;
-                                    fden = 0.42f;
+                                    fden = 0.45f;
                                 } else {
                                     fp.steps = (p.steps > 16u) ? 16u : p.steps;
                                     fp.cfg_scale = p.cfg_scale;
                                     fp.sampler = p.sampler;
-                                    fden = 0.36f;
+                                    fden = 0.42f;
                                 }
                                 fp.seed = seed ^ 0xFA5E1234ull;
                                 fp.eco_mode = p.eco_mode;
@@ -2430,12 +2510,13 @@ static void* gpu_worker_main(void* arg) {
                                 on_progress(NULL, 0.96f, "Auto Face Fix (refining eyes & face)...");
                                 int frc = sdxl_img2img(&eng, &fp, fcrop, fden, fref, on_progress, on_cancel, NULL);
                                 if (frc == 0) {
-                                    face_blend_back(rgb, out_w, out_h, fref, fsz, fsz, &crop_box, 0.16f);
-                                    eng.last_gen_sec = base_gen_sec + eng.last_gen_sec;
-                                    eng.stats.unet_gpu_ms = base_unet_gpu_ms + eng.stats.unet_gpu_ms;
-                                    eng.stats.vae_ms = base_vae_ms + eng.stats.vae_ms;
+                                    face_blend_back(rgb, out_w, out_h, fref, fsz, fsz, &crop_box, 0.22f);
+                                    face_fix_sec = eng.last_gen_sec;
+                                    eng.last_gen_sec = base_gen_sec + face_fix_sec;
+                                    eng.stats.unet_gpu_ms = base_unet_gpu_ms;
+                                    eng.stats.vae_ms = base_vae_ms;
                                     eng.stats.upscale_ms = base_up_ms;
-                                    eng.stats.cooldown_ms = base_cool_ms + eng.stats.cooldown_ms;
+                                    eng.stats.cooldown_ms = base_cool_ms;
                                     if (base_tflops > 0.0) eng.stats.effective_tflops = base_tflops;
                                 } else if (frc == 1) {
                                     rc = 1;
@@ -2476,6 +2557,12 @@ static void* gpu_worker_main(void* arg) {
                         gm.cfg = p.cfg_scale; gm.seed = seed; gm.eco = p.eco_mode;
                         gm.upscaled = did_up;
                         gm.sec = eng.last_gen_sec;
+                        gm.unet_sec = eng.stats.unet_gpu_ms / 1000.0;
+                        gm.vae_sec = eng.stats.vae_ms / 1000.0;
+                        gm.upscale_sec = eng.stats.upscale_ms / 1000.0;
+                        gm.face_fix_sec = face_fix_sec;
+                        gm.cooldown_sec = eng.stats.cooldown_ms / 1000.0;
+                        gm.eff_tflops = eng.stats.effective_tflops;
                         http_srv_lock();
                         snprintf(g_st.stage, sizeof(g_st.stage), "Staging PNG in RAM buffer...");
                         http_srv_unlock();
@@ -2498,6 +2585,7 @@ static void* gpu_worker_main(void* arg) {
                     g_st.unet_gpu_sec = eng.stats.unet_gpu_ms / 1000.0;
                     g_st.vae_sec = eng.stats.vae_ms / 1000.0;
                     g_st.upscale_sec = eng.stats.upscale_ms / 1000.0;
+                    g_st.face_fix_sec = face_fix_sec;
                     g_st.cooldown_sec = eng.stats.cooldown_ms / 1000.0;
                     g_st.eff_tflops = eng.stats.effective_tflops;
                     g_st.temp_peak_c = eng.stats.temp_peak_c;
@@ -3527,10 +3615,12 @@ int main(void) {
                     apply_tv_easy_framing_and_quality();
                     snprintf(toast, sizeof(toast), "Scene: %s", g_presets[preset_idx].name);
                 } else if (sm_focus == EROW_FRAMING) {
-                    g_easy_framing = (g_easy_framing + 4 + dir) % 4;
+                    int n_fr = g_st.is_sd15 ? 3 : 4;
+                    g_easy_framing = (g_easy_framing + n_fr + dir) % n_fr;
                     apply_tv_easy_framing_and_quality();
                 } else if (sm_focus == EROW_QUALITY) {
-                    g_easy_quality = (g_easy_quality + 3 + dir) % 3;
+                    int n_q = g_st.is_sd15 ? 2 : 3;
+                    g_easy_quality = (g_easy_quality + n_q + dir) % n_q;
                     apply_tv_easy_framing_and_quality();
                 }
                 ui_dirty = 1;
@@ -3545,7 +3635,8 @@ int main(void) {
                     sm_dd_cur = (preset_idx >= 0) ? (preset_idx + 1) : 0;
                     sm_dd_sel = sm_dd_cur; sm_dd_top = 0; sm_dd_clamp(); sm_dd_open = 1;
                 } else if (sm_focus == EROW_FRAMING) {
-                    g_easy_framing = (g_easy_framing + 1) % 4;
+                    int n_fr = g_st.is_sd15 ? 3 : 4;
+                    g_easy_framing = (g_easy_framing + 1) % n_fr;
                     apply_tv_easy_framing_and_quality();
                 } else if (sm_focus == EROW_QUALITY) {
                     g_easy_quality = (g_easy_quality + 1) % 3;

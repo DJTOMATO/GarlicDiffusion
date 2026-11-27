@@ -2,8 +2,10 @@
 // Builds for PS4 / PS4 Pro GCN GPU (default) or Windows/Host CPU verification (-DSDXL_CPU).
 
 #include "sdxl.h"
+#include "easynegative_emb.h"
 #include "randomizer_pools.h"
 
+#include <ctype.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <math.h>
@@ -39,13 +41,13 @@ typedef struct {
 } GdJailbreakBackup;
 
 static int64_t gd_goldhen_cmd(uint64_t cmd, void* data) {
-    uint64_t rax = 0;
+    uint64_t rax = 500;
     uint8_t cf = 0;
     __asm__ volatile(
         "syscall\n\t"
         "setc %1\n\t"
         : "+a"(rax), "=qm"(cf)
-        : "D"((uint64_t)500), "S"(cmd), "d"((uint64_t)(uintptr_t)data)
+        : "D"(cmd), "S"((uint64_t)(uintptr_t)data)
         : "rcx", "r11", "memory"
     );
     return cf ? -(int64_t)rax : (int64_t)rax;
@@ -89,16 +91,16 @@ const char* sdxl_eco_name_ex(int eco_mode, int neo) {
     if (!neo) {
         switch (eco_mode) {
             case 0: return "Turbo (18CU)";
-            case 1: return "Balanced (13CU)";
-            case 2: return "Quiet (8CU)";
-            default: return "Silent (6CU)";
+            case 1: return "Balanced (15CU)";
+            case 2: return "Quiet (11CU)";
+            default: return "Silent (8CU)";
         }
     }
     switch (eco_mode) {
         case 0: return "Turbo (36CU)";
-        case 1: return "Balanced (25CU)";
-        case 2: return "Quiet (16CU)";
-        default: return "Silent (12CU)";
+        case 1: return "Balanced (29CU)";
+        case 2: return "Quiet (22CU)";
+        default: return "Silent (16CU)";
     }
 }
 
@@ -141,8 +143,10 @@ int sdxl_read_temp_c(int* cpu_c, int* soc_c) {
             }
         } else if (mode == -1) {
             // Try GoldHEN SDK syscall(500): VERSION(0), JAILBREAK(2), UNJAILBREAK(3)
+            // Note: FreeBSD sets CF=1 for any non-zero syscall return (e.g. VERSION returns 0x100 -> -256).
             int64_t ver = gd_goldhen_cmd(0, NULL);
-            if (ver > 0) {
+            unsigned ver_u = (unsigned)(ver < 0 ? -ver : ver);
+            if (ver != -78 && ver_u >= 0x100u) {
                 GdJailbreakBackup jb;
                 memset(&jb, 0, sizeof(jb));
                 if (gd_goldhen_cmd(2, &jb) == 0) {
@@ -153,7 +157,7 @@ int sdxl_read_temp_c(int* cpu_c, int* soc_c) {
             }
             if ((rc_c == 0 && c > 0) || (rc_s == 0 && s > 0)) {
                 mode = 2;
-                glog("temp sensor (GoldHEN SDK 0x%x): cpu=%dC soc=%dC", (unsigned)ver, c, s);
+                glog("temp sensor (GoldHEN SDK 0x%x): cpu=%dC soc=%dC", ver_u, c, s);
             } else {
                 mode = 0;
                 glog("temp sensor: unavailable (direct rc=%d/%d, goldhen ver=%lld)", rc_c, rc_s, (long long)ver);
@@ -452,9 +456,9 @@ static void gpu_begin(SdxlEngine* e) {
     // Symmetric checkerboard CU masks replicated across SH0 [15:0] and SH1 [31:16] on every SE:
     // spreads thermal load evenly across the entire APU die (no hot-side concentration, safe under CU harvesting).
     uint32_t mask = 0xFFFFFFFFu;          // Mode 0 Turbo:      100% CUs (36 Pro / 18 Base)
-    if (e->eco_mode == 1) mask = 0x02DB02DBu;      // Mode 1 Balanced:   ~70% CUs (~25 Pro / ~13 Base)
-    else if (e->eco_mode == 2) mask = 0x02490249u; // Mode 2 Quiet:      ~44% CUs (~16 Pro / ~8 Base — calm fan even in summer)
-    else if (e->eco_mode >= 3) mask = 0x01110111u; // Mode 3 Silent:     ~33% CUs (~12 Pro / ~6 Base — whisper quiet)
+    if (e->eco_mode == 1) mask = 0x03DF03DFu;      // Mode 1 Balanced:   ~80% CUs (~29 Pro / ~15 Base)
+    else if (e->eco_mode == 2) mask = 0x02DB02DBu; // Mode 2 Quiet:      ~61% CUs (~22 Pro / ~11 Base)
+    else if (e->eco_mode >= 3) mask = 0x02490249u; // Mode 3 Silent:     ~44% CUs (~16 Pro / ~8 Base — whisper quiet)
     uint32_t se_pair[2] = {mask, mask};
     uint32_t zero3[3] = {0, 0, 0};
     set_sh1(e, SH_RESOURCE_LIMITS, 0);
@@ -1180,16 +1184,66 @@ static void ln_op(SdxlEngine* e, const SdxlPack* p, const char* prefix,
 // CLIP ENCODERS (CLIP-L + OpenCLIP-bigG)
 // =================================================================================================
 
+static int strip_easynegative_trigger(const char* in, char* out, size_t out_max) {
+    if (!out || out_max == 0) return 0;
+    out[0] = 0;
+    if (!in || !in[0]) return 0;
+    int found = 0;
+    size_t op = 0;
+    const char* p = in;
+    while (*p && op + 1 < out_max) {
+        int is_boundary = (p == in) || !(isalnum((unsigned char)p[-1]) || p[-1] == '_');
+        if (is_boundary) {
+            const char* kw = "easynegative";
+            size_t klen = 12;
+            size_t j = 0;
+            while (j < klen && p[j] && tolower((unsigned char)p[j]) == kw[j]) j++;
+            int end_boundary = (j == klen) && !(isalnum((unsigned char)p[klen]) || p[klen] == '_');
+            if (end_boundary) {
+                found = 1;
+                p += klen;
+                while (*p == ' ' || *p == '\t' || *p == ',') p++;
+                continue;
+            }
+        }
+        out[op++] = *p++;
+    }
+    while (op > 0 && (out[op - 1] == ' ' || out[op - 1] == '\t' || out[op - 1] == ',')) op--;
+    out[op] = 0;
+    return found;
+}
+
 static int run_clip(SdxlEngine* e, const SdxlPack* p, const uint32_t tokens[CLIP_MAX_LEN], uint32_t eos_pos,
                     int n_layers, uint32_t C, uint32_t n_heads, uint32_t act_mode,
-                    uint64_t penult_out, uint64_t pooled_out, int apply_final_ln) {
+                    uint64_t penult_out, uint64_t pooled_out, int apply_final_ln,
+                    const uint16_t* ti_emb, uint32_t ti_start, uint32_t ti_count) {
     memcpy((void*)(uintptr_t)e->tok_gpu, tokens, CLIP_MAX_LEN * 4);
     const SdxlTensor* te = pack_req(e, p, "text_model.embeddings.token_embedding.weight");
     const SdxlTensor* pe = pack_req(e, p, "text_model.embeddings.position_embedding.weight");
     if (!te || !pe) return -1;
 
     uint64_t x = e->buf_a, h = e->buf_b;
-    op_clip_emb(e, t_addr(p, te), t_addr(p, pe), e->tok_gpu, x, CLIP_MAX_LEN, C);
+    if (ti_emb && ti_count > 0 && C == EASYNEGATIVE_DIM && te->fmt == 1 && pe->fmt == 1) {
+        // Inject Textual Inversion vectors (e.g. EasyNegative) directly into CLIP input embeddings
+        const uint16_t* te_h = (const uint16_t*)(uintptr_t)t_addr(p, te);
+        const uint16_t* pe_h = (const uint16_t*)(uintptr_t)t_addr(p, pe);
+        float* out_x = (float*)(uintptr_t)x;
+        for (uint32_t s = 0; s < CLIP_MAX_LEN; s++) {
+            const uint16_t* prow = pe_h + (size_t)s * C;
+            const uint16_t* trow = (s >= ti_start && s < ti_start + ti_count)
+                ? (ti_emb + (size_t)(s - ti_start) * C)
+                : (te_h + (size_t)tokens[s] * C);
+            float* dst = out_x + (size_t)s * C;
+            for (uint32_t c = 0; c < C; c++) {
+                dst[c] = host_fp16_to_f32(trow[c]) + host_fp16_to_f32(prow[c]);
+            }
+        }
+#ifndef SDXL_CPU
+        __asm__ volatile("sfence" ::: "memory");
+#endif
+    } else {
+        op_clip_emb(e, t_addr(p, te), t_addr(p, pe), e->tok_gpu, x, CLIP_MAX_LEN, C);
+    }
 
     int run_layers = pooled_out ? n_layers : (n_layers - 1);
     for (int i = 0; i < run_layers; i++) {
@@ -1271,14 +1325,31 @@ static void apply_clip_token_weights(uint64_t buf_addr, uint32_t C, const float 
 static int encode_prompt(SdxlEngine* e, const char* text, int force_zero_empty,
                          uint64_t ctx_out, uint64_t pooled_out, uint32_t* ctx_len_out) {
     if (e->is_sd15) {
-        // SD 1.5: CLIP-L with Clip Skip 2 (layer 10 + final_layer_norm), up to 2x77 = 154 tokens!
+        // SD 1.5: CLIP-L with Clip Skip 2 (layer 10 + final_layer_norm) + built-in EasyNegative TI!
+        char clean_txt[2048];
+        int use_easyneg = strip_easynegative_trigger(text ? text : "", clean_txt, sizeof(clean_txt));
         uint32_t ids_l[CLIP_MAX_CHUNKS][CLIP_MAX_LEN];
         float w_l[CLIP_MAX_CHUNKS][CLIP_MAX_LEN];
         uint32_t eos_l[CLIP_MAX_CHUNKS] = {0};
-        uint32_t n_chunks = clip_tok_encode_weighted_chunks(&e->tok, text ? text : "", ids_l, w_l, eos_l, CLIP_EOS);
+        uint32_t n_chunks = clip_tok_encode_weighted_chunks(&e->tok, clean_txt, ids_l, w_l, eos_l, CLIP_EOS);
+        if (use_easyneg) {
+            // Reserve slots [1 .. EASYNEGATIVE_N_TOKS] right after BOS on chunk 0
+            for (int s = (int)CLIP_MAX_LEN - 2; s >= 1 + (int)EASYNEGATIVE_N_TOKS; s--) {
+                ids_l[0][s] = ids_l[0][s - (int)EASYNEGATIVE_N_TOKS];
+                w_l[0][s] = w_l[0][s - (int)EASYNEGATIVE_N_TOKS];
+            }
+            for (uint32_t s = 1; s <= EASYNEGATIVE_N_TOKS; s++) {
+                ids_l[0][s] = CLIP_EOS;
+                w_l[0][s] = 1.0f;
+            }
+            ids_l[0][CLIP_MAX_LEN - 1] = CLIP_EOS;
+        }
         for (uint32_t c = 0; c < n_chunks; c++) {
             uint64_t dst = ctx_out + (uint64_t)c * CLIP_MAX_LEN * 768ull * 4ull;
-            if (run_clip(e, &e->clip_l, ids_l[c], 0, 12, 768, 12, 1 /* quick_gelu */, dst, 0, 1)) return -1;
+            const uint16_t* ti = (use_easyneg && c == 0) ? EASYNEGATIVE_FP16 : NULL;
+            uint32_t ti_n = (use_easyneg && c == 0) ? EASYNEGATIVE_N_TOKS : 0u;
+            if (run_clip(e, &e->clip_l, ids_l[c], 0, 12, 768, 12, 1 /* quick_gelu */, dst, 0, 1, ti, 1u, ti_n))
+                return -1;
             apply_clip_token_weights(dst, 768, w_l[c]);
         }
         if (ctx_len_out) *ctx_len_out = n_chunks * CLIP_MAX_LEN;
@@ -1298,9 +1369,11 @@ static int encode_prompt(SdxlEngine* e, const char* text, int force_zero_empty,
 
     for (uint32_t c = 0; c < n_chunks; c++) {
         uint64_t dst = ctx_out + (uint64_t)c * CLIP_MAX_LEN * 2048ull * 4ull;
-        if (run_clip(e, &e->clip_l, ids_l[c], 0, 12, 768, 12, 1 /* quick_gelu */, e->tmp_cl, 0, 0)) return -1;
+        if (run_clip(e, &e->clip_l, ids_l[c], 0, 12, 768, 12, 1 /* quick_gelu */, e->tmp_cl, 0, 0, NULL, 0, 0))
+            return -1;
         if (run_clip(e, &e->clip_g, ids_g[c], eos_g[c], 32, 1280, 20, 2 /* gelu_exact */,
-                     e->tmp_cg, (c == 0) ? pooled_out : 0, 0)) return -1;
+                     e->tmp_cg, (c == 0) ? pooled_out : 0, 0, NULL, 0, 0))
+            return -1;
         apply_clip_token_weights(e->tmp_cl, 768, w_l[c]);
         apply_clip_token_weights(e->tmp_cg, 1280, w_g[c]);
         op_concat(e, e->tmp_cl, e->tmp_cg, dst, CLIP_MAX_LEN, 768, 1280);
@@ -1459,81 +1532,56 @@ static int block_breather(SdxlEngine* e) {
     if (soc_c > t_c) t_c = soc_c;
     if (t_c > e->stats.temp_peak_c) e->stats.temp_peak_c = t_c;
 
-    // Active Thermal Safety Guard: prevent PS4 hardware overheating shutdown (~95C trip) even in Turbo!
-    if (t_c >= 88) {
+    // Active Thermal Safety Guard: PS4 Pro stock syscon targets ~79-85C under normal load
+    // (hardware overheat shutdown is ~95C). Only throttle/pause when genuinely hot!
+    if (t_c >= 92) {
         if (gpu_flush(e)) return -1;
         if (e->eco_mode < 2) {
-            e->eco_mode = 2; // Drop to Quiet (~20CU Pro / ~11CU Base) immediately
+            e->eco_mode = 2; // Drop to Quiet immediately
             gpu_begin(e);
         }
-        glog("thermal_guard: PS4 hot (%dC, cpu=%dC soc=%dC) — pausing to cool to <=82C...", t_c, cpu_c, soc_c);
-        for (int w = 0; w < 50; w++) { // Up to 25s active cooldown
+        glog("thermal_guard: PS4 hot (%dC, cpu=%dC soc=%dC) — pausing to cool to <=87C...", t_c, cpu_c, soc_c);
+        for (int w = 0; w < 30; w++) { // Up to 15s active cooldown
             if (e->cancel_fn && e->cancel_fn(e->cancel_user)) return 1;
             sceKernelUsleep(500000u);
             e->stats.cooldown_ms += 500.0;
             t_c = sdxl_read_temp_c(&cpu_c, &soc_c);
             if (soc_c > t_c) t_c = soc_c;
-            if (t_c > 0 && t_c <= 82) break;
+            if (t_c > 0 && t_c <= 87) break;
         }
         return 0;
     }
 
-    if (t_c >= 84 && e->eco_mode < 2) {
+    if (t_c >= 90 && e->eco_mode < 2) {
         if (gpu_flush(e)) return -1;
         e->eco_mode = 2; // Auto-throttle Turbo/Balanced -> Quiet
         gpu_begin(e);
-        sceKernelUsleep(250000u);
-        e->stats.cooldown_ms += 250.0;
+        sceKernelUsleep(100000u);
+        e->stats.cooldown_ms += 100.0;
         return 0;
     }
-    if (t_c >= 80 && e->eco_mode == 0) {
+    if (t_c >= 88 && e->eco_mode == 0) {
         if (gpu_flush(e)) return -1;
         e->eco_mode = 1; // Auto-throttle Turbo -> Balanced before heat builds
         gpu_begin(e);
-        sceKernelUsleep(60000u);
-        e->stats.cooldown_ms += 60.0;
-        return 0;
-    }
-
-    // Mode-specific Active Thermal Ceiling: keeps Quiet/Silent fan whisper-calm even in hot summer!
-    if (e->eco_mode >= 3 && t_c >= 74) {
-        if (gpu_flush(e)) return -1;
-        for (int w = 0; w < 30; w++) {
-            if (e->cancel_fn && e->cancel_fn(e->cancel_user)) return 1;
-            sceKernelUsleep(500000u);
-            e->stats.cooldown_ms += 500.0;
-            t_c = sdxl_read_temp_c(&cpu_c, &soc_c);
-            if (soc_c > t_c) t_c = soc_c;
-            if (t_c > 0 && t_c <= 70) break;
-        }
-        return 0;
-    }
-    if (e->eco_mode == 2 && t_c >= 78) {
-        if (gpu_flush(e)) return -1;
-        for (int w = 0; w < 24; w++) {
-            if (e->cancel_fn && e->cancel_fn(e->cancel_user)) return 1;
-            sceKernelUsleep(500000u);
-            e->stats.cooldown_ms += 500.0;
-            t_c = sdxl_read_temp_c(&cpu_c, &soc_c);
-            if (soc_c > t_c) t_c = soc_c;
-            if (t_c > 0 && t_c <= 74) break;
-        }
+        sceKernelUsleep(40000u);
+        e->stats.cooldown_ms += 40.0;
         return 0;
     }
 
     if (e->eco_mode <= 0) {
-        // Even in Turbo (<80C), flush + tiny 15ms breather prevents sudden VRM/SoC thermal spikes
+        // Even in Turbo (<88C), flush + tiny 10ms breather prevents sudden VRM/SoC thermal spikes
         if (gpu_flush(e)) return -1;
-        sceKernelUsleep(15000u);
-        e->stats.cooldown_ms += 15.0;
+        sceKernelUsleep(10000u);
+        e->stats.cooldown_ms += 10.0;
         return 0;
     }
 
     if (gpu_flush(e)) return -1;
     if (e->cancel_fn && e->cancel_fn(e->cancel_user)) return 1;
-    uint32_t us = (e->eco_mode == 1) ? 25000u : (e->eco_mode == 2 ? 85000u : 140000u);
-    if (e->eco_mode == 2 && t_c >= 75) us = 180000u;
-    else if (e->eco_mode >= 3 && t_c >= 71) us = 250000u;
+    uint32_t us = (e->eco_mode == 1) ? 15000u : (e->eco_mode == 2 ? 40000u : 75000u);
+    if (e->eco_mode == 2 && t_c >= 87) us = 90000u;
+    else if (e->eco_mode >= 3 && t_c >= 85) us = 130000u;
     if (e->is_sd15) us >>= 1; // SD 1.5 blocks are ~4x lighter, keep breathers snappy!
     if (!e->neo) us >>= 1;    // Base PS4 (18 CUs, ~110W) runs cooler than Pro (36 CUs, ~160W)
     sceKernelUsleep(us);
@@ -3651,9 +3699,9 @@ void sdxl_apply_quality_shield(const char* model_name, int is_sd15, int auto_qua
             }
             snprintf(pbuf, sizeof(pbuf), "%s", merged);
         }
-        // Ensure anti-deformity hand/finger/eye negative shield
+        // Ensure anti-deformity hand/finger/eye negative shield (with built-in EasyNegative TI for SD 1.5)
         const char* shield = is_sd15
-            ? "(worst quality, low quality:1.4), lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad eyes, asymmetrical eyes, blurry, watermark"
+            ? "EasyNegative, (worst quality, low quality:1.4), lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad eyes, asymmetrical eyes, blurry, watermark"
             : (ci_has(m, "animagine")
                 ? "lowres, bad anatomy, bad hands, extra digits, fewer digits, missing fingers, bad eyes, worst quality, low quality, low score, bad score, average score, blurry"
                 : (ci_has(m, "noob")
@@ -3663,6 +3711,26 @@ void sdxl_apply_quality_shield(const char* model_name, int is_sd15, int auto_qua
             char mn[1024];
             snprintf(mn, sizeof(mn), "%s%s%s", nbuf, nbuf[0] ? ", " : "", shield);
             snprintf(nbuf, sizeof(nbuf), "%s", mn);
+        }
+        if (is_sd15 && !ci_has(nbuf, "easynegative")) {
+            char mn[1024];
+            snprintf(mn, sizeof(mn), "EasyNegative%s%s", nbuf[0] ? ", " : "", nbuf);
+            snprintf(nbuf, sizeof(nbuf), "%s", mn);
+        }
+        // On SD 1.5 single-character prompts, enforce solo + anti-crowd negatives so 512x512 doesn't spawn extra melted people
+        if (is_sd15 && (ci_has(pbuf, "1girl") || ci_has(pbuf, "1boy")) &&
+            !ci_has(pbuf, "2girls") && !ci_has(pbuf, "multiple") && !ci_has(pbuf, "group")) {
+            if (!ci_has(pbuf, "solo")) {
+                char mp[2048];
+                snprintf(mp, sizeof(mp), "solo, %s", pbuf);
+                snprintf(pbuf, sizeof(pbuf), "%s", mp);
+            }
+            if (!ci_has(nbuf, "multiple girls")) {
+                char mn[1024];
+                snprintf(mn, sizeof(mn), "%s%smultiple girls, multiple boys, crowd, extra people",
+                         nbuf, nbuf[0] ? ", " : "");
+                snprintf(nbuf, sizeof(nbuf), "%s", mn);
+            }
         }
     }
 
@@ -3681,7 +3749,7 @@ void sdxl_load_speed_preset(const char* model_name, int is_sd15, ModelPreset* ou
     memset(out, 0, sizeof(*out));
     const char* m = model_name ? model_name : "";
     if (is_sd15) {
-        out->width = 512; out->height = 768; out->upscale = 0;
+        out->width = 512; out->height = 512; out->upscale = 0;
         if (ci_has(m, "8step") || ci_has(m, "hyper")) {
             out->steps = 6; out->cfg = 3.2f; out->sampler = 1; // Euler (~18s!)
             snprintf(out->description, sizeof(out->description), "Speed Mode · SD1.5 6-Step Euler (~18s)");
@@ -3713,12 +3781,12 @@ void sdxl_load_preset(const char* model_dir, const char* model_name, int is_sd15
     memset(out, 0, sizeof(*out));
     // Authoritative Anti-Deformity Best-Quality Defaults per Architecture & Checkpoint Family
     if (is_sd15) {
-        out->width = 512; out->height = 768;
+        out->width = 512; out->height = 512;
         out->upscale = 1; // Auto-upscale SD 1.5 -> crisp 1080p!
         snprintf(out->prompt, sizeof(out->prompt),
                  "masterpiece, best quality, highres, 1girl, solo, silver hair, blue eyes, glowing sakura petals, night sky, anime style");
         snprintf(out->negative, sizeof(out->negative),
-                 "(worst quality, low quality:1.4), lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad eyes, blurry, text, watermark");
+                 "EasyNegative, (worst quality, low quality:1.4), lowres, bad anatomy, bad hands, extra digits, fewer digits, fused fingers, bad eyes, blurry, text, watermark");
         if (ci_has(model_name, "8step") || ci_has(model_name, "hyper")) {
             out->steps = 8; out->cfg = 3.5f; out->sampler = 1; // Euler
             snprintf(out->description, sizeof(out->description), "SD 1.5 Fast 8-step (Euler · CFG 3.5 · +1080p)");
@@ -4214,18 +4282,18 @@ static int sdxl_generate_internal(SdxlEngine* e, const SdxlParams* p, const uint
         if (cur_soc > cur_t) cur_t = cur_soc;
         if (cur_t > e->stats.temp_peak_c) e->stats.temp_peak_c = cur_t;
 #ifndef SDXL_CPU
-        if (cur_t >= 86) {
+        if (cur_t >= 92) {
             if (e->eco_mode < 2) { e->eco_mode = 2; gpu_begin(e); }
-            for (int w = 0; w < 40; w++) {
+            for (int w = 0; w < 30; w++) {
                 if (cancel && cancel(user)) { free(lat); free(noise); free(old_denoised); e->rt_phase = 0; e->cancel_fn = NULL; return 1; }
                 char cmsg[128];
-                snprintf(cmsg, sizeof(cmsg), "Thermal Guard: Cooling PS4 (%dC -> 81C)...", cur_t);
+                snprintf(cmsg, sizeof(cmsg), "Thermal Guard: Cooling PS4 (%dC -> 87C)...", cur_t);
                 if (progress) progress(user, 0.05f + 0.85f * ((float)s / (float)steps), cmsg);
                 sceKernelUsleep(500000u);
                 e->stats.cooldown_ms += 500.0;
                 cur_t = sdxl_read_temp_c(&cur_cpu, &cur_soc);
                 if (cur_soc > cur_t) cur_t = cur_soc;
-                if (cur_t > 0 && cur_t <= 81) break;
+                if (cur_t > 0 && cur_t <= 87) break;
             }
         }
 #endif

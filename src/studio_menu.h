@@ -59,7 +59,7 @@ static const char* const SM_UPSCALE[4] = {
 
 typedef struct {
     const char* model;
-    int neo, busy, ready, has_upscaler;
+    int neo, is_sd15, busy, ready, has_upscaler;
     int ui_mode;                                  // 0 = Easy Mode, 1 = Advanced Studio
     int easy_framing;                             // 0=Portrait, 1=Upper, 2=Full Body, 3=Wide 16:9
     int easy_quality;                             // 0=Fast, 1=Best Quality, 2=Best + 1080p HD
@@ -82,7 +82,7 @@ typedef struct {
     float cfg;
     int sampler, upscale, eco;
     uint32_t batch, rand_mask;
-    int shutdown_after, nsfw_allow, auto_quality;
+    int shutdown_after, nsfw_allow, auto_quality, auto_face_fix;
     const char* batch_folder;
     uint64_t seed, last_seed;
     double last_sec, last_tf;
@@ -271,9 +271,9 @@ static void sm_easy_row_value(const StudioView* v, int erow, char* out, size_t c
         break;
     case EROW_CREDITS:
         if (v->update_ver && v->update_ver[0])
-            snprintf(out, cap, "Update v%s Ready on GitHub!  ·  Press X or L3 to Open", v->update_ver);
+            snprintf(out, cap, "Update v%s Ready on GitHub!  ·  Press X or L3", v->update_ver);
         else
-            snprintf(out, cap, "Open Credits, Licenses, OTA Updates & Content Filter  (Press X or L3)");
+            snprintf(out, cap, "Credits, Licenses, OTA Updates & Content Filter  (X / L3)");
         break;
     default:
         out[0] = 0;
@@ -281,16 +281,140 @@ static void sm_easy_row_value(const StudioView* v, int erow, char* out, size_t c
     }
 }
 
-static void sm_draw_easy_row(uint32_t* back, const StudioView* v, int erow) {
-    const int x = SM_PX, w = SM_PW, h = 68;
-    const int y = SM_ROW0 + 6 + erow * SM_EASY_ROW_H;
-    const int foc = (v->focus == erow);
-    const int cy = y + h / 2;
+static void sm_draw_easy_panel(uint32_t* back, const StudioView* v, int* out_next_y) {
+    const int px = SM_PX, pw = SM_PW;
+    int y = SM_ROW0;
 
-    if (erow == EROW_GEN) {
+    // Web-style Easy Studio outer card header
+    g_rrect(back, px, y, pw, 668, 18, 0x0A162D, 240);
+    g_rrect_line(back, px, y, pw, 668, 18, 1, 0x1E3866, 255);
+    g_draw_str(back, &g_fsmall, px + 20, y + 12, "Easy Studio", C_GREEN);
+    const char* sw = "R1: Advanced Studio ->";
+    g_draw_str(back, &g_fsmall, px + pw - 20 - g_str_width(&g_fsmall, sw), y + 12, sw, C_ACCENT_HI);
+
+    const int ix = px + 18, iw = pw - 36;
+    y += 46;
+
+    // Helper for compact input-box rows (1. Character, 2. Scenario, 5. Checkpoint)
+    static const char* const FR_PILLS[4] = { "Portrait", "Upper Body", "Full Body", "Wide 16:9" };
+    static const char* const QL_PILLS_XL[3] = { "Testing Draft", "Best Quality", "Best + 1080p" };
+    static const char* const QL_PILLS_15[2] = { "Testing Draft", "Best + 1080p" };
+
+    // Row 0: 1. Character
+    {
+        int foc = (v->focus == EROW_CHAR);
+        g_draw_str(back, &g_fsmall, ix + 2, y, "1. Character  (Left/Right or X to browse)", foc ? 0xFFFFFF : C_TEXT_DIM);
+        y += 32;
+        g_rrect(back, ix, y, iw, 38, 10, foc ? C_SURFACE_HI : 0x071226, 250);
+        g_rrect_line(back, ix, y, iw, 38, 10, foc ? 2 : 1, foc ? C_ACCENT_HI : C_LINE, 255);
+        char val[240], fit[240];
+        sm_easy_row_value(v, EROW_CHAR, val, sizeof(val));
+        sm_fit(&g_fsmall, val, iw - 68, fit, sizeof(fit));
+        g_draw_str(back, &g_fsmall, ix + 14, y + (38 - g_fsmall.line) / 2, fit, foc ? 0xFFFFFF : C_TEXT);
+        if (foc) { sm_chev(back, ix + iw - 36, y + 19, -1, C_ACCENT_HI); sm_chev(back, ix + iw - 16, y + 19, +1, C_ACCENT_HI); }
+        y += 50;
+    }
+
+    // Row 1: 2. Scenario / Action
+    {
+        int foc = (v->focus == EROW_SCENE);
+        g_draw_str(back, &g_fsmall, ix + 2, y, "2. Scenario / Action  (X Pick · L2 Surprise · R2 Type)", foc ? 0xFFFFFF : C_TEXT_DIM);
+        y += 32;
+        g_rrect(back, ix, y, iw, 38, 10, foc ? C_SURFACE_HI : 0x071226, 250);
+        g_rrect_line(back, ix, y, iw, 38, 10, foc ? 2 : 1, foc ? C_ACCENT_HI : C_LINE, 255);
+        char val[240], fit[240];
+        sm_easy_row_value(v, EROW_SCENE, val, sizeof(val));
+        sm_fit(&g_fsmall, val, iw - 68, fit, sizeof(fit));
+        g_draw_str(back, &g_fsmall, ix + 14, y + (38 - g_fsmall.line) / 2, fit, foc ? 0xFFFFFF : C_TEXT);
+        if (foc) { sm_chev(back, ix + iw - 36, y + 19, -1, C_ACCENT_HI); sm_chev(back, ix + iw - 16, y + 19, +1, C_ACCENT_HI); }
+        y += 50;
+    }
+
+    // Row 2: 3. Camera Framing (segmented web-style pills!)
+    {
+        int foc = (v->focus == EROW_FRAMING);
+        int n_fr = v->is_sd15 ? 3 : 4;
+        int cur_f = (v->easy_framing >= 0 && v->easy_framing < n_fr) ? v->easy_framing : 1;
+        g_draw_str(back, &g_fsmall, ix + 2, y, "3. Camera Framing  (Left/Right)", foc ? 0xFFFFFF : C_TEXT_DIM);
+        y += 32;
+        int gap = 10;
+        int bw = (iw - gap * (n_fr - 1)) / n_fr;
+        for (int i = 0; i < n_fr; i++) {
+            int bx = ix + i * (bw + gap);
+            int act = (i == cur_f);
+            uint32_t bg = act ? C_ACCENT : (foc ? 0x132648 : 0x0A1830);
+            uint32_t bd = (act && foc) ? 0xFFFFFF : (act ? C_ACCENT_HI : (foc ? C_LINE_HI : C_LINE));
+            g_rrect(back, bx, y, bw, 36, 10, bg, 250);
+            g_rrect_line(back, bx, y, bw, 36, 10, (act || foc) ? 2 : 1, bd, 255);
+            int tw = g_str_width(&g_fsmall, FR_PILLS[i]);
+            g_draw_str(back, &g_fsmall, bx + (bw - tw) / 2, y + (36 - g_fsmall.line) / 2, FR_PILLS[i], act ? 0xFFFFFF : C_TEXT_DIM);
+        }
+        y += 48;
+    }
+
+    // Row 3: 4. Speed vs Quality (segmented web-style pills!)
+    {
+        int foc = (v->focus == EROW_QUALITY);
+        int n_q = v->is_sd15 ? 2 : 3;
+        int cur_q = (v->easy_quality >= 0 && v->easy_quality < n_q) ? v->easy_quality : 1;
+        g_draw_str(back, &g_fsmall, ix + 2, y, "4. Speed vs Quality  (Left/Right)", foc ? 0xFFFFFF : C_TEXT_DIM);
+        y += 32;
+        int gap = 10;
+        int bw = (iw - gap * (n_q - 1)) / n_q;
+        for (int i = 0; i < n_q; i++) {
+            int bx = ix + i * (bw + gap);
+            int act = (i == cur_q);
+            const char* lbl = v->is_sd15 ? QL_PILLS_15[i] : QL_PILLS_XL[i];
+            uint32_t bg = act ? (i == 0 ? 0x1D5E46 : C_ACCENT) : (foc ? 0x132648 : 0x0A1830);
+            uint32_t bd = (act && foc) ? 0xFFFFFF : (act ? (i == 0 ? C_GREEN : C_ACCENT_HI) : (foc ? C_LINE_HI : C_LINE));
+            g_rrect(back, bx, y, bw, 36, 10, bg, 250);
+            g_rrect_line(back, bx, y, bw, 36, 10, (act || foc) ? 2 : 1, bd, 255);
+            int tw = g_str_width(&g_fsmall, lbl);
+            g_draw_str(back, &g_fsmall, bx + (bw - tw) / 2, y + (36 - g_fsmall.line) / 2, lbl, act ? 0xFFFFFF : C_TEXT_DIM);
+        }
+        y += 48;
+    }
+
+    // Row 4: 5. Checkpoint Model
+    {
+        int foc = (v->focus == EROW_MODEL);
+        g_draw_str(back, &g_fsmall, ix + 2, y, "5. Checkpoint Model  (X to switch / OPTIONS to download)", foc ? 0xFFFFFF : C_TEXT_DIM);
+        y += 32;
+        g_rrect(back, ix, y, iw, 38, 10, foc ? C_SURFACE_HI : 0x071226, 250);
+        g_rrect_line(back, ix, y, iw, 38, 10, foc ? 2 : 1, foc ? C_ACCENT_HI : C_LINE, 255);
+        char val[240], fit[240];
+        snprintf(val, sizeof(val), "%s", (v->model && v->model[0]) ? v->model : "No model loaded - press X");
+        sm_fit(&g_fsmall, val, iw - 52, fit, sizeof(fit));
+        g_draw_str(back, &g_fsmall, ix + 14, y + (38 - g_fsmall.line) / 2, fit, foc ? 0xFFFFFF : C_TEXT);
+        if (foc) sm_chev(back, ix + iw - 20, y + 19, 0, C_ACCENT_HI);
+        y += 50;
+    }
+
+    // Auto-Tuned 2-Row Summary Box (fits every setting cleanly with zero truncation!)
+    {
+        static const char* const SMP_SHORT[4] = { "Euler a", "Euler", "LCM", "DPM++ 2M Karras" };
+        g_rrect(back, ix, y, iw, 60, 10, 0x061022, 245);
+        g_rrect_line(back, ix, y, iw, 60, 10, 1, 0x1A3158, 255);
+        char row1[180], row2[180], f1[180], f2[180];
+        const char* smp_n = SMP_SHORT[(v->sampler >= 0 && v->sampler <= 3) ? v->sampler : 0];
+        const char* up_n = (v->upscale == 1) ? "1080p RealESRGAN" : (v->upscale == 3 ? "4K UHD" : "Off (Native)");
+        snprintf(row1, sizeof(row1), "Auto-Tuned: %ux%u  ·  %u steps  ·  CFG %.1f  ·  %s",
+                 v->w, v->h, v->steps, (double)v->cfg, smp_n);
+        snprintf(row2, sizeof(row2), "Upscale: %s  ·  Shield: %s  ·  FaceFix: %s",
+                 up_n, v->auto_quality ? "ON" : "OFF", v->auto_face_fix ? "ON" : "OFF");
+        sm_fit(&g_fsmall, row1, iw - 24, f1, sizeof(f1));
+        sm_fit(&g_fsmall, row2, iw - 24, f2, sizeof(f2));
+        g_draw_str(back, &g_fsmall, ix + 12, y + 6, f1, 0x9CC4F8);
+        g_draw_str(back, &g_fsmall, ix + 12, y + 32, f2, 0x6EF3BD);
+        y += 70;
+    }
+
+    // Row 5: Generate CTA Button
+    {
+        int foc = (v->focus == EROW_GEN);
         uint32_t fill = !v->ready ? 0x1B3156 : (v->busy ? 0x1B3156 : C_ACCENT);
-        g_rrect(back, x, y + 6, w, h - 6, 18, fill, foc ? 255 : 225);
-        g_rrect_line(back, x, y + 6, w, h - 6, 18, foc ? 2 : 1, foc ? 0xFFFFFF : C_LINE_HI, 255);
+        g_rrect(back, ix, y, iw, 48, 12, fill, foc ? 255 : 230);
+        g_rrect_line(back, ix, y, iw, 48, 12, foc ? 2 : 1, foc ? 0xFFFFFF : C_LINE_HI, 255);
         char gen_lbl[96], eta_b[32];
         if (v->busy) {
             sm_fmt_eta(v->eta_sec, eta_b, sizeof(eta_b));
@@ -301,30 +425,25 @@ static void sm_draw_easy_row(uint32_t* back, const StudioView* v, int erow) {
         } else {
             snprintf(gen_lbl, sizeof(gen_lbl), "Generate Anime Artwork");
         }
-        int tw = g_str_width(&g_fbold, gen_lbl) + (v->ready && !v->busy ? 44 : 0);
-        int tx = x + (w - tw) / 2;
-        if (v->ready && !v->busy) tx += g_draw_btn(back, GBTN_TRIANGLE, tx, cy + 3) + 12;
-        g_draw_str(back, &g_fbold, tx, cy + 3 - g_fbold.line / 2, gen_lbl, 0xFFFFFF);
-        return;
+        int tw = g_str_width(&g_fsmall, gen_lbl) + (v->ready && !v->busy ? 38 : 0);
+        int tx = ix + (iw - tw) / 2;
+        if (v->ready && !v->busy) tx += g_draw_btn(back, GBTN_TRIANGLE, tx, y + 24) + 10;
+        g_draw_str(back, &g_fsmall, tx, y + (48 - g_fsmall.line) / 2, gen_lbl, 0xFFFFFF);
+        y += 58;
     }
 
-    g_rrect(back, x, y, w, h, 16, foc ? C_SURFACE_HI : C_SURFACE, foc ? 255 : 215);
-    g_rrect_line(back, x, y, w, h, 16, foc ? 2 : 1, foc ? C_ACCENT_HI : C_LINE, 255);
-    if (foc) g_rrect(back, x + 10, y + 14, 4, h - 28, 2, C_ACCENT_HI, 255);
-
-    g_draw_str(back, &g_fbold, x + 28, y + 8, SM_EASY_LABEL[erow], foc ? 0xFFFFFF : C_ACCENT_HI);
-    char val[300], fit[300];
-    sm_easy_row_value(v, erow, val, sizeof(val));
-    sm_fit(&g_fsmall, val, w - 84, fit, sizeof(fit));
-    g_draw_str(back, &g_fsmall, x + 28, y + 37, fit, foc ? 0xFFFFFF : C_TEXT);
-    if (foc) {
-        if (erow != EROW_MODEL && erow != EROW_CREDITS) {
-            sm_chev(back, x + w - 48, cy, -1, C_ACCENT_HI);
-            sm_chev(back, x + w - 24, cy, +1, C_ACCENT_HI);
-        } else {
-            sm_chev(back, x + w - 30, cy, 0, C_ACCENT_HI);
-        }
+    // Row 6: Full-width Credits & Updates bar (fits cleanly with zero truncation)
+    {
+        int foc = (v->focus == EROW_CREDITS);
+        g_rrect(back, ix, y, iw, 42, 10, foc ? C_SURFACE_HI : 0x09162D, 240);
+        g_rrect_line(back, ix, y, iw, 42, 10, foc ? 2 : 1, foc ? C_ACCENT_HI : C_LINE, 255);
+        char val[220], fit[220];
+        sm_easy_row_value(v, EROW_CREDITS, val, sizeof(val));
+        sm_fit(&g_fsmall, val, iw - 28, fit, sizeof(fit));
+        g_draw_str(back, &g_fsmall, ix + 14, y + (42 - g_fsmall.line) / 2, fit, foc ? 0xFFFFFF : C_TEXT_DIM);
     }
+
+    if (out_next_y) *out_next_y = SM_ROW0 + 680;
 }
 
 static void sm_draw_welcome(uint32_t* back, int sel, int neo, const char* model, int busy,
@@ -616,8 +735,7 @@ static void sm_draw_studio(uint32_t* back, const StudioView* v) {
 
     int iy;
     if (is_easy) {
-        for (int r = 0; r < EROW_COUNT; r++) sm_draw_easy_row(back, v, r);
-        iy = SM_ROW0 + 6 + EROW_COUNT * SM_EASY_ROW_H + 14;
+        sm_draw_easy_panel(back, v, &iy);
     } else {
         for (int r = 0; r < ROW_COUNT; r++) sm_draw_row(back, v, r);
         iy = SM_ROW0 + ROW_COUNT * SM_ROW_H + 10;
@@ -695,7 +813,7 @@ static void sm_draw_studio(uint32_t* back, const StudioView* v) {
     // Footer hints depend on the current mode — L3 Credits works anytime (even while busy!)
     const char* right = (v->update_ver && v->update_ver[0])
         ? "Update Ready! Press L3 for Credits"
-        : "ko-fi.com/djtomato";
+        : "ko-fi.com/djtomato · Support: Discord / GitHub (L3)";
     if (v->dd_open) {
         sm_draw_dropdown(back, v);
         const GHint h[] = { { GBTN_UPDOWN, "Choose" }, { GBTN_L1, "Page up" }, { GBTN_R1, "Page down" },

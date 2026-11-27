@@ -221,6 +221,12 @@ static void parse_meta_buf(char* buf, GalleryItem* it) {
             else if (strcmp(k, "eco") == 0) it->eco = atoi(v);
             else if (strcmp(k, "upscaled") == 0) it->upscaled = atoi(v);
             else if (strcmp(k, "sec") == 0) it->sec = atof(v);
+            else if (strcmp(k, "unet_sec") == 0) it->unet_sec = atof(v);
+            else if (strcmp(k, "vae_sec") == 0) it->vae_sec = atof(v);
+            else if (strcmp(k, "upscale_sec") == 0) it->upscale_sec = atof(v);
+            else if (strcmp(k, "face_fix_sec") == 0) it->face_fix_sec = atof(v);
+            else if (strcmp(k, "cooldown_sec") == 0) it->cooldown_sec = atof(v);
+            else if (strcmp(k, "eff_tflops") == 0) it->eff_tflops = atof(v);
         }
         if (!nl) break;
         line = nl + 1;
@@ -234,13 +240,17 @@ static int write_meta_item(const char* id, const GalleryItem* meta) {
     snprintf(lr, sizeof(lr), "%s", meta->lora); strip_newlines(lr);
     if (meta->folder[0]) gallery_clean_folder_name(meta->folder, fld, sizeof(fld));
 
-    char mbuf[2600];
+    char mbuf[2800];
     int n = snprintf(mbuf, sizeof(mbuf),
                      "id=%s\nmodel=%s\nwidth=%u\nheight=%u\nsteps=%u\ncfg=%.2f\nsampler=%s\n"
-                     "seed=%llu\neco=%d\nupscaled=%d\nsec=%.2f\nlora=%s\nfolder=%s\nstarred=%d\nprompt=%s\nnegative=%s\n",
+                     "seed=%llu\neco=%d\nupscaled=%d\nsec=%.2f\nunet_sec=%.2f\nvae_sec=%.2f\n"
+                     "upscale_sec=%.2f\nface_fix_sec=%.2f\ncooldown_sec=%.2f\neff_tflops=%.3f\n"
+                     "lora=%s\nfolder=%s\nstarred=%d\nprompt=%s\nnegative=%s\n",
                      id, meta->model, meta->width, meta->height, meta->steps, (double)meta->cfg,
                      meta->sampler[0] ? meta->sampler : "Euler a",
-                     (unsigned long long)meta->seed, meta->eco, meta->upscaled, meta->sec, lr,
+                     (unsigned long long)meta->seed, meta->eco, meta->upscaled, meta->sec,
+                     meta->unet_sec, meta->vae_sec, meta->upscale_sec, meta->face_fix_sec,
+                     meta->cooldown_sec, meta->eff_tflops, lr,
                      fld, meta->starred ? 1 : 0, pr, ng);
     char fp[320];
     snprintf(fp, sizeof(fp), "%s/%s.meta", g_out_dir, id);

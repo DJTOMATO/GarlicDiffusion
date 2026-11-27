@@ -127,7 +127,7 @@ int main(int argc, char** argv) {
             return 1;
         }
         sdxl_load_preset("build/nonexistent_dir", "Animagine_XL_4_dmd2", 0, &mp);
-        if (mp.width != 1024 || mp.height != 1344 || mp.steps != 4 || fabsf(mp.cfg - 1.0f) > 0.05f || mp.sampler != 2 || strncmp(mp.prompt, "1girl,", 6) != 0) {
+        if (mp.width != 1024 || mp.height != 1344 || mp.steps != 6 || fabsf(mp.cfg - 1.4f) > 0.05f || mp.sampler != 2 || strncmp(mp.prompt, "1girl,", 6) != 0) {
             fprintf(stderr, "FAIL: sdxl_load_preset Animagine_XL_4_dmd2 (got %ux%u %u steps cfg=%.2f smp=%d prompt='%s')\n",
                     mp.width, mp.height, mp.steps, (double)mp.cfg, mp.sampler, mp.prompt);
             return 1;
@@ -139,7 +139,7 @@ int main(int argc, char** argv) {
             return 1;
         }
         sdxl_load_preset("build/nonexistent_dir", "Counterfeit_V25", 1, &mp);
-        if (mp.width != 512 || mp.height != 768 || mp.steps != 20 || mp.sampler != 3 || mp.upscale != 1) {
+        if (mp.width != 512 || mp.height != 512 || mp.steps != 20 || mp.sampler != 3 || mp.upscale != 1) {
             fprintf(stderr, "FAIL: sdxl_load_preset Counterfeit_V25\n");
             return 1;
         }
@@ -177,6 +177,13 @@ int main(int argc, char** argv) {
         sdxl_apply_quality_shield("Animagine_XL_4_dmd2", 0, 1, 0, anim_p, sizeof(anim_p), anim_n, sizeof(anim_n));
         if (strncmp(anim_p, "1girl, hatsune miku", 19) != 0 || strstr(anim_p, "high score") == NULL) {
             fprintf(stderr, "FAIL: sdxl_apply_quality_shield Animagine tag order got '%s'\n", anim_p);
+            return 1;
+        }
+        // Verify SD 1.5 Quality Shield injects built-in EasyNegative TI trigger even on presets that already have bad hands/extra digits
+        char sd15_p[512] = "1girl, silver hair", sd15_n[512] = "lowres, bad hands, extra digits, blurry";
+        sdxl_apply_quality_shield("MeinaMix_V11", 1, 1, 0, sd15_p, sizeof(sd15_p), sd15_n, sizeof(sd15_n));
+        if (strstr(sd15_n, "EasyNegative") == NULL || strstr(anim_n, "EasyNegative") != NULL) {
+            fprintf(stderr, "FAIL: EasyNegative TI shield check (sd15='%s', sdxl='%s')\n", sd15_n, anim_n);
             return 1;
         }
 
