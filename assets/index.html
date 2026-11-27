@@ -550,6 +550,7 @@ textarea{min-height:68px;resize:vertical}
       <button class="btn ok sm" onclick="upscaleLatest(1)">Upscale 1080p</button>
       <button class="btn sec sm" onclick="upscaleLatest(3)">Upscale 4K</button>
       <button class="btn sec sm" onclick="fixFaceLatest()" title="Detect anime face on CPU & refine via optional VAE encoder img2img">✨ Fix Face</button>
+      <button class="btn sec sm" onclick="copyLatestSlashCmd()" title="Copy exact Discord /imagine command to reproduce this image">📋 Copy /imagine</button>
       <button class="btn sec sm" onclick="openLatestInGallery()">Inspect Full Size</button>
       <a id="dl" class="btn sec sm" style="text-decoration:none" download="garlic_diffusion.png">Download PNG</a>
     </div>
@@ -880,6 +881,7 @@ textarea{min-height:68px;resize:vertical}
 
       <div class="macts">
         <button class="btn sm" onclick="copyModalPrompt()">Copy Prompt</button>
+        <button class="btn sec sm" onclick="copyModalSlashCmd()" title="Copy exact Discord /imagine command to reproduce this image">📋 Copy /imagine</button>
         <button class="btn sec sm" onclick="loadModalToStudio()">Load to Studio</button>
         <button class="btn ok sm" onclick="recreateModal()">Recreate (New Seed)</button>
         <button class="btn sm" onclick="fixFaceModal()" title="Pure-C CPU anime face detector + optional VAE encoder img2img face refinement">✨ Fix Face</button>
@@ -2847,6 +2849,68 @@ function toggleZoom(){
   document.getElementById('zoombtn').textContent=f?'Fit Screen':'1:1 Full Size';
 }
 function copyModalPrompt(){if(modalIdx>=0)copyText(galItems[modalIdx].prompt||'');}
+function buildDiscordImagineCmd(it){
+  if(!it)return '';
+  const mdl=(it.model||'').trim();
+  const is15=/meinamix|anything_v5|ghostmix|dreamshaper|sd15|sd1\.5/i.test(mdl);
+  const [bw,bh]=resolveBaseDimsForItem(it,is15);
+  let ptxt=(it.prompt||'').replace(/[\r\n]+/g,' ').trim();
+  if(it.lora){
+    const extra=[];
+    for(const raw of String(it.lora).split(',').map(s=>s.trim()).filter(Boolean)){
+      const nm=raw.split(':')[0].trim();
+      if(nm&&!ptxt.toLowerCase().includes('<lora:'+nm.toLowerCase())){
+        extra.push(raw.includes(':')?`<lora:${raw}>`:`<lora:${raw}:0.75>`);
+      }
+    }
+    if(extra.length)ptxt=(extra.join(', ')+(ptxt?', '+ptxt:'')).trim();
+  }
+  const ntxt=(it.negative||'').replace(/[\r\n]+/g,' ').trim();
+  const parts=['/imagine',`prompt:${ptxt}`];
+  if(ntxt)parts.push(`negative_prompt:${ntxt}`);
+  if(bw>=256&&bw<=1536)parts.push(`width:${bw}`);
+  if(bh>=256&&bh<=1536)parts.push(`height:${bh}`);
+  if(it.cfg!==undefined&&it.cfg!==null&&Number(it.cfg)>0)parts.push(`cfg:${Number(it.cfg).toFixed(1).replace(/\.0$/,'')}`);
+  if(it.sampler)parts.push(`sampler:${it.sampler}`);
+  if(it.steps)parts.push(`steps:${it.steps}`);
+  if(it.seed)parts.push(`seed:${it.seed}`);
+  if(mdl)parts.push(`checkpoint:${mdl}`);
+  return parts.join(' ');
+}
+function copyModalSlashCmd(){
+  if(modalIdx<0)return;
+  const cmd=buildDiscordImagineCmd(galItems[modalIdx]);
+  if(!cmd)return;
+  copyText(cmd);
+  toast('Copied Discord /imagine command!');
+}
+async function copyLatestSlashCmd(){
+  const gid=lastStatus&&lastStatus.last_gallery_id;
+  let it=gid?galItems.find(x=>x.id===gid):null;
+  if(!it&&gid){
+    try{const r=await fetch('/gallery/item/'+encodeURIComponent(gid));if(r.ok)it=await r.json();}catch(e){}
+  }
+  if(!it&&lastStatus){
+    const c=lastStatus.current||{};
+    it={
+      model:lastStatus.model||curModel,
+      prompt:c.prompt||pr.value,
+      negative:c.negative||ng.value,
+      lora:lastStatus.active_lora||c.lora||'',
+      width:lastStatus.width||c.width||832,
+      height:lastStatus.height||c.height||1216,
+      steps:lastStatus.steps||c.steps||+st.value,
+      cfg:lastStatus.cfg||c.cfg||+cfg.value,
+      sampler:c.sampler||smp.value,
+      seed:lastStatus.seed||c.seed||0,
+      upscaled:c.upscale||0
+    };
+  }
+  const cmd=buildDiscordImagineCmd(it);
+  if(!cmd)return toast('No generated image yet');
+  copyText(cmd);
+  toast('Copied Discord /imagine command!');
+}
 function resolveBaseDimsForItem(it,is15){
   let w=it.width||0,h=it.height||0;
   const needsMap=(it.upscaled>0)||(is15&&(w>896||h>896))||(!is15&&(w>1280||h>1344));
