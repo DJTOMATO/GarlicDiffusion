@@ -172,6 +172,7 @@ const char* sdxl_eco_name_ex(int eco_mode, int neo);
 void sdxl_load_preset(const char* model_dir, const char* model_name, int is_sd15, ModelPreset* out);
 void sdxl_load_speed_preset(const char* model_name, int is_sd15, ModelPreset* out);
 void sdxl_clean_prompt_dupes(const char* src, char* dst, size_t dst_max);
+void sdxl_sanitize_nsfw_prompts(int nsfw_allow, char* prompt, size_t pr_max, char* negative, size_t ng_max);
 void sdxl_expand_wildcards(const char* src, uint64_t seed, int nsfw_allow, uint32_t rand_mask,
                            char* dst, size_t dst_max);
 void sdxl_apply_quality_shield(const char* model_name, int is_sd15, int auto_quality, int nsfw_allow,

@@ -3395,10 +3395,12 @@ static void canonical_tag_key(const char* raw, char* key, size_t max) {
         return;
     }
 
-    // Strip outer (tag:1.2) wrapper so "(bad hands:1.3)" and "bad hands" share canonical key "bad hands"
-    if (len >= 2 && raw[0] == '(' && raw[len - 1] == ')') {
+    // Strip outer (tag:1.2) wrappers so "((bad hands:1.3))" and "bad hands" share canonical key "bad hands"
+    while (len >= 2 && raw[0] == '(' && raw[len - 1] == ')') {
         raw++;
         len -= 2;
+        while (len > 0 && (*raw == ' ' || *raw == '\t')) { raw++; len--; }
+        while (len > 0 && (raw[len - 1] == ' ' || raw[len - 1] == '\t')) len--;
         const char* col = NULL;
         for (size_t i = len; i > 0; i--) {
             if (raw[i - 1] == ':') { col = raw + i - 1; break; }
@@ -3421,6 +3423,16 @@ static void canonical_tag_key(const char* raw, char* key, size_t max) {
     }
     while (k > 0 && key[k - 1] == ' ') k--;
     key[k] = 0;
+    // Normalize Danbooru rating prefixes so "rating: explicit" == "explicit", "rating: safe" == "safe", etc.
+    if (strncmp(key, "rating:", 7) == 0) {
+        const char* r = key + 7;
+        while (*r == ' ') r++;
+        if (strcmp(r, "explicit") == 0 || strcmp(r, "safe") == 0 || strcmp(r, "general") == 0 ||
+            strcmp(r, "sensitive") == 0 || strcmp(r, "questionable") == 0 ||
+            strcmp(r, "nsfw") == 0 || strcmp(r, "sfw") == 0) {
+            memmove(key, r, strlen(r) + 1);
+        }
+    }
 }
 
 void sdxl_clean_prompt_dupes(const char* src, char* dst, size_t dst_max) {
@@ -3475,8 +3487,9 @@ void sdxl_clean_prompt_dupes(const char* src, char* dst, size_t dst_max) {
             if (strcmp(keys[i], ckey) == 0) { dup = i; break; }
         }
         if (dup >= 0) {
-            // If new token has explicit weight "(...:1.3)" and old didn't, upgrade in place
-            if (cand[0] == '(' && toks[dup][0] != '(') {
+            // Prefer explicit "(...:1.3)" weight or "rating: ..." canonical form over bare tag
+            if ((cand[0] == '(' && toks[dup][0] != '(') ||
+                (strncasecmp(cand, "rating:", 7) == 0 && strncasecmp(toks[dup], "rating:", 7) != 0)) {
                 snprintf(toks[dup], sizeof(toks[0]), "%s", cand);
             }
             continue;
@@ -3495,6 +3508,163 @@ void sdxl_clean_prompt_dupes(const char* src, char* dst, size_t dst_max) {
         out_pos += strlen(toks[i]);
     }
     dst[out_pos] = 0;
+}
+
+static int is_tag_word_char(unsigned char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+}
+
+static int ci_word_has(const char* hay, const char* needle) {
+    if (!hay || !needle || !needle[0]) return 0;
+    size_t nl = strlen(needle);
+    for (const char* p = hay; *p; p++) {
+        size_t i = 0;
+        while (i < nl && p[i] && tolower((unsigned char)p[i]) == tolower((unsigned char)needle[i])) i++;
+        if (i == nl) {
+            int left_ok = (p == hay) || !is_tag_word_char((unsigned char)p[-1]);
+            int right_ok = !p[nl] || !is_tag_word_char((unsigned char)p[nl]);
+            if (left_ok && right_ok) return 1;
+        }
+    }
+    return 0;
+}
+
+static int split_prompt_tags(const char* src, char toks[][160], char keys[][80], int max_toks) {
+    int n_toks = 0;
+    if (!src || !src[0]) return 0;
+    const char* p = src;
+    while (*p && n_toks < max_toks) {
+        while (*p == ' ' || *p == '\t' || *p == ',' || *p == '\r' || *p == '\n') p++;
+        if (!*p) break;
+        int paren = 0, angle = 0, brace = 0;
+        const char* st = p;
+        while (*p) {
+            if (*p == '(') paren++;
+            else if (*p == ')' && paren > 0) paren--;
+            else if (*p == '<') angle++;
+            else if (*p == '>' && angle > 0) angle--;
+            else if (*p == '{') brace++;
+            else if (*p == '}' && brace > 0) brace--;
+            else if (*p == ',' && paren == 0 && angle == 0 && brace == 0) break;
+            p++;
+        }
+        size_t tl = (size_t)(p - st);
+        while (tl > 0 && (st[tl - 1] == ' ' || st[tl - 1] == '\t' || st[tl - 1] == '\r' || st[tl - 1] == '\n')) tl--;
+        if (tl == 0) continue;
+        if (tl >= 160u) tl = 159u;
+        memcpy(toks[n_toks], st, tl);
+        toks[n_toks][tl] = 0;
+        canonical_tag_key(toks[n_toks], keys[n_toks], 80u);
+        if (!keys[n_toks][0]) continue;
+        n_toks++;
+    }
+    return n_toks;
+}
+
+void sdxl_sanitize_nsfw_prompts(int nsfw_allow, char* prompt, size_t pr_max, char* negative, size_t ng_max) {
+    if (!nsfw_allow) return;
+
+    // Core NSFW / adult / ecchi keywords: always stripped from negative when NSFW mode is ON,
+    // and their presence in positive triggers removal of conflicting SFW rating tags from positive.
+    static const char* const NSFW_CORE_KWS[] = {
+        "nsfw", "not safe for work", "explicit", "questionable", "sensitive",
+        "ecchi", "lewd", "erotic", "hentai", "porn", "pornographic",
+        "sexual", "suggestive", "r18", "r-18", "18+", "uncensored",
+        "nude", "naked", "nudity", "nipples", "areola", "topless", "bottomless"
+    };
+    // Extended ecchi / adult attire & anatomy keywords: if present (even as part of a tag) in positive,
+    // any negative tag containing the same keyword is deleted so negative never fights positive.
+    static const char* const NSFW_ECCHI_KWS[] = {
+        "lingerie", "underwear", "panties", "bra", "bikini", "swimsuit",
+        "cleavage", "sideboob", "underboob", "pantyshot", "upskirt", "cameltoe",
+        "breasts", "boobs", "oppai", "ass", "butt", "pussy", "vagina", "penis",
+        "genitals", "ahegao", "bdsm", "bondage", "gravure", "seductive",
+        "provocative", "revealing", "see-through", "sheer", "bodysuit",
+        "micro bikini", "thong", "g-string", "garter", "stockings", "thighhighs",
+        "bunny girl", "succubus", "sexy", "sensual", "alluring"
+    };
+    static const size_t N_CORE = sizeof(NSFW_CORE_KWS) / sizeof(NSFW_CORE_KWS[0]);
+    static const size_t N_ECCHI = sizeof(NSFW_ECCHI_KWS) / sizeof(NSFW_ECCHI_KWS[0]);
+
+    char p_toks[192][160], p_keys[192][80];
+    char n_toks[192][160], n_keys[192][80];
+    int np = (prompt && pr_max) ? split_prompt_tags(prompt, p_toks, p_keys, 192) : 0;
+    int nn = (negative && ng_max) ? split_prompt_tags(negative, n_toks, n_keys, 192) : 0;
+
+    int pos_has_nsfw = 0;
+    unsigned char pos_ecchi_hit[64];
+    memset(pos_ecchi_hit, 0, sizeof(pos_ecchi_hit));
+
+    for (int i = 0; i < np; i++) {
+        for (size_t k = 0; k < N_CORE; k++) {
+            if (ci_word_has(p_keys[i], NSFW_CORE_KWS[k])) {
+                pos_has_nsfw = 1;
+                break;
+            }
+        }
+        for (size_t k = 0; k < N_ECCHI && k < sizeof(pos_ecchi_hit); k++) {
+            if (ci_word_has(p_keys[i], NSFW_ECCHI_KWS[k])) {
+                pos_ecchi_hit[k] = 1;
+            }
+        }
+    }
+
+    // 1. If positive contains NSFW/ecchi indicators, strip conflicting SFW tags from positive
+    if (prompt && pr_max && pos_has_nsfw) {
+        char out[2048];
+        size_t pos = 0;
+        int first = 1;
+        for (int i = 0; i < np; i++) {
+            const char* k = p_keys[i];
+            int drop = (strcmp(k, "sfw") == 0 || strcmp(k, "safe") == 0 ||
+                        strcmp(k, "general") == 0 || strcmp(k, "safe for work") == 0 ||
+                        strcmp(k, "pg") == 0 || strcmp(k, "pg-13") == 0 || strcmp(k, "g-rated") == 0 ||
+                        ci_word_has(k, "sfw") || ci_word_has(k, "safe for work"));
+            if (drop) continue;
+            size_t tl = strlen(p_toks[i]);
+            if (pos + tl + (first ? 0u : 2u) + 1u >= sizeof(out)) break;
+            if (!first) { out[pos++] = ','; out[pos++] = ' '; }
+            memcpy(out + pos, p_toks[i], tl);
+            pos += tl;
+            first = 0;
+        }
+        out[pos] = 0;
+        snprintf(prompt, pr_max, "%s", out);
+    }
+
+    // 2. Strip all core NSFW keywords from negative, plus any negative tag conflicting with positive
+    //    (exact match or shared ecchi/nsfw keyword).
+    if (negative && ng_max) {
+        char out[1024];
+        size_t pos = 0;
+        int first = 1;
+        for (int i = 0; i < nn; i++) {
+            const char* nk = n_keys[i];
+            int drop = 0;
+            for (size_t k = 0; k < N_CORE; k++) {
+                if (ci_word_has(nk, NSFW_CORE_KWS[k])) { drop = 1; break; }
+            }
+            if (!drop) {
+                for (size_t k = 0; k < N_ECCHI && k < sizeof(pos_ecchi_hit); k++) {
+                    if (pos_ecchi_hit[k] && ci_word_has(nk, NSFW_ECCHI_KWS[k])) { drop = 1; break; }
+                }
+            }
+            if (!drop) {
+                for (int j = 0; j < np; j++) {
+                    if (strcmp(nk, p_keys[j]) == 0) { drop = 1; break; }
+                }
+            }
+            if (drop) continue;
+            size_t tl = strlen(n_toks[i]);
+            if (pos + tl + (first ? 0u : 2u) + 1u >= sizeof(out)) break;
+            if (!first) { out[pos++] = ','; out[pos++] = ' '; }
+            memcpy(out + pos, n_toks[i], tl);
+            pos += tl;
+            first = 0;
+        }
+        out[pos] = 0;
+        snprintf(negative, ng_max, "%s", out);
+    }
 }
 
 static const char* pick_pool(const char* const* arr, int n, uint64_t* rng) {
@@ -3526,22 +3696,32 @@ static const char* pick_sfw_any(uint64_t* rng) {
     return RND_DETAIL[idx];
 }
 
-static const char* pick_ecchi_any(uint64_t* rng, int allow_explicit) {
-    int pose_n = allow_explicit ? RND_ECCHI_POSE_N : (RND_ECCHI_POSE_N - 10);
-    int expr_n = allow_explicit ? RND_ECCHI_EXPR_N : (RND_ECCHI_EXPR_N - 18);
-    int outf_n = allow_explicit ? RND_ECCHI_OUTFIT_N : (RND_ECCHI_OUTFIT_N - 30);
-    int acc_n  = allow_explicit ? RND_ECCHI_ACCENT_N : (RND_ECCHI_ACCENT_N - 15);
-    int tot = pose_n + expr_n + outf_n + RND_ECCHI_SCENE_N + acc_n;
+static const char* pick_ecchi_any(uint64_t* rng) {
+    int tot = RND_ECCHI_POSE_N + RND_ECCHI_EXPR_N + RND_ECCHI_OUTFIT_N + RND_ECCHI_SCENE_N + RND_ECCHI_ACCENT_N;
     int idx = (int)(splitmix64_next(rng) % (uint64_t)tot);
-    if (idx < pose_n) return RND_ECCHI_POSE[idx];
-    idx -= pose_n;
-    if (idx < expr_n) return RND_ECCHI_EXPR[idx];
-    idx -= expr_n;
-    if (idx < outf_n) return RND_ECCHI_OUTFIT[idx];
-    idx -= outf_n;
+    if (idx < RND_ECCHI_POSE_N) return RND_ECCHI_POSE[idx];
+    idx -= RND_ECCHI_POSE_N;
+    if (idx < RND_ECCHI_EXPR_N) return RND_ECCHI_EXPR[idx];
+    idx -= RND_ECCHI_EXPR_N;
+    if (idx < RND_ECCHI_OUTFIT_N) return RND_ECCHI_OUTFIT[idx];
+    idx -= RND_ECCHI_OUTFIT_N;
     if (idx < RND_ECCHI_SCENE_N) return RND_ECCHI_SCENE[idx];
     idx -= RND_ECCHI_SCENE_N;
     return RND_ECCHI_ACCENT[idx];
+}
+
+static const char* pick_explicit_any(uint64_t* rng) {
+    int tot = RND_EXPLICIT_POSE_N + RND_EXPLICIT_EXPR_N + RND_EXPLICIT_OUTFIT_N + RND_EXPLICIT_SCENE_N + RND_EXPLICIT_ACCENT_N;
+    int idx = (int)(splitmix64_next(rng) % (uint64_t)tot);
+    if (idx < RND_EXPLICIT_POSE_N) return RND_EXPLICIT_POSE[idx];
+    idx -= RND_EXPLICIT_POSE_N;
+    if (idx < RND_EXPLICIT_EXPR_N) return RND_EXPLICIT_EXPR[idx];
+    idx -= RND_EXPLICIT_EXPR_N;
+    if (idx < RND_EXPLICIT_OUTFIT_N) return RND_EXPLICIT_OUTFIT[idx];
+    idx -= RND_EXPLICIT_OUTFIT_N;
+    if (idx < RND_EXPLICIT_SCENE_N) return RND_EXPLICIT_SCENE[idx];
+    idx -= RND_EXPLICIT_SCENE_N;
+    return RND_EXPLICIT_ACCENT[idx];
 }
 
 void sdxl_expand_wildcards(const char* src, uint64_t seed, int nsfw_allow, uint32_t rand_mask,
@@ -3591,7 +3771,8 @@ void sdxl_expand_wildcards(const char* src, uint64_t seed, int nsfw_allow, uint3
         { "__light__", 5 }, { "__outfit__", 6 }, { "__detail__", 7 }, { "__random__", 8 },
         { "__ecchi__", 9 }, { "__ecchi_pose__", 10 }, { "__ecchi_expr__", 11 },
         { "__ecchi_outfit__", 12 }, { "__ecchi_scene__", 13 }, { "__ecchi_accent__", 14 },
-        { "__explicit__", 15 }
+        { "__explicit__", 15 }, { "__explicit_pose__", 16 }, { "__explicit_expr__", 17 },
+        { "__explicit_outfit__", 18 }, { "__explicit_scene__", 19 }, { "__explicit_accent__", 20 }
     };
     for (int guard = 0; guard < 24; guard++) {
         int hit = 0;
@@ -3600,7 +3781,6 @@ void sdxl_expand_wildcards(const char* src, uint64_t seed, int nsfw_allow, uint3
             if (!pos) continue;
             hit = 1;
             const char* rep = "";
-            int allow_exp = nsfw_allow && ((rand_mask & RAND_EXPLICIT) != 0 || map[m].id == 15);
             uint64_t wrng = rng ^ ((uint64_t)(map[m].id * 131u + guard * 17u) * 0x9E3779B97F4A7C15ull);
             (void)splitmix64_next(&wrng);
             (void)splitmix64_next(&rng);
@@ -3613,13 +3793,18 @@ void sdxl_expand_wildcards(const char* src, uint64_t seed, int nsfw_allow, uint3
             case 6: rep = pick_pool(RND_OUTFIT, RND_OUTFIT_N, &wrng); break;
             case 7: rep = pick_pool(RND_DETAIL, RND_DETAIL_N, &wrng); break;
             case 8: rep = pick_sfw_any(&wrng); break;
-            case 9: rep = nsfw_allow ? pick_ecchi_any(&wrng, allow_exp) : pick_sfw_any(&wrng); break;
-            case 10: rep = nsfw_allow ? pick_pool(RND_ECCHI_POSE, allow_exp ? RND_ECCHI_POSE_N : (RND_ECCHI_POSE_N - 10), &wrng) : pick_pool(RND_POSE, RND_POSE_N, &wrng); break;
-            case 11: rep = nsfw_allow ? pick_pool(RND_ECCHI_EXPR, allow_exp ? RND_ECCHI_EXPR_N : (RND_ECCHI_EXPR_N - 18), &wrng) : pick_pool(RND_EXPR, RND_EXPR_N, &wrng); break;
-            case 12: rep = nsfw_allow ? pick_pool(RND_ECCHI_OUTFIT, allow_exp ? RND_ECCHI_OUTFIT_N : (RND_ECCHI_OUTFIT_N - 30), &wrng) : pick_pool(RND_OUTFIT, RND_OUTFIT_N, &wrng); break;
+            case 9: rep = nsfw_allow ? pick_ecchi_any(&wrng) : pick_sfw_any(&wrng); break;
+            case 10: rep = nsfw_allow ? pick_pool(RND_ECCHI_POSE, RND_ECCHI_POSE_N, &wrng) : pick_pool(RND_POSE, RND_POSE_N, &wrng); break;
+            case 11: rep = nsfw_allow ? pick_pool(RND_ECCHI_EXPR, RND_ECCHI_EXPR_N, &wrng) : pick_pool(RND_EXPR, RND_EXPR_N, &wrng); break;
+            case 12: rep = nsfw_allow ? pick_pool(RND_ECCHI_OUTFIT, RND_ECCHI_OUTFIT_N, &wrng) : pick_pool(RND_OUTFIT, RND_OUTFIT_N, &wrng); break;
             case 13: rep = nsfw_allow ? pick_pool(RND_ECCHI_SCENE, RND_ECCHI_SCENE_N, &wrng) : pick_pool(RND_SCENE, RND_SCENE_N, &wrng); break;
-            case 14: rep = nsfw_allow ? pick_pool(RND_ECCHI_ACCENT, allow_exp ? RND_ECCHI_ACCENT_N : (RND_ECCHI_ACCENT_N - 15), &wrng) : pick_pool(RND_DETAIL, RND_DETAIL_N, &wrng); break;
-            case 15: rep = nsfw_allow ? pick_pool(RND_ECCHI_OUTFIT + (RND_ECCHI_OUTFIT_N - 30), 30, &wrng) : ""; break;
+            case 14: rep = nsfw_allow ? pick_pool(RND_ECCHI_ACCENT, RND_ECCHI_ACCENT_N, &wrng) : pick_pool(RND_DETAIL, RND_DETAIL_N, &wrng); break;
+            case 15: rep = nsfw_allow ? pick_explicit_any(&wrng) : ""; break;
+            case 16: rep = nsfw_allow ? pick_pool(RND_EXPLICIT_POSE, RND_EXPLICIT_POSE_N, &wrng) : ""; break;
+            case 17: rep = nsfw_allow ? pick_pool(RND_EXPLICIT_EXPR, RND_EXPLICIT_EXPR_N, &wrng) : ""; break;
+            case 18: rep = nsfw_allow ? pick_pool(RND_EXPLICIT_OUTFIT, RND_EXPLICIT_OUTFIT_N, &wrng) : ""; break;
+            case 19: rep = nsfw_allow ? pick_pool(RND_EXPLICIT_SCENE, RND_EXPLICIT_SCENE_N, &wrng) : ""; break;
+            case 20: rep = nsfw_allow ? pick_pool(RND_EXPLICIT_ACCENT, RND_EXPLICIT_ACCENT_N, &wrng) : ""; break;
             }
             char next_buf[2048];
             size_t pre = (size_t)(pos - work);
@@ -3649,24 +3834,31 @@ void sdxl_expand_wildcards(const char* src, uint64_t seed, int nsfw_allow, uint3
     if (rand_mask & RAND_LIGHT)  APPEND_RND(PICK_SALTED(RND_LIGHT,  RND_LIGHT_N,  0x606u));
     if (rand_mask & RAND_DETAIL) APPEND_RND(PICK_SALTED(RND_DETAIL, RND_DETAIL_N, 0x707u));
 
-    if (nsfw_allow && (rand_mask & RAND_ECCHI)) {
-        int exp_ok = (rand_mask & RAND_EXPLICIT) != 0;
-        uint32_t sfw_sub = rand_mask & (RAND_POSE | RAND_EXPR | RAND_OUTFIT | RAND_SCENE);
+    int do_ecchi = nsfw_allow && (rand_mask & RAND_ECCHI);
+    int do_exp   = nsfw_allow && (rand_mask & RAND_EXPLICIT);
+    uint32_t sfw_sub = rand_mask & (RAND_POSE | RAND_EXPR | RAND_OUTFIT | RAND_SCENE);
+
+    if (do_ecchi && !do_exp) {
         if (!sfw_sub) {
-            APPEND_RND(PICK_SALTED(RND_ECCHI_POSE, exp_ok ? RND_ECCHI_POSE_N : (RND_ECCHI_POSE_N - 10), 0x801u));
-            APPEND_RND(PICK_SALTED(RND_ECCHI_EXPR, exp_ok ? RND_ECCHI_EXPR_N : (RND_ECCHI_EXPR_N - 18), 0x802u));
-            APPEND_RND(PICK_SALTED(RND_ECCHI_OUTFIT, exp_ok ? RND_ECCHI_OUTFIT_N : (RND_ECCHI_OUTFIT_N - 30), 0x803u));
-            APPEND_RND(PICK_SALTED(RND_ECCHI_SCENE, RND_ECCHI_SCENE_N, 0x804u));
+            APPEND_RND(PICK_SALTED(RND_ECCHI_POSE,   RND_ECCHI_POSE_N,   0x801u));
+            APPEND_RND(PICK_SALTED(RND_ECCHI_EXPR,   RND_ECCHI_EXPR_N,   0x802u));
+            APPEND_RND(PICK_SALTED(RND_ECCHI_OUTFIT, RND_ECCHI_OUTFIT_N, 0x803u));
+            APPEND_RND(PICK_SALTED(RND_ECCHI_SCENE,  RND_ECCHI_SCENE_N,  0x804u));
         } else {
             uint64_t er = rng ^ 0x8055AA3399CC1177ull;
             (void)splitmix64_next(&er);
-            APPEND_RND(pick_ecchi_any(&er, exp_ok));
+            APPEND_RND(pick_ecchi_any(&er));
         }
-        APPEND_RND(PICK_SALTED(RND_ECCHI_ACCENT, exp_ok ? RND_ECCHI_ACCENT_N : (RND_ECCHI_ACCENT_N - 15), 0x806u));
-    }
-    if (nsfw_allow && (rand_mask & RAND_EXPLICIT)) {
-        APPEND_RND(PICK_SALTED(RND_ECCHI_OUTFIT + (RND_ECCHI_OUTFIT_N - 30), 30, 0x901u));
-        APPEND_RND(PICK_SALTED(RND_ECCHI_ACCENT + (RND_ECCHI_ACCENT_N - 15), 15, 0x902u));
+        APPEND_RND(PICK_SALTED(RND_ECCHI_ACCENT, RND_ECCHI_ACCENT_N, 0x806u));
+    } else if (do_exp) {
+        if (!(rand_mask & RAND_POSE))   APPEND_RND(PICK_SALTED(RND_EXPLICIT_POSE,   RND_EXPLICIT_POSE_N,   0x901u));
+        if (!(rand_mask & RAND_EXPR))   APPEND_RND(PICK_SALTED(RND_EXPLICIT_EXPR,   RND_EXPLICIT_EXPR_N,   0x902u));
+        if (!(rand_mask & RAND_OUTFIT)) APPEND_RND(PICK_SALTED(RND_EXPLICIT_OUTFIT, RND_EXPLICIT_OUTFIT_N, 0x903u));
+        if (!(rand_mask & RAND_SCENE))  APPEND_RND(PICK_SALTED(RND_EXPLICIT_SCENE,  RND_EXPLICIT_SCENE_N,  0x904u));
+        if (do_ecchi) {
+            APPEND_RND(PICK_SALTED(RND_ECCHI_ACCENT, RND_ECCHI_ACCENT_N, 0x806u));
+        }
+        APPEND_RND(PICK_SALTED(RND_EXPLICIT_ACCENT, RND_EXPLICIT_ACCENT_N, 0x905u));
     }
     #undef PICK_SALTED
     #undef APPEND_RND
@@ -3739,6 +3931,8 @@ void sdxl_apply_quality_shield(const char* model_name, int is_sd15, int auto_qua
         snprintf(mn, sizeof(mn), "%s%s%s", nbuf, nbuf[0] ? ", " : "",
                  "nsfw, rating: questionable, rating: explicit, nude, naked, nipples, explicit");
         snprintf(nbuf, sizeof(nbuf), "%s", mn);
+    } else {
+        sdxl_sanitize_nsfw_prompts(1, pbuf, sizeof(pbuf), nbuf, sizeof(nbuf));
     }
 
     if (prompt && pr_max) sdxl_clean_prompt_dupes(pbuf, prompt, pr_max);
@@ -3761,11 +3955,11 @@ void sdxl_load_speed_preset(const char* model_name, int is_sd15, ModelPreset* ou
         out->width = 768; out->height = 1024; out->upscale = 0;
         if (ci_has(m, "dmd")) {
             if (ci_has(m, "animagine")) {
-                out->steps = 4; out->cfg = 1.0f; out->sampler = 2; // Animagine XL 4.0 DMD2 Speed (~31s!)
-                snprintf(out->description, sizeof(out->description), "Speed Mode · Animagine DMD2 4-Step CFG 1.0 (~31s)");
+                out->steps = 4; out->cfg = 1.0f; out->sampler = 2; // Animagine XL 4.0 DMD2 Speed
+                snprintf(out->description, sizeof(out->description), "Speed Mode · Animagine DMD2 4-Step (~31s Turbo / ~58s Silent)");
             } else {
-                out->steps = 5; out->cfg = 1.0f; out->sampler = 2; // LCM single-pass (~38s!)
-                snprintf(out->description, sizeof(out->description), "Speed Mode · DMD2 5-Step CFG 1.0 (~38s)");
+                out->steps = 5; out->cfg = 1.0f; out->sampler = 2; // LCM single-pass
+                snprintf(out->description, sizeof(out->description), "Speed Mode · DMD2 5-Step CFG 1.0 (~38s Turbo / ~69s Silent)");
             }
         } else if (ci_has(m, "8step") || ci_has(m, "hyper")) {
             out->steps = 6; out->cfg = 3.0f; out->sampler = 1; // Euler

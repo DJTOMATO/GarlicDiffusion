@@ -403,7 +403,8 @@ textarea{min-height:68px;resize:vertical}
         <span style="font-size:11.5px;font-weight:700;color:#8cc8ff">🎲 Batch Word Randomizer (500+ Pool)</span>
         <span style="display:flex;gap:7px;font-size:11px;align-items:center">
           <span id="rand-stat" style="color:var(--muted);font-size:10.5px">Off</span>
-          <a href="#" onclick="setRandPreset(true);return false" style="color:#52e3ab;text-decoration:none;font-weight:600">Variety Mix</a>
+          <a href="#" onclick="setPhotoSetMode();return false" style="color:#c4b5fd;text-decoration:none;font-weight:700" title="Keep Character &amp; Preset scene/outfit, vary Pose + Expression + Camera + Lighting across a 10-image batch">📸 Photo Set</a>
+          <a href="#" onclick="setRandPreset(true);return false" style="color:#52e3ab;text-decoration:none;font-weight:600" title="Vary Pose + Expression + Scene + Lighting + Details">Variety Mix</a>
           <a href="#" onclick="setRandPreset(false);return false" style="color:var(--muted);text-decoration:none">Off</a>
         </span>
       </div>
@@ -547,6 +548,7 @@ textarea{min-height:68px;resize:vertical}
     </div>
     <div id="qbar" class="quick-bar" style="display:none">
       <button class="btn sec sm" onclick="recreateLatest()">Recreate (New Seed)</button>
+      <button class="btn ok sm" onclick="shootPhotoSetLatest()" title="Configure &amp; shoot a Photo Set (choose count, Draft/Native/1080p quality, and variations) based on this winning image">📸 Photo Set…</button>
       <button class="btn ok sm" onclick="upscaleLatest(1)">Upscale 1080p</button>
       <button class="btn sec sm" onclick="upscaleLatest(3)">Upscale 4K</button>
       <button class="btn sec sm" onclick="fixFaceLatest()" title="Detect anime face on CPU & refine via optional VAE encoder img2img">✨ Fix Face</button>
@@ -858,6 +860,60 @@ textarea{min-height:68px;resize:vertical}
   </div>
 </div>
 
+<!-- PHOTO SET SETUP MODAL -->
+<div id="photoset-modal" class="modal" onclick="if(event.target===this)closePhotoSetModal()">
+  <div style="max-width:560px;width:94%;margin:auto;background:var(--panel);border:1px solid var(--border-hi);border-radius:16px;padding:18px 20px;box-shadow:0 20px 60px rgba(0,0,0,.65)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h2 style="margin:0;font-size:17px;color:#fff">📸 Photo Set Shootout</h2>
+      <button class="btn stop sm" onclick="closePhotoSetModal()">Close</button>
+    </div>
+    <div id="ps-sub" style="font-size:12px;color:var(--muted);margin-bottom:12px">Shoot a cohesive set of variations based on your winning image into a dedicated Gallery folder.</div>
+    <div class="row" style="gap:10px;margin-bottom:10px">
+      <div style="flex:1">
+        <label style="margin-top:0">Number of Photos (2–100)</label>
+        <div style="display:flex;gap:5px;align-items:center">
+          <input id="ps-count" type="number" min="2" max="100" value="10" style="width:74px">
+          <button type="button" class="chip" style="cursor:pointer" onclick="document.getElementById('ps-count').value=4">4</button>
+          <button type="button" class="chip" style="cursor:pointer" onclick="document.getElementById('ps-count').value=6">6</button>
+          <button type="button" class="chip" style="cursor:pointer" onclick="document.getElementById('ps-count').value=10">10</button>
+          <button type="button" class="chip" style="cursor:pointer" onclick="document.getElementById('ps-count').value=16">16</button>
+          <button type="button" class="chip" style="cursor:pointer" onclick="document.getElementById('ps-count').value=20">20</button>
+        </div>
+      </div>
+    </div>
+    <div style="margin-bottom:10px">
+      <label style="margin-top:0">Shoot Quality Tier (upgrade or upscale the folder anytime after!)</label>
+      <select id="ps-qual" autocomplete="off">
+        <option value="draft">⚡ Fast Draft (Speed Mode res/steps · Quickest contact sheet)</option>
+        <option value="native" selected>✨ Native Quality (Exact base res &amp; steps · Crisp)</option>
+        <option value="hd">💎 Native + 1080p HD (Real-ESRGAN upscale per shot)</option>
+      </select>
+    </div>
+    <div style="margin-bottom:10px">
+      <label style="margin-top:0">Album Folder Name (auto-created in Gallery)</label>
+      <input id="ps-folder" type="text" placeholder="set_character_1234" autocomplete="off">
+    </div>
+    <div style="margin-bottom:14px">
+      <label style="margin-top:0">Vary Across Set (keeps Character, LoRAs &amp; Base Prompt locked)</label>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;font-size:12px">
+        <label style="margin:0;display:inline-flex;align-items:center;gap:4px"><input type="checkbox" class="ps-cb" value="1" checked style="width:auto;margin:0">Pose</label>
+        <label style="margin:0;display:inline-flex;align-items:center;gap:4px"><input type="checkbox" class="ps-cb" value="2" checked style="width:auto;margin:0">Expression</label>
+        <label style="margin:0;display:inline-flex;align-items:center;gap:4px"><input type="checkbox" class="ps-cb" value="64" checked style="width:auto;margin:0">Camera</label>
+        <label style="margin:0;display:inline-flex;align-items:center;gap:4px"><input type="checkbox" class="ps-cb" value="8" checked style="width:auto;margin:0">Lighting</label>
+        <label style="margin:0;display:inline-flex;align-items:center;gap:4px"><input type="checkbox" class="ps-cb" value="32" checked style="width:auto;margin:0">Details</label>
+        <label style="margin:0;display:inline-flex;align-items:center;gap:4px"><input type="checkbox" class="ps-cb" value="16" style="width:auto;margin:0">Outfit</label>
+        <label style="margin:0;display:inline-flex;align-items:center;gap:4px"><input type="checkbox" class="ps-cb" value="4" style="width:auto;margin:0">Scene</label>
+        <label id="ps-ecchi-lbl" style="margin:0;display:none;align-items:center;gap:4px;color:#f9a8d4"><input type="checkbox" class="ps-cb" value="128" style="width:auto;margin:0">🌶️ Ecchi</label>
+        <label id="ps-exp-lbl" style="margin:0;display:none;align-items:center;gap:4px;color:#fda4af"><input type="checkbox" class="ps-cb" value="256" style="width:auto;margin:0">🔥 Explicit</label>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn sec" onclick="closePhotoSetModal()">Cancel</button>
+      <button class="btn ok" onclick="launchPhotoSetFromModal()">🚀 Start Photo Set</button>
+    </div>
+  </div>
+</div>
+
 <!-- GALLERY LIGHTBOX MODAL -->
 <div id="modal" class="modal" onclick="if(event.target===this)closeModal()">
   <div class="mbar">
@@ -884,6 +940,7 @@ textarea{min-height:68px;resize:vertical}
         <button class="btn sec sm" onclick="copyModalSlashCmd()" title="Copy exact Discord /imagine command to reproduce this image">📋 Copy /imagine</button>
         <button class="btn sec sm" onclick="loadModalToStudio()">Load to Studio</button>
         <button class="btn ok sm" onclick="recreateModal()">Recreate (New Seed)</button>
+        <button class="btn ok sm" onclick="shootPhotoSetModal()" title="Configure &amp; shoot a Photo Set (choose count, Draft/Native/1080p quality, and variations) based on this image">📸 Photo Set…</button>
         <button class="btn sm" onclick="fixFaceModal()" title="Pure-C CPU anime face detector + optional VAE encoder img2img face refinement">✨ Fix Face</button>
         <button class="btn sm" onclick="upscaleModal(1)">AI Upscale 1080p</button>
         <button class="btn sec sm" onclick="upscaleModal(2)">AI Upscale 2x</button>
@@ -1041,7 +1098,7 @@ textarea{min-height:68px;resize:vertical}
 <div id="toast"></div>
 
 <script>
-let lastId=0,lastPreviewId=0,lastGalRev=0,galPage=0,galPageSize=24,galTotal=0,galSelectMode=false,galSelected=new Set(),galSearchTm=null,galReqSeq=0,lastModels='',curModel='',curArch='',lastPreset=null,lastSpeedPreset=null,galItems=[],presetItems=[],styleItems=[],charItems=[],loraItems=[],folderData={all:0,unsorted:0,starred:0,folders:[]},curGalFolder='',modalIdx=-1,lastStatus=null,switchingModel=false,pendingModel='',lastNeo=null,dlLastFin=0,mdlMgrData=null,loraMgrData=null,hydratedFromServer=false,lastSettingsSeq=0,nsfwAllow=false,uiMode=1,uiModeInitialized=false,starterAutoShown=false,easyFraming='full',easyQuality='best',easyCharId='',lastInsertedCharPr='',lastInsertedCharNg='',recentFilm=[];
+let lastId=0,lastPreviewId=0,lastGalRev=0,galPage=0,galPageSize=24,galTotal=0,galSelectMode=false,galSelected=new Set(),galSearchTm=null,galReqSeq=0,lastModels='',curModel='',curArch='',lastPreset=null,lastSpeedPreset=null,galItems=[],presetItems=[],styleItems=[],charItems=[],loraItems=[],folderData={all:0,unsorted:0,starred:0,folders:[]},curGalFolder='',modalIdx=-1,lastStatus=null,loadedStudioItem=null,switchingModel=false,pendingModel='',lastNeo=null,dlLastFin=0,mdlMgrData=null,loraMgrData=null,hydratedFromServer=false,lastSettingsSeq=0,nsfwAllow=false,uiMode=1,uiModeInitialized=false,starterAutoShown=false,easyFraming='full',easyQuality='best',easyCharId='',lastInsertedCharPr='',lastInsertedCharNg='',recentFilm=[];
 
 const KNOWN_TRIGGERS={
   'better_eyes_detail-000009':'better_eyes',
@@ -1656,8 +1713,14 @@ async function installAndExitOta(){
 async function toggleNsfwMode(){
   nsfwAllow=!nsfwAllow;
   applyNsfwUI();
+  if(nsfwAllow){
+    const cl=sanitizeNsfwPrompts(pr.value,ng.value,true);
+    pr.value=cl.prompt;
+    ng.value=cl.negative;
+    onPromptEdited();
+  }
   await pushSettings();
-  toast(nsfwAllow?'🔓 NSFW Allowed: SFW guard removed + Ecchi/Explicit presets & 500-word pool unlocked':'🔒 SFW Mode active: SFW negative guard enabled & adult presets hidden');
+  toast(nsfwAllow?'🔓 NSFW Allowed: SFW guard & negative NSFW tags removed + Ecchi/Explicit presets & 500-word pool unlocked':'🔒 SFW Mode active: SFW negative guard enabled & adult presets hidden');
 }
 function getRandMask(){
   let m=0;
@@ -1689,6 +1752,16 @@ function insertWildcardToken(tok){
   pr.value=cur?(cur+', '+tok):tok;
   onPromptEdited();
   toast('Inserted wildcard '+tok+' into Prompt!');
+}
+function setPhotoSetMode(){
+  // Keep Character + Preset scene/outfit consistent; vary Pose + Expression + Camera + Lighting (+ Details)
+  const m=(1|2|8|32|64);
+  setRandMaskUI(m);
+  if((+bc.value||1)<2)bc.value=10;
+  sd.value=0;
+  pushSettings();
+  const c=getSelectedChar();
+  toast(`📸 Photo Set ready (${bc.value}x · Pose+Expr+Camera+Light`+(c?` · ${c.name}`:'')+`) — click Generate!`);
 }
 function setRandPreset(on){
   const m=on?(1|2|4|8|32|(nsfwAllow?128:0)):0;
@@ -1729,13 +1802,19 @@ function dedupeTagString(raw){
     else cur+=ch;
   }
   parts.push(cur);
-  const seen=new Set(),out=[];
+  const seen=new Map(),out=[];
   for(const rawTok of parts){
     const t=rawTok.replace(/\s+/g,' ').trim();
     if(!t)continue;
-    const key=t.toLowerCase().replace(/^\(+|\)+$/g,'').replace(/:\d+(\.\d+)?$/,'').trim();
-    if(!key||seen.has(key))continue;
-    seen.add(key);
+    let key=t.toLowerCase().replace(/^\(+|\)+$/g,'').replace(/:\d+(\.\d+)?$/,'').replace(/_/g,' ').replace(/\s+/g,' ').trim();
+    key=key.replace(/^rating:\s*(explicit|safe|general|sensitive|questionable|nsfw|sfw)$/,'$1');
+    if(!key)continue;
+    if(seen.has(key)){
+      const prevIdx=seen.get(key);
+      if(/^rating:/i.test(t)&&!/^rating:/i.test(out[prevIdx]))out[prevIdx]=t;
+      continue;
+    }
+    seen.set(key,out.length);
     out.push(t);
   }
   const seenL=new Set(),outL=[];
@@ -1746,12 +1825,80 @@ function dedupeTagString(raw){
   }
   return [...outL,...out].join(', ').replace(/(<lora:[^>]+>),\s*/g,'$1 ');
 }
+const NSFW_CORE_KWS=[
+  'nsfw','not safe for work','explicit','questionable','sensitive',
+  'ecchi','lewd','erotic','hentai','porn','pornographic',
+  'sexual','suggestive','r18','r-18','18+','uncensored',
+  'nude','naked','nudity','nipples','areola','topless','bottomless'
+];
+const NSFW_ECCHI_KWS=[
+  'lingerie','underwear','panties','bra','bikini','swimsuit',
+  'cleavage','sideboob','underboob','pantyshot','upskirt','cameltoe',
+  'breasts','boobs','oppai','ass','butt','pussy','vagina','penis',
+  'genitals','ahegao','bdsm','bondage','gravure','seductive',
+  'provocative','revealing','see-through','sheer','bodysuit',
+  'micro bikini','thong','g-string','garter','stockings','thighhighs',
+  'bunny girl','succubus','sexy','sensual','alluring'
+];
+function _escRe(s){return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
+function _wordHas(key,kw){
+  if(!key||!kw)return false;
+  return new RegExp('(^|[^a-z0-9])'+_escRe(kw)+'([^a-z0-9]|$)','i').test(key);
+}
+function _splitTags(raw){
+  if(!raw)return [];
+  let depthP=0,depthB=0,depthA=0,parts=[],cur='';
+  for(const ch of raw){
+    if(ch==='(')depthP++;else if(ch===')'&&depthP>0)depthP--;
+    else if(ch==='{')depthB++;else if(ch==='}'&&depthB>0)depthB--;
+    else if(ch==='<')depthA++;else if(ch==='>'&&depthA>0)depthA--;
+    if(ch===','&&depthP===0&&depthB===0&&depthA===0){parts.push(cur);cur='';}
+    else cur+=ch;
+  }
+  parts.push(cur);
+  return parts.map(s=>s.replace(/\s+/g,' ').trim()).filter(Boolean);
+}
+function _canonKey(t){
+  let key=t.toLowerCase().trim();
+  while(key.length>=2&&key[0]==='('&&key[key.length-1]===')'){
+    key=key.slice(1,-1).trim().replace(/:\s*[+-]?\d+(?:\.\d+)?$/,'').trim();
+  }
+  key=key.replace(/_/g,' ').replace(/\s+/g,' ').trim();
+  key=key.replace(/^rating:\s*(explicit|safe|general|sensitive|questionable|nsfw|sfw)$/,'$1');
+  return key;
+}
+function sanitizeNsfwPrompts(posRaw,negRaw,isNsfw){
+  if(!isNsfw)return {prompt:posRaw||'',negative:negRaw||''};
+  const pToks=_splitTags(posRaw||'').map(t=>({t,k:_canonKey(t)}));
+  const nToks=_splitTags(negRaw||'').map(t=>({t,k:_canonKey(t)}));
+  const posHasNsfw=pToks.some(x=>NSFW_CORE_KWS.some(kw=>_wordHas(x.k,kw)));
+  const activeEcchi=NSFW_ECCHI_KWS.filter(kw=>pToks.some(x=>_wordHas(x.k,kw)));
+  const pKeys=new Set(pToks.map(x=>x.k));
+  const outP=posHasNsfw?pToks.filter(x=>{
+    const k=x.k;
+    if(k==='sfw'||k==='safe'||k==='general'||k==='safe for work'||k==='pg'||k==='pg-13'||k==='g-rated')return false;
+    if(_wordHas(k,'sfw')||_wordHas(k,'safe for work'))return false;
+    return true;
+  }):pToks;
+  const outN=nToks.filter(x=>{
+    const k=x.k;
+    if(NSFW_CORE_KWS.some(kw=>_wordHas(k,kw)))return false;
+    if(activeEcchi.some(kw=>_wordHas(k,kw)))return false;
+    if(pKeys.has(k))return false;
+    return true;
+  });
+  return {prompt:outP.map(x=>x.t).join(', '),negative:outN.map(x=>x.t).join(', ')};
+}
 function cleanPromptDupes(silent){
-  const bPr=pr.value,bNg=ng.value;
-  pr.value=dedupeTagString(bPr);
-  ng.value=dedupeTagString(bNg);
+  let bPr=dedupeTagString(pr.value),bNg=dedupeTagString(ng.value);
+  if(nsfwAllow){
+    const cl=sanitizeNsfwPrompts(bPr,bNg,true);
+    bPr=cl.prompt;bNg=cl.negative;
+  }
+  pr.value=bPr;
+  ng.value=bNg;
   onPromptEdited();
-  if(!silent)toast('Cleaned duplicate tags in Prompt & Negative Prompt!');
+  if(!silent)toast(nsfwAllow?'Cleaned duplicate & conflicting NSFW/SFW tags!':'Cleaned duplicate tags in Prompt & Negative Prompt!');
 }
 function estimateClipTokens(raw){
   let txt=(raw||'').replace(/<lora:[^>]+>/gi,' ').replace(/\{([^{}]+)\}/g,(_,g)=>g.split('|')[0]||'');
@@ -2425,6 +2572,7 @@ async function gen(override){
   let fp=dedupeTagString(pr.value),fn=dedupeTagString(ng.value);
   if(stObj&&stObj.prompt)fp=dedupeTagString((fp?fp+', ':'')+stObj.prompt);
   if(stObj&&stObj.negative)fn=dedupeTagString((fn?fn+', ':'')+stObj.negative);
+  if(nsfwAllow){const cl=sanitizeNsfwPrompts(fp,fn,true);fp=cl.prompt;fn=cl.negative;}
   const bcnt=Math.max(1,Math.min(100,parseInt(bc.value,10)||1));
   const lval=document.getElementById('lsel').value||'';
   const lsc=parseFloat(document.getElementById('lstr').value);
@@ -2448,7 +2596,7 @@ async function toggleShutdownAfter(en){
   toast(en?'PS4 will shut down after batch finishes':'Auto-shutdown disabled');
 }
 async function cancel(){await fetch('/cancel',{method:'POST'});toast('Cancelling...');}
-function recreateLatest(){sd.value=0;gen({seed:0,batch_count:1});}
+function recreateLatest(){sd.value=0;gen({seed:0,batch_count:1,rand_mask:0});}
 async function upscaleLatest(mode){
   const idx=await ensureLatestGalIdx();
   if(idx<0)return toast('No gallery image yet');
@@ -2464,7 +2612,7 @@ async function fixFaceLatest(){
   toast('✨ Detecting face & refining on PS4 GPU...');poll();
 }
 async function ensureLatestGalIdx(){
-  const lid=lastStatus&&lastStatus.last_gallery_id;
+  const lid=(loadedStudioItem&&loadedStudioItem.id)||(lastStatus&&lastStatus.last_gallery_id);
   galPage=0;curGalFolder='';
   document.getElementById('gsearch').value='';
   await loadGallery(true);
@@ -2545,6 +2693,8 @@ function renderFolderBar(){
     (f.folders||[]).map(x=>`<button class="fbtn ${curGalFolder===x.name?'active':''}" onclick="selectGalFolder('${x.name.replace(/'/g,"\\'")}')">📁 ${x.name.replace(/</g,'&lt;')} (${x.count})</button>`).join('')+
     `<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">`+
       `<button class="btn sec sm" onclick="promptCreateFolder(false)">+ New Folder</button>`+
+      (isUserFolder?`<button class="btn sm" onclick="upscaleCurrentFolder(1)" title="Batch-upscale all images in this folder to 1080p HD using Real-ESRGAN">⬆️ Upscale Set (1080p)</button>`:'')+
+      (isUserFolder?`<button class="btn sec sm" onclick="upscaleCurrentFolder(3)" title="Batch-upscale all images in this folder to 4K UHD">4K Set</button>`:'')+
       (curGalFolder&&curGalFolder!=='__starred__'?`<a class="btn ok sm" style="text-decoration:none" href="/gallery/zip?folder=${encodeURIComponent(curGalFolder)}">⬇ Download Folder (.zip)</a>`:'')+
       (isUserFolder?`<button class="btn stop sm" onclick="deleteCurrentFolder()">🗑 Delete Folder</button>`:'')+
     `</span>`;
@@ -2885,8 +3035,8 @@ function copyModalSlashCmd(){
   toast('Copied Discord /imagine command!');
 }
 async function copyLatestSlashCmd(){
-  const gid=lastStatus&&lastStatus.last_gallery_id;
-  let it=gid?galItems.find(x=>x.id===gid):null;
+  const gid=(loadedStudioItem&&loadedStudioItem.id)||(lastStatus&&lastStatus.last_gallery_id);
+  let it=(loadedStudioItem&&loadedStudioItem.id===gid)?loadedStudioItem:(gid?galItems.find(x=>x.id===gid):null);
   if(!it&&gid){
     try{const r=await fetch('/gallery/item/'+encodeURIComponent(gid));if(r.ok)it=await r.json();}catch(e){}
   }
@@ -2927,17 +3077,74 @@ function resolveBaseDimsForItem(it,is15){
   }
   return [Math.floor(w/64)*64,Math.floor(h/64)*64];
 }
+function showGalleryItemInStudio(it){
+  loadedStudioItem=it||null;
+  if(!it||!it.id)return;
+  const u='/gallery/'+encodeURIComponent(it.id)+'.png';
+  img.src=u;img.style.display='block';ph.style.display='none';
+  const qb=document.getElementById('qbar');if(qb)qb.style.display='flex';
+  dl.href=u;dl.download=it.id+'.png';
+}
+function findMatchingCharIdxForPrompt(ptxt){
+  if(!ptxt||!charItems||!charItems.length)return -1;
+  const low=ptxt.toLowerCase();
+  const tags=new Set(low.replace(/<lora:[^>]+>/gi,' ').split(',').map(s=>s.trim()).filter(Boolean));
+  let bestIdx=-1,bestScore=0;
+  for(let i=0;i<charItems.length;i++){
+    const c=charItems[i];
+    if(!c||!c.prompt)continue;
+    const cTags=c.prompt.toLowerCase().replace(/<lora:[^>]+>/gi,' ').split(',').map(s=>s.trim()).filter(Boolean);
+    if(!cTags.length)continue;
+    let hits=0;
+    for(const t of cTags)if(tags.has(t))hits++;
+    const nm=(c.name||'').toLowerCase().trim();
+    const nameHit=nm.length>=3&&low.includes(nm);
+    const ratio=hits/cTags.length;
+    if(hits>=2&&ratio>=0.5&&(ratio>=0.75||nameHit)){
+      const score=hits*10+(nameHit?5:0);
+      if(score>bestScore){bestScore=score;bestIdx=i;}
+    }
+  }
+  return bestIdx;
+}
 function applyGalleryItemToWebStudio(it,newSeed,is15){
-  lastInsertedCharPr='';chsel.value='';
   let ptxt=it.prompt||'';
   if(it.lora&&!ptxt.includes('<lora:')){
     const tags=it.lora.split(',').map(s=>s.trim()).filter(Boolean).map(s=>s.includes(':')?`<lora:${s}>`:`<lora:${s}:0.75>`).join(' ');
     if(tags)ptxt=tags+' '+ptxt;
   }
   pr.value=ptxt;
+  ng.value=it.negative||'';
+  if(nsfwAllow){const cl=sanitizeNsfwPrompts(pr.value,ng.value,true);pr.value=cl.prompt;ng.value=cl.negative;}
   const lsel=document.getElementById('lsel');
-  if(lsel&&ptxt.includes('<lora:'))lsel.value='';
-  if(it.negative)ng.value=it.negative;
+  if(lsel&&lsel.value){lsel.value='';onLoraChange(true);}
+  if(stsel&&stsel.value){stsel.value='';onStyleChange();}
+  bc.value=1;
+  setRandMaskUI(0);
+  const cIdx=findMatchingCharIdxForPrompt(ptxt);
+  const ezSel=document.getElementById('ez-chsel');
+  const ezCust=document.getElementById('ez-chcustom');
+  const ezSc=document.getElementById('ez-scene');
+  const ezPs=document.getElementById('ez-psel');
+  if(cIdx>=0&&charItems[cIdx]){
+    const c=charItems[cIdx];
+    chsel.value=String(cIdx);
+    if(ezSel&&[...ezSel.options].some(o=>o.value===String(cIdx)))ezSel.value=String(cIdx);
+    easyCharId=c.id||c.name||'';
+    lastInsertedCharPr=c.prompt||'';
+    lastInsertedCharNg=c.negative||'';
+    onCharChange(true);
+  }else{
+    chsel.value='';
+    if(ezSel)ezSel.value='';
+    easyCharId='';
+    lastInsertedCharPr='';
+    lastInsertedCharNg='';
+    onCharChange(true);
+  }
+  if(ezCust)ezCust.value='';
+  if(ezSc)ezSc.value=ptxt;
+  if(ezPs)ezPs.value='';
   const [bw,bh]=resolveBaseDimsForItem(it,is15);
   ensureSizeOption(bw+'x'+bh);
   if(it.steps)st.value=it.steps;
@@ -2945,7 +3152,9 @@ function applyGalleryItemToWebStudio(it,newSeed,is15){
   if(it.sampler&&[...smp.options].some(o=>o.value===it.sampler))smp.value=it.sampler;
   if(ups)ups.value=String(it.upscaled||0);
   if(typeof it.eco==='number'&&it.eco>=0&&it.eco<=3)eco.value=String(it.eco);
-  sd.value=newSeed?0:(it.seed||0);
+  const recSeed=newSeed?0:(it.seed||0);
+  sd.value=recSeed;
+  if(!newSeed&&recSeed&&lastStatus)lastStatus.seed=recSeed;
   onPromptEdited();checkUpscaleGuard();updateProfileHighlight();
   return [bw,bh];
 }
@@ -2964,6 +3173,8 @@ async function loadModalToStudio(newSeed,autoGen){
   if(modalIdx<0)return;
   const it=galItems[modalIdx];
   closeModal();showTab('studio');
+  showGalleryItemInStudio(it);
+  if(!autoGen&&uiMode===0)applyUiMode(1,true);
   let activeArch=(lastStatus&&lastStatus.arch)||curArch||'sdxl';
   let switched=false;
   if(it.model&&it.model!==curModel){
@@ -2987,16 +3198,150 @@ async function loadModalToStudio(newSeed,autoGen){
     }
   }
   const [bw,bh]=applyGalleryItemToWebStudio(it,newSeed,activeArch==='sd15');
+  showGalleryItemInStudio(it);
   if(autoGen){
-    gen({seed:0,width:bw,height:bh});
+    gen({seed:0,width:bw,height:bh,batch_count:1,rand_mask:0});
   }else if(switched){
-    toast(`Switched to ${it.model} & restored all settings`);
+    toast(`Switched to ${it.model} & restored prompt, seed ${it.seed||0} & all settings`);
   }else{
-    toast('Restored all settings & LoRA tags into Studio');
+    toast(`Loaded into Studio (prompt, seed ${it.seed||0} & all settings restored)`);
   }
 }
 function recreateModal(){
   loadModalToStudio(true,true);
+}
+function makePhotoSetFolderName(it){
+  const p=(it&&it.prompt||'').replace(/<lora:[^>]+>/gi,'').replace(/\b(masterpiece|best quality|amazing quality|very aesthetic|absurdres|highres|1girl|1boy|solo|better_eyes|rating:\s*\w+|ecchi|explicit|nsfw)\b/gi,'');
+  const words=p.split(/[,\s]+/).map(s=>s.replace(/[^a-zA-Z0-9]/g,'').toLowerCase()).filter(s=>s.length>=3).slice(0,2);
+  const slug=words.length?words.join('_'):'shoot';
+  const s4=String((it&&it.seed)||Date.now()).slice(-4);
+  return ('set_'+slug+'_'+s4).slice(0,48);
+}
+let pendingPhotoSetItem=null;
+function openPhotoSetModal(it){
+  pendingPhotoSetItem=it;
+  document.getElementById('ps-folder').value=makePhotoSetFolderName(it);
+  document.getElementById('ps-count').value=Math.max(2,Math.min(100,(+bc.value||1)>=2?(+bc.value):10));
+  const ec=document.getElementById('ps-ecchi-lbl'),ex=document.getElementById('ps-exp-lbl');
+  if(ec)ec.style.display=nsfwAllow?'inline-flex':'none';
+  if(ex)ex.style.display=nsfwAllow?'inline-flex':'none';
+  document.getElementById('ps-sub').textContent=it&&it.model
+    ? `Based on ${it.model} (seed ${it.seed||'random'}) — choose Fast Draft to preview poses quickly, then upscale the folder if you love it!`
+    : 'Configure count, quality tier, and variations for your Photo Set.';
+  closeModal();
+  document.getElementById('photoset-modal').classList.add('open');
+}
+function closePhotoSetModal(){
+  document.getElementById('photoset-modal').classList.remove('open');
+}
+async function launchPhotoSetFromModal(){
+  const it=pendingPhotoSetItem;
+  if(!it)return closePhotoSetModal();
+  const n=Math.max(2,Math.min(100,parseInt(document.getElementById('ps-count').value,10)||10));
+  const qual=document.getElementById('ps-qual').value||'native';
+  const fname=(document.getElementById('ps-folder').value||'').trim()||makePhotoSetFolderName(it);
+  let rmask=0;
+  document.querySelectorAll('.ps-cb').forEach(cb=>{if(cb.checked&&(nsfwAllow||+cb.value<128))rmask|=(+cb.value);});
+  closePhotoSetModal();
+  await shootPhotoSetFromItem(it,n,qual,fname,rmask);
+}
+async function shootPhotoSetFromItem(it,count,qual,customFolder,customMask){
+  if(!it)return toast('No image selected for Photo Set');
+  const n=Math.max(2,Math.min(100,count||10));
+  const q=qual||'native';
+  closeModal();showTab('studio');
+  showGalleryItemInStudio(it);
+  let activeArch=(lastStatus&&lastStatus.arch)||curArch||'sdxl';
+  if(it.model&&it.model!==curModel&&[...msel.options].some(o=>o.value===it.model)){
+    msel.value=it.model;
+    toast(`📸 Photo Set: switching checkpoint to ${it.model}...`);
+    const r=await fetch('/model',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:it.model})});
+    if(r.ok){
+      switchingModel=true;pendingModel=it.model;
+      const s=await waitForModelSwitch(it.model);
+      switchingModel=false;pendingModel='';
+      if(s){curModel=s.model;activeArch=s.arch||'sdxl';curArch=activeArch;lastStatus=s;await poll();}
+    }
+  }
+  let [bw,bh]=applyGalleryItemToWebStudio(it,true,activeArch==='sd15');
+  let useSteps=+st.value||6, useCfg=+cfg.value||1.4, useUps=0;
+  if(q==='draft'){
+    if(lastSpeedPreset){
+      bw=lastSpeedPreset.width||bw; bh=lastSpeedPreset.height||bh;
+      useSteps=lastSpeedPreset.steps||useSteps; useCfg=lastSpeedPreset.cfg||useCfg;
+      if(lastSpeedPreset.sampler&&[...smp.options].some(o=>o.value===lastSpeedPreset.sampler))smp.value=lastSpeedPreset.sampler;
+    }else{
+      bw=activeArch==='sd15'?512:768; bh=activeArch==='sd15'?512:1024;
+      useSteps=Math.min(useSteps,activeArch==='sd15'?6:5);
+    }
+    useUps=0;
+    ensureSizeOption(bw+'x'+bh); st.value=useSteps; cfg.value=useCfg; ups.value='0';
+  }else if(q==='hd'){
+    useUps=1; ups.value='1';
+  }else{
+    useUps=0; ups.value='0';
+  }
+  const fname=customFolder||makePhotoSetFolderName(it);
+  let targetFolder='';
+  try{
+    const fr=await fetch('/gallery/folder/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:fname})});
+    const fd=await fr.json().catch(()=>({}));
+    if(fr.ok&&fd.name){targetFolder=fd.name;await loadFolders();}
+  }catch(e){}
+  const bf=document.getElementById('bfolder');
+  if(bf&&targetFolder){bf.value=targetFolder;}
+  const rmask=(customMask!==undefined)?customMask:(1|2|8|32|64);
+  setRandMaskUI(rmask);
+  bc.value=n;
+  sd.value=0;
+  await pushSettings();
+  const qLbl=q==='draft'?'⚡ Draft':(q==='hd'?'💎 1080p HD':'✨ Native');
+  toast(`📸 Starting ${n}x ${qLbl} Photo Set`+(targetFolder?` → 📁 ${targetFolder}`:'')+'!');
+  gen({seed:0,width:bw,height:bh,steps:useSteps,cfg:useCfg,upscale:useUps,batch_count:n,rand_mask:rmask,folder:targetFolder});
+}
+function shootPhotoSetModal(){
+  if(modalIdx<0)return;
+  openPhotoSetModal(galItems[modalIdx]);
+}
+async function shootPhotoSetLatest(){
+  const gid=(loadedStudioItem&&loadedStudioItem.id)||(lastStatus&&lastStatus.last_gallery_id);
+  let it=(loadedStudioItem&&loadedStudioItem.id===gid)?loadedStudioItem:(gid?galItems.find(x=>x.id===gid):null);
+  if(!it&&gid){
+    try{const r=await fetch('/gallery/item/'+encodeURIComponent(gid));if(r.ok)it=await r.json();}catch(e){}
+  }
+  if(!it&&lastStatus){
+    const c=lastStatus.current||{};
+    it={
+      model:lastStatus.model||curModel,
+      prompt:c.prompt||pr.value,
+      negative:c.negative||ng.value,
+      lora:lastStatus.active_lora||c.lora||'',
+      width:lastStatus.width||c.width||832,
+      height:lastStatus.height||c.height||1216,
+      steps:lastStatus.steps||c.steps||+st.value,
+      cfg:lastStatus.cfg||c.cfg||+cfg.value,
+      sampler:c.sampler||smp.value,
+      seed:lastStatus.seed||c.seed||0,
+      upscaled:c.upscale||0
+    };
+  }
+  openPhotoSetModal(it);
+}
+async function upscaleCurrentFolder(mode){
+  if(!curGalFolder||curGalFolder==='__starred__'||curGalFolder==='__unsorted__')return;
+  try{
+    const r=await fetch(`/gallery?offset=0&limit=128&folder=${encodeURIComponent(curGalFolder)}`);
+    const d=await r.json();
+    const ids=(d.items||[]).map(x=>x.id).filter(Boolean);
+    if(!ids.length)return toast('Folder is empty');
+    const lbl=mode===3?'4K UHD':'1080p HD';
+    if(!confirm(`Batch-upscale all ${ids.length} image(s) in "${curGalFolder}" to ${lbl} on PS4 GPU?`))return;
+    const ur=await fetch('/gallery/batch_upscale',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids,mode})});
+    const ud=await ur.json().catch(()=>({}));
+    if(!ur.ok)return toast(ud.error||'PS4 is busy — wait or cancel active task');
+    showTab('studio');
+    toast(`⬆️ Queued ${lbl} upscale for ${ud.count||ids.length} image(s) in ${curGalFolder}!`);
+  }catch(e){toast('Failed to queue folder upscale');}
 }
 async function upscaleModal(mode){
   if(modalIdx<0)return;const it=galItems[modalIdx];
@@ -3108,10 +3453,21 @@ function applyUserPreset(i){
     toast('Applied scene in Easy Mode: '+p.name+(keepIdx!==''?' (character preserved)':''));
     return;
   }
-  lastInsertedCharPr='';lastInsertedCharNg='';chsel.value='';
-  const pv=document.getElementById('chprev');if(pv){pv.style.display='none';pv.textContent='';}
-  pr.value=dedupeTagString(p.prompt||'');
-  if(p.negative)ng.value=dedupeTagString(p.negative);
+  const keepChar=getSelectedChar();
+  const baseP=(p.prompt||'').trim();
+  if(keepChar){
+    pr.value=dedupeTagString(keepChar.prompt+(baseP?', '+baseP:''));
+    if(p.negative)ng.value=dedupeTagString(p.negative+(keepChar.negative?', '+keepChar.negative:''));
+    else if(keepChar.negative)ng.value=dedupeTagString((ng.value?ng.value+', ':'')+keepChar.negative);
+    lastInsertedCharPr=keepChar.prompt||'';
+    lastInsertedCharNg=keepChar.negative||'';
+  }else{
+    lastInsertedCharPr='';lastInsertedCharNg='';
+    const pv=document.getElementById('chprev');if(pv){pv.style.display='none';pv.textContent='';}
+    pr.value=dedupeTagString(baseP);
+    if(p.negative)ng.value=dedupeTagString(p.negative);
+  }
+  if(nsfwAllow){const cl=sanitizeNsfwPrompts(pr.value,ng.value,true);pr.value=cl.prompt;ng.value=cl.negative;}
   onPromptEdited();
 
   const isSd15=!!(lastStatus&&lastStatus.arch==='sd15');
@@ -3120,7 +3476,7 @@ function applyUserPreset(i){
   if(p.is_speed){
     if(lastSpeedPreset)applySpeedProfile();
     else{st.value=p.steps||6;cfg.value=p.cfg||1.2;smp.value=p.sampler||'LCM';ups.value='0';}
-    showTab('studio');toast('⚡ Applied Speed Preset: '+p.name);
+    showTab('studio');toast('⚡ Applied Speed Preset: '+p.name+(keepChar?` (kept ${keepChar.name})`:''));
     return;
   }
   if(p.model&&p.model!==curModel&&[...msel.options].some(o=>o.value===p.model)){
@@ -3139,7 +3495,7 @@ function applyUserPreset(i){
     if(p.upscale!==undefined)ups.value=String(p.upscale||0);
   }
   checkUpscaleGuard();updateProfileHighlight();
-  showTab('studio');toast('Applied preset: '+p.name+' (kept optimal model settings)');
+  showTab('studio');toast('Applied preset: '+p.name+(keepChar?` (kept ${keepChar.name})`:' (kept optimal model settings)'));
 }
 function applyQuickPreset(){if(psel.value!=='')applyUserPreset(+psel.value);}
 function fillEditorFromStudio(){
@@ -3382,9 +3738,14 @@ function updateConsoleModeUI(neo){
   eco.value=cur||(neo?'2':'1');
 }
 
+let pollInFlight=false;
 async function poll(){
+  if(pollInFlight)return;
+  pollInFlight=true;
+  const ac=new AbortController();
+  const tm=setTimeout(()=>ac.abort(),4500);
   try{
-    const d=await(await fetch('/status')).json();lastStatus=d;
+    const d=await(await fetch('/status?_='+Date.now(),{cache:'no-store',signal:ac.signal})).json();lastStatus=d;
     updateConsoleModeUI(d.neo);
     syncOtaUI(d);
     if(!uiModeInitialized){
@@ -3514,9 +3875,10 @@ async function poll(){
       loadGallery(false);
     }
     if(d.has_image&&d.image_gen_id!==lastId){
+      loadedStudioItem=null;
       lastId=d.image_gen_id;if(d.preview_id)lastPreviewId=d.preview_id;const u='/image.png?t='+lastId;
       img.src=u;img.style.display='block';ph.style.display='none';
-      document.getElementById('qbar').style.display='flex';dl.href=u;
+      document.getElementById('qbar').style.display='flex';dl.href=u;dl.download='garlic_diffusion.png';
       if(d.last_gallery_id&&!recentFilm.includes(d.last_gallery_id)){
         recentFilm=[d.last_gallery_id,...recentFilm].slice(0,8);
         renderFilmstrip();
@@ -3529,6 +3891,7 @@ async function poll(){
     }
     if(document.getElementById('pg-models').classList.contains('active')||document.getElementById('starter-modal').classList.contains('open')||hasNoModels||(mdlMgrData&&mdlMgrData.download&&mdlMgrData.download.active)){loadModelsMgr();loadLoras();}
   }catch(e){}
+  finally{clearTimeout(tm);pollInFlight=false;}
 }
 
 buildSizeOptions('sdxl','832x1216');

@@ -161,7 +161,7 @@ int main(int argc, char** argv) {
         // Verify inline {a|b|c} + 500-word SFW & NSFW randomizer + SFW guard
         char exp1[1024] = {0}, exp2[1024] = {0}, ng_sfw[512] = "blurry", ng_nsfw[512] = "blurry";
         sdxl_expand_wildcards("1girl, {red dress|blue dress}, __scene__", 11111ull, 0, 1u | 2u, exp1, sizeof(exp1));
-        sdxl_expand_wildcards("1girl, adult woman, __ecchi__", 22222ull, 1, 128u | 256u, exp2, sizeof(exp2));
+        sdxl_expand_wildcards("1girl, __ecchi__", 22222ull, 1, 128u | 256u, exp2, sizeof(exp2));
         if (strchr(exp1, '{') != NULL || strstr(exp1, "__scene__") != NULL || strlen(exp2) < 25) {
             fprintf(stderr, "FAIL: sdxl_expand_wildcards exp1='%s' exp2='%s'\n", exp1, exp2);
             return 1;
@@ -171,6 +171,31 @@ int main(int argc, char** argv) {
         if (strstr(ng_sfw, "nsfw") == NULL || strstr(ng_nsfw, "nsfw") != NULL || strstr(exp1, "masterpiece") == NULL) {
             fprintf(stderr, "FAIL: sdxl_apply_quality_shield sfw='%s' nsfw='%s'\n", ng_sfw, ng_nsfw);
             return 1;
+        }
+        // Verify NSFW conflict sanitizer: removes NSFW tags from negative, deletes ecchi conflicts from negative,
+        // strips SFW tags from positive when NSFW is in positive, and preserves non-conflicting negatives (censored, bad hands).
+        {
+            char cp[512] = "1girl, sfw, rating: safe, general, nsfw, black lace lingerie, safety pin, blue eyes";
+            char cn[512] = "lowres, bad hands, (nsfw:1.4), rating: explicit, rating: questionable, nude, naked, nipples, ecchi, lingerie, censored, blurry";
+            sdxl_apply_quality_shield("WAI_Illustrious_v17_dmd2", 0, 0, 1, cp, sizeof(cp), cn, sizeof(cn));
+            if (strstr(cn, "nsfw") != NULL || strstr(cn, "explicit") != NULL || strstr(cn, "nude") != NULL ||
+                strstr(cn, "ecchi") != NULL || strstr(cn, "lingerie") != NULL ||
+                strstr(cn, "censored") == NULL || strstr(cn, "bad hands") == NULL) {
+                fprintf(stderr, "FAIL: NSFW negative sanitizer got cn='%s'\n", cn);
+                return 1;
+            }
+            if (strstr(cp, "rating: safe") != NULL || strstr(cp, ", sfw") != NULL || strstr(cp, ", general") != NULL ||
+                strstr(cp, "nsfw") == NULL || strstr(cp, "safety pin") == NULL) {
+                fprintf(stderr, "FAIL: NSFW positive SFW-stripper got cp='%s'\n", cp);
+                return 1;
+            }
+            // When NSFW mode is ON without NSFW in positive, still strip NSFW from negative but keep sfw in positive
+            char sp2[256] = "1girl, sfw, silver hair", sn2[256] = "lowres, nsfw, nude, blurry";
+            sdxl_sanitize_nsfw_prompts(1, sp2, sizeof(sp2), sn2, sizeof(sn2));
+            if (strstr(sp2, "sfw") == NULL || strstr(sn2, "nsfw") != NULL || strstr(sn2, "nude") != NULL || strstr(sn2, "blurry") == NULL) {
+                fprintf(stderr, "FAIL: NSFW mode-on negative-only strip got sp2='%s' sn2='%s'\n", sp2, sn2);
+                return 1;
+            }
         }
         // Verify Animagine XL 4.0 appends quality tags at the END (character/framing first)
         char anim_p[512] = "1girl, hatsune miku, full body", anim_n[512] = "blurry";
@@ -388,7 +413,29 @@ int main(int argc, char** argv) {
             fprintf(stderr, "FAIL: RAND_ECCHI masked out RAND_CAMERA (%s not in %s)\n", cam_part, r_combo);
             return 1;
         }
-        printf("Per-category independent Batch Word Randomizer PASS (pose='%s' | scene='%s')!\n", r_pose, r_scene);
+        // Verify RAND_ECCHI alone has zero explicit bleed, and RAND_EXPLICIT expands full dedicated explicit pools
+        char r_ecchi_only[1024], r_exp_only[1024], r_exp_blocked[512], r_exp_wc[512];
+        sdxl_expand_wildcards("1girl", 54321ull, 1, 1u << 7, r_ecchi_only, sizeof(r_ecchi_only));
+        sdxl_expand_wildcards("1girl", 54321ull, 1, 1u << 8, r_exp_only, sizeof(r_exp_only));
+        sdxl_expand_wildcards("1girl", 54321ull, 0, 1u << 8, r_exp_blocked, sizeof(r_exp_blocked));
+        sdxl_expand_wildcards("1girl, __explicit_pose__, __explicit_outfit__", 54321ull, 1, 0u, r_exp_wc, sizeof(r_exp_wc));
+        if (strstr(r_ecchi_only, "rating: explicit") != NULL) {
+            fprintf(stderr, "FAIL: RAND_ECCHI leaked explicit tag: %s\n", r_ecchi_only);
+            return 1;
+        }
+        if (strstr(r_exp_only, "rating: explicit") == NULL || strlen(r_exp_only) < 80) {
+            fprintf(stderr, "FAIL: RAND_EXPLICIT incomplete expansion: %s\n", r_exp_only);
+            return 1;
+        }
+        if (strcmp(r_exp_blocked, "1girl") != 0) {
+            fprintf(stderr, "FAIL: RAND_EXPLICIT expanded when nsfw_allow=0: %s\n", r_exp_blocked);
+            return 1;
+        }
+        if (strstr(r_exp_wc, "__explicit") != NULL || strstr(r_exp_wc, "rating: explicit") == NULL) {
+            fprintf(stderr, "FAIL: __explicit_*__ wildcard expansion failed: %s\n", r_exp_wc);
+            return 1;
+        }
+        printf("Per-category independent Batch Word Randomizer + RAND_EXPLICIT PASS (pose='%s' | scene='%s')!\n", r_pose, r_scene);
     }
     printf("Gallery + PNG decode + rgb_resize + %d seeded presets PASS!\n", np);
 

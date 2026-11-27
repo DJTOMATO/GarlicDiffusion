@@ -7,9 +7,9 @@
 #define GALLERY_MAX_ITEMS 2048
 #define GALLERY_TV_MAX 512
 #define GALLERY_MAX_FOLDERS 64
-#define PRESETS_MAX_ITEMS 256
-#define STYLES_MAX_ITEMS 64
-#define CHARS_MAX_ITEMS 400
+#define PRESETS_MAX_ITEMS 2000
+#define STYLES_MAX_ITEMS 200
+#define CHARS_MAX_ITEMS 2000
 
 typedef struct {
     char name[64];

@@ -844,7 +844,7 @@ static void sm_dd_item_label(void* ctx, int row, int i, char* out, size_t cap) {
             "Details (60 micro-details)",
             "Camera Framing (35 angles)",
             "Ecchi Pool (Gravure / Alluring)",
-            "Explicit Pool"
+            "Explicit Pool (NSFW / Uncensored)"
         };
         if (i == 0) {
             snprintf(out, cap, "Randomizer Variety Mix: %s   (press X to toggle / clear)", rmask ? "ACTIVE (Clear All)" : "OFF (Enable Mix)");
@@ -1773,6 +1773,32 @@ static int model_is_installed_name(const char* name) {
     return 0;
 }
 
+static void publish_gal_preview_to_studio(void) {
+    if (!g_gal_rgb || !g_gal_w || !g_gal_h) return;
+    size_t sz = (size_t)g_gal_w * g_gal_h * 3u;
+    uint8_t* copy = (uint8_t*)malloc(sz);
+    if (copy) {
+        memcpy(copy, g_gal_rgb, sz);
+        publish_preview_rgb(copy, g_gal_w, g_gal_h);
+    }
+}
+
+static int match_tv_char_for_prompt(const char* prompt) {
+    if (!prompt || !prompt[0] || g_num_chars <= 0) return -1;
+    int best_idx = -1, best_len = 0;
+    for (int i = 0; i < g_num_chars; i++) {
+        if (!g_chars[i].prompt[0]) continue;
+        if (str_contains_ci(prompt, g_chars[i].prompt)) {
+            int len = (int)strlen(g_chars[i].prompt);
+            if (len > best_len) { best_len = len; best_idx = i; }
+        } else if (g_chars[i].name[0] && strlen(g_chars[i].name) >= 3 && str_contains_ci(prompt, g_chars[i].name)) {
+            int len = (int)strlen(g_chars[i].name);
+            if (len > best_len) { best_len = len; best_idx = i; }
+        }
+    }
+    return best_idx;
+}
+
 static void apply_gallery_item_to_job_locked(const GalleryItem* it, int new_seed, int is_sd15) {
     if (!it) return;
     // Restore prompt + LoRA tags (avoid duplicating if <lora:...> is already in prompt)
@@ -1800,7 +1826,7 @@ static void apply_gallery_item_to_job_locked(const GalleryItem* it, int new_seed
         snprintf(g_job.prompt, sizeof(g_job.prompt), "%s", it->prompt);
         g_job.lora[0] = 0;
     }
-    if (it->negative[0]) snprintf(g_job.negative, sizeof(g_job.negative), "%s", it->negative);
+    snprintf(g_job.negative, sizeof(g_job.negative), "%s", it->negative);
 
     // Restore base generation resolution (handle upscaled gallery items cleanly!)
     uint32_t w = it->width, h = it->height;
@@ -1836,6 +1862,16 @@ static void apply_gallery_item_to_job_locked(const GalleryItem* it, int new_seed
     g_job.upscale = (it->upscaled >= 0 && it->upscaled <= 3) ? (eng.has_upscaler ? it->upscaled : 0) : 0;
     if (it->eco >= 0 && it->eco <= 3) g_job.eco_mode = it->eco;
     g_job.seed = new_seed ? 0ull : it->seed;
+    if (it->seed) sm_last_seed = it->seed;
+    g_job.batch_count = 1u;
+    g_job.batch_rand_mask = 0u;
+    style_idx = -1;
+    preset_idx = -1;
+    char_idx = match_tv_char_for_prompt(g_job.prompt);
+    if (!new_seed && g_job.ui_mode == 0) {
+        g_job.ui_mode = 1;
+        g_st.ui_mode = 1;
+    }
     g_st.settings_seq++;
 
     for (int i = 0; i < (int)(sizeof(RES_LIST) / sizeof(RES_LIST[0])); i++) {
@@ -3199,6 +3235,7 @@ int main(void) {
                         if (g_gal_rgb) g_gal_full = 1;
                     } else if (g_gal_asel == 2 || g_gal_asel == 3) {
                         int run_now = (g_gal_asel == 3);
+                        publish_gal_preview_to_studio();
                         http_srv_lock();
                         int same_mdl = (!it->model[0] || strcmp(it->model, g_st.model) == 0);
                         int has_mdl = (!same_mdl && model_is_installed_name(it->model));
@@ -3358,16 +3395,11 @@ int main(void) {
                     ui_dirty = 1;
                 } else if ((pressed & ORBIS_PAD_BUTTON_TRIANGLE) && g_gal_count > 0) {
                     const GalleryItem* it = &g_gal[g_gal_idx];
+                    publish_gal_preview_to_studio();
                     http_srv_lock();
-                    if (it->prompt[0]) snprintf(g_job.prompt, sizeof(g_job.prompt), "%s", it->prompt);
-                    if (it->negative[0]) snprintf(g_job.negative, sizeof(g_job.negative), "%s", it->negative);
-                    if (it->steps) g_job.steps = it->steps;
-                    if (it->cfg > 0) g_job.cfg = it->cfg;
-                    g_job.sampler = strstr(it->sampler, "DPM") ? 3 : ((strcmp(it->sampler, "LCM") == 0) ? 2 : (strcmp(it->sampler, "Euler") == 0 ? 1 : 0));
-                    g_job.seed = 0;
+                    apply_gallery_item_to_job_locked(it, 1, g_st.is_sd15);
                     g_job.cancel_req = 0;
                     g_job.pending = 1;
-                    g_st.settings_seq++;
                     http_srv_unlock();
                     g_in_gallery = 0; toast[0] = 0; ui_dirty = 1;
                 } else if ((pressed & ORBIS_PAD_BUTTON_L3) && g_gal_count > 0 && cur_has_up) {

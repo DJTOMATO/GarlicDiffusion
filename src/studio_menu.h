@@ -229,7 +229,7 @@ static void sm_row_value(const StudioView* v, int row, char* out, size_t cap, fl
         if (v->rand_mask) {
             char cats[96] = {0};
             size_t cp = 0;
-            static const char* const CN[9] = {"Pose", "Expr", "Scene", "Light", "Outfit", "Detail", "Cam", "Ecchi", "Cog"};
+            static const char* const CN[9] = {"Pose", "Expr", "Scene", "Light", "Outfit", "Detail", "Cam", "Ecchi", "Explicit"};
             for (int b = 0; b < 9; b++) {
                 if (v->rand_mask & (1u << b))
                     cp += (size_t)snprintf(cats + cp, sizeof(cats) - cp, "%s%s", cp ? "+" : "", CN[b]);

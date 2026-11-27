@@ -158,16 +158,49 @@ int gallery_valid_id(const char* id) {
     return 1;
 }
 
-static void seed_default_presets(void) {
-    char marker[320];
-    snprintf(marker, sizeof(marker), "%s/.seeded_v4", g_presets_dir);
-    if (path_exists_local(marker)) return;
+static uint32_t fnv1a_str(uint32_t h, const char* s) {
+    if (!s) return h;
+    for (const unsigned char* p = (const unsigned char*)s; *p; p++) {
+        h ^= (uint32_t)(*p);
+        h *= 16777619u;
+    }
+    h ^= 0xFFu;
+    return h * 16777619u;
+}
 
+static int seed_sig_matches(const char* marker_path, const char* expected_sig) {
+    size_t sz = 0;
+    uint8_t* buf = read_all_file(marker_path, &sz);
+    if (!buf) return 0;
+    int eq = (strcmp((const char*)buf, expected_sig) == 0);
+    free(buf);
+    return eq;
+}
+
+static void seed_default_presets(void) {
     gd_init_preset_seeds();
-    for (size_t i = 0; i < sizeof(SEED_PRESETS) / sizeof(SEED_PRESETS[0]); i++) {
+    size_t cnt = sizeof(SEED_PRESETS) / sizeof(SEED_PRESETS[0]);
+    uint32_t h = 2166136261u ^ (uint32_t)cnt;
+    for (size_t i = 0; i < cnt; i++) {
+        h = fnv1a_str(h, SEED_PRESETS[i].id);
+        h = fnv1a_str(h, SEED_PRESETS[i].name);
+        h = fnv1a_str(h, SEED_PRESETS[i].model);
+        h = fnv1a_str(h, SEED_PRESETS[i].prompt);
+        h = fnv1a_str(h, SEED_PRESETS[i].negative);
+        h ^= (uint32_t)(SEED_PRESETS[i].width ^ (SEED_PRESETS[i].height << 16) ^
+                        (SEED_PRESETS[i].steps << 8) ^ (SEED_PRESETS[i].nsfw << 1) ^ SEED_PRESETS[i].is_speed);
+        h *= 16777619u;
+    }
+    char sig[48];
+    int sn = snprintf(sig, sizeof(sig), "%u:%08x\n", (unsigned)cnt, h);
+    char marker[320];
+    snprintf(marker, sizeof(marker), "%s/.seeded_sig", g_presets_dir);
+    if (seed_sig_matches(marker, sig)) return;
+
+    for (size_t i = 0; i < cnt; i++) {
         presets_save(&SEED_PRESETS[i], NULL, 0);
     }
-    write_all_file(marker, "4\n", 2);
+    write_all_file(marker, sig, (size_t)(sn > 0 ? sn : 0));
 }
 
 void gallery_init(const char* out_dir, const char* presets_dir) {
@@ -1438,15 +1471,26 @@ static int cmp_char_asc(const void* a, const void* b) {
 }
 
 static void seed_default_characters(void) {
-    char marker[320];
-    snprintf(marker, sizeof(marker), "%s/.seeded_v3", g_chars_dir);
-    if (path_exists_local(marker)) return;
-
     gd_init_preset_seeds();
-    for (size_t i = 0; i < sizeof(SEED_CHARS) / sizeof(SEED_CHARS[0]); i++) {
+    size_t cnt = sizeof(SEED_CHARS) / sizeof(SEED_CHARS[0]);
+    uint32_t h = 2166136261u ^ (uint32_t)cnt;
+    for (size_t i = 0; i < cnt; i++) {
+        h = fnv1a_str(h, SEED_CHARS[i].id);
+        h = fnv1a_str(h, SEED_CHARS[i].name);
+        h = fnv1a_str(h, SEED_CHARS[i].series);
+        h = fnv1a_str(h, SEED_CHARS[i].prompt);
+        h = fnv1a_str(h, SEED_CHARS[i].negative);
+    }
+    char sig[48];
+    int sn = snprintf(sig, sizeof(sig), "%u:%08x\n", (unsigned)cnt, h);
+    char marker[320];
+    snprintf(marker, sizeof(marker), "%s/.seeded_sig", g_chars_dir);
+    if (seed_sig_matches(marker, sig)) return;
+
+    for (size_t i = 0; i < cnt; i++) {
         characters_save(&SEED_CHARS[i], NULL, 0);
     }
-    write_all_file(marker, "3\n", 2);
+    write_all_file(marker, sig, (size_t)(sn > 0 ? sn : 0));
 }
 
 void characters_init(const char* chars_dir) {
