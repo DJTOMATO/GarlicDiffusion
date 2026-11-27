@@ -40,6 +40,7 @@ typedef struct {
 
 static OrbisPthreadMutex srv_mu;
 static OrbisPthreadMutex sync_gen_mu;
+static OrbisPthreadMutex api_cache_mu;
 static OrbisPthread srv_th;
 static DiffJob* g_job;
 static DiffStatus* g_st;
@@ -77,6 +78,58 @@ static void save_ui_mode_file(int mode) {
         if (n > 0) (void)write(fd, buf, (size_t)n);
         close(fd);
     }
+}
+
+static void save_api_eco_file(int mode) {
+    if (mode < -1 || mode > 3) return;
+    int fd = open("/data/garlic-diffusion/api_eco.cfg", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd >= 0) {
+        char buf[32];
+        int n = snprintf(buf, sizeof(buf), "api_eco=%d\n", mode);
+        if (n > 0) (void)write(fd, buf, (size_t)n);
+        close(fd);
+    }
+}
+
+static void save_api_ff_file(int en) {
+    int fd = open("/data/garlic-diffusion/api_face_fix.cfg", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd >= 0) {
+        char buf[32];
+        int n = snprintf(buf, sizeof(buf), "api_face_fix=%d\n", en ? 1 : 0);
+        if (n > 0) (void)write(fd, buf, (size_t)n);
+        close(fd);
+    }
+}
+
+static int json_get_double(const char* json, const char* key, double* out);
+static int ci_contains(const char* hay, const char* needle);
+
+// Detect explicit FaceFix / ADetailer request in API JSON (returns 1 if explicitly specified, 0 if unspecified)
+static int api_req_face_fix_override(const char* body, int* out_val) {
+    if (!body) return 0;
+    double v = 0;
+    if (json_get_double(body, "auto_face_fix", &v)) { *out_val = (v != 0) ? 1 : 0; return 1; }
+    if (strstr(body, "\"auto_face_fix\":true") || strstr(body, "\"auto_face_fix\": true")) { *out_val = 1; return 1; }
+    if (strstr(body, "\"auto_face_fix\":false") || strstr(body, "\"auto_face_fix\": false")) { *out_val = 0; return 1; }
+    if (json_get_double(body, "adetailer", &v)) { *out_val = (v != 0) ? 1 : 0; return 1; }
+    if (strstr(body, "\"adetailer\":true") || strstr(body, "\"adetailer\": true")) { *out_val = 1; return 1; }
+    if (strstr(body, "\"adetailer\":false") || strstr(body, "\"adetailer\": false")) { *out_val = 0; return 1; }
+    const char* ad = strstr(body, "\"ADetailer\"");
+    if (ad) {
+        // Standard A1111/bz-cogs ADetailer script: enabled unless args starts with false
+        const char* args = strstr(ad, "\"args\"");
+        if (args && (strstr(args, "[false") || strstr(args, "[ false"))) { *out_val = 0; return 1; }
+        *out_val = 1;
+        return 1;
+    }
+    return 0;
+}
+
+static int model_is_sd15_name(const char* name) {
+    if (!name || !name[0]) return 0;
+    return ci_contains(name, "meinamix") || ci_contains(name, "anything_v5") ||
+           ci_contains(name, "ghostmix") || ci_contains(name, "dreamshaper") ||
+           ci_contains(name, "sd15") || ci_contains(name, "sd1.5");
 }
 
 void http_srv_lock(void) { scePthreadMutexLock(&srv_mu); }
@@ -490,9 +543,268 @@ static int switch_model_sync(const char* req_raw) {
     return 0;
 }
 
+#define API_CACHE_MAX 64
+
+typedef struct {
+    int valid;
+    uint64_t hash;
+    uint32_t last_use;
+    // Exact request key fields
+    char model[64];
+    char prompt[1024];
+    char negative[512];
+    char lora[80];
+    int lora_scale_100;
+    uint32_t width, height, steps;
+    int cfg_100;
+    int sampler, upscale;
+    uint64_t req_seed;
+    int nsfw_allow, auto_quality, auto_face_fix;
+    // Cached result metadata + Gallery PNG reference (0 extra PNG RAM!)
+    char gallery_id[64];
+    char used_prompt[1024];
+    char used_neg[512];
+    uint64_t actual_seed;
+    uint32_t out_w, out_h, out_steps;
+    float out_cfg;
+    uint32_t image_gen_id;
+} ApiCacheEntry;
+
+static ApiCacheEntry g_api_cache[API_CACHE_MAX];
+static uint32_t g_api_cache_clock = 0;
+
+static uint64_t fnv1a_bytes(uint64_t h, const void* data, size_t n) {
+    const uint8_t* p = (const uint8_t*)data;
+    for (size_t i = 0; i < n; i++) {
+        h ^= (uint64_t)p[i];
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+static uint64_t fnv1a_str(uint64_t h, const char* s) {
+    if (!s) s = "";
+    h = fnv1a_bytes(h, s, strlen(s));
+    uint8_t sep = 0xff;
+    return fnv1a_bytes(h, &sep, 1);
+}
+
+static int prompt_has_wildcard(const char* s) {
+    if (!s) return 0;
+    const char* lb = strchr(s, '{');
+    if (!lb) return 0;
+    const char* bar = strchr(lb + 1, '|');
+    if (!bar) return 0;
+    return strchr(bar + 1, '}') != NULL;
+}
+
+static int req_is_cacheable(const char* body, const DiffJob* j) {
+    if (!j || j->batch_count > 1 || j->batch_rand_mask != 0) return 0;
+    if (prompt_has_wildcard(j->prompt) || prompt_has_wildcard(j->negative)) return 0;
+    if (body && (strstr(body, "\"no_cache\":true") || strstr(body, "\"no_cache\": true") ||
+                 strstr(body, "\"force\":true") || strstr(body, "\"force\": true"))) return 0;
+    return 1;
+}
+
+static uint64_t api_cache_hash(const char* model, const DiffJob* j) {
+    uint64_t h = 14695981039346656037ull;
+    h = fnv1a_str(h, model);
+    h = fnv1a_str(h, j->prompt);
+    h = fnv1a_str(h, j->negative);
+    h = fnv1a_str(h, j->lora);
+    int ls100 = (int)(j->lora_scale * 100.0f + (j->lora_scale >= 0 ? 0.5f : -0.5f));
+    int cfg100 = (int)(j->cfg * 100.0f + 0.5f);
+    uint64_t nums[11] = {
+        (uint64_t)(uint32_t)ls100, j->width, j->height, j->steps, (uint64_t)(uint32_t)cfg100,
+        (uint64_t)(uint32_t)j->sampler, (uint64_t)(uint32_t)j->upscale, j->seed,
+        (uint64_t)(uint32_t)j->nsfw_allow, (uint64_t)(uint32_t)j->auto_quality, (uint64_t)(uint32_t)j->auto_face_fix
+    };
+    return fnv1a_bytes(h, nums, sizeof(nums));
+}
+
+static int api_cache_matches(const ApiCacheEntry* e, uint64_t h, const char* model, const DiffJob* j) {
+    if (!e->valid || e->hash != h) return 0;
+    int ls100 = (int)(j->lora_scale * 100.0f + (j->lora_scale >= 0 ? 0.5f : -0.5f));
+    int cfg100 = (int)(j->cfg * 100.0f + 0.5f);
+    return e->width == j->width && e->height == j->height && e->steps == j->steps &&
+           e->cfg_100 == cfg100 && e->sampler == j->sampler && e->upscale == j->upscale &&
+           e->req_seed == j->seed && e->lora_scale_100 == ls100 &&
+           e->nsfw_allow == j->nsfw_allow && e->auto_quality == j->auto_quality &&
+           e->auto_face_fix == j->auto_face_fix &&
+           strcmp(e->model, model ? model : "") == 0 &&
+           strcmp(e->prompt, j->prompt) == 0 &&
+           strcmp(e->negative, j->negative) == 0 &&
+           strcmp(e->lora, j->lora) == 0;
+}
+
+static int api_cache_lookup(const char* model, const DiffJob* j, uint8_t** out_png, size_t* out_sz,
+                            uint32_t* out_id, DiffStatus* snap, char* out_prompt, size_t pr_max,
+                            char* out_neg, size_t ng_max, int* out_sampler) {
+    uint64_t h = api_cache_hash(model, j);
+    ApiCacheEntry* hit = (ApiCacheEntry*)malloc(sizeof(ApiCacheEntry));
+    if (!hit) return 0;
+    int found = -1;
+    scePthreadMutexLock(&api_cache_mu);
+    for (int i = 0; i < API_CACHE_MAX; i++) {
+        if (api_cache_matches(&g_api_cache[i], h, model, j)) {
+            g_api_cache[i].last_use = ++g_api_cache_clock;
+            *hit = g_api_cache[i];
+            found = i;
+            break;
+        }
+    }
+    scePthreadMutexUnlock(&api_cache_mu);
+    if (found < 0 || !hit->gallery_id[0]) { free(hit); return 0; }
+
+    size_t sz = 0;
+    uint8_t* png = gallery_load_png(hit->gallery_id, &sz);
+    if (!png || sz == 0) {
+        free(png);
+        // Gallery image was deleted; evict stale cache slot
+        scePthreadMutexLock(&api_cache_mu);
+        if (g_api_cache[found].valid && g_api_cache[found].hash == h) g_api_cache[found].valid = 0;
+        scePthreadMutexUnlock(&api_cache_mu);
+        free(hit);
+        return 0;
+    }
+
+    if (snap) {
+        memset(snap, 0, sizeof(*snap));
+        snprintf(snap->model, sizeof(snap->model), "%s", hit->model);
+        snap->width = hit->out_w;
+        snap->height = hit->out_h;
+        snap->steps = hit->out_steps;
+        snap->cfg = hit->out_cfg;
+        snap->seed = hit->actual_seed;
+        snap->image_gen_id = hit->image_gen_id;
+        snprintf(snap->last_gallery_id, sizeof(snap->last_gallery_id), "%s", hit->gallery_id);
+    }
+    if (out_prompt && pr_max) snprintf(out_prompt, pr_max, "%s", hit->used_prompt[0] ? hit->used_prompt : hit->prompt);
+    if (out_neg && ng_max) snprintf(out_neg, ng_max, "%s", hit->used_neg[0] ? hit->used_neg : hit->negative);
+    if (out_sampler) *out_sampler = hit->sampler;
+    if (out_id) *out_id = hit->image_gen_id;
+    *out_png = png;
+    *out_sz = sz;
+    glog("a1111: cache HIT (gallery=%s, %zu bytes, seed=%llu) — returned instantly!",
+         hit->gallery_id, sz, (unsigned long long)hit->actual_seed);
+    free(hit);
+    return 1;
+}
+
+static void api_cache_store(const char* model, const DiffJob* j, const DiffStatus* st,
+                            const char* used_pr, const char* used_ng) {
+    if (!st || !st->last_gallery_id[0]) return;
+    uint64_t h = api_cache_hash(model, j);
+    scePthreadMutexLock(&api_cache_mu);
+    int slot = -1;
+    uint32_t oldest = 0xffffffffu;
+    for (int i = 0; i < API_CACHE_MAX; i++) {
+        if (api_cache_matches(&g_api_cache[i], h, model, j)) { slot = i; break; }
+        if (!g_api_cache[i].valid) { slot = i; oldest = 0; }
+        else if (oldest != 0 && g_api_cache[i].last_use < oldest) {
+            oldest = g_api_cache[i].last_use;
+            slot = i;
+        }
+    }
+    if (slot < 0) slot = 0;
+    ApiCacheEntry* e = &g_api_cache[slot];
+    memset(e, 0, sizeof(*e));
+    e->valid = 1;
+    e->hash = h;
+    e->last_use = ++g_api_cache_clock;
+    snprintf(e->model, sizeof(e->model), "%s", model ? model : "");
+    snprintf(e->prompt, sizeof(e->prompt), "%s", j->prompt);
+    snprintf(e->negative, sizeof(e->negative), "%s", j->negative);
+    snprintf(e->lora, sizeof(e->lora), "%s", j->lora);
+    e->lora_scale_100 = (int)(j->lora_scale * 100.0f + (j->lora_scale >= 0 ? 0.5f : -0.5f));
+    e->width = j->width;
+    e->height = j->height;
+    e->steps = j->steps;
+    e->cfg_100 = (int)(j->cfg * 100.0f + 0.5f);
+    e->sampler = j->sampler;
+    e->upscale = j->upscale;
+    e->req_seed = j->seed;
+    e->nsfw_allow = j->nsfw_allow;
+    e->auto_quality = j->auto_quality;
+    e->auto_face_fix = j->auto_face_fix;
+    snprintf(e->gallery_id, sizeof(e->gallery_id), "%s", st->last_gallery_id);
+    snprintf(e->used_prompt, sizeof(e->used_prompt), "%s", (used_pr && used_pr[0]) ? used_pr : j->prompt);
+    snprintf(e->used_neg, sizeof(e->used_neg), "%s", (used_ng && used_ng[0]) ? used_ng : j->negative);
+    e->actual_seed = st->seed;
+    e->out_w = st->width ? st->width : j->width;
+    e->out_h = st->height ? st->height : j->height;
+    e->out_steps = st->steps ? st->steps : j->steps;
+    e->out_cfg = st->cfg > 0.0f ? st->cfg : j->cfg;
+    e->image_gen_id = st->image_gen_id;
+    scePthreadMutexUnlock(&api_cache_mu);
+}
+
+static void adapt_a1111_distilled(const char* active_mdl, DiffJob* tmp, int do_log) {
+    if (!active_mdl || !active_mdl[0]) return;
+    if (ci_contains(active_mdl, "dmd2") && (tmp->steps > 10 || tmp->cfg > 2.2f)) {
+        uint32_t os = tmp->steps; float oc = tmp->cfg;
+        if (ci_contains(active_mdl, "animagine")) {
+            if (tmp->steps > 10) tmp->steps = 5;
+            if (tmp->cfg > 2.2f) tmp->cfg = 1.1f;
+        } else if (ci_contains(active_mdl, "noob")) {
+            if (tmp->steps > 10) tmp->steps = 6;
+            if (tmp->cfg > 2.2f) tmp->cfg = 1.2f;
+        } else {
+            if (tmp->steps > 10) tmp->steps = 6;
+            if (tmp->cfg > 2.2f) tmp->cfg = 1.4f;
+        }
+        tmp->sampler = 2; // LCM
+        if (do_log) {
+            glog("a1111: adapted DMD2 '%s' (%u stp / CFG %.1f -> %u stp / CFG %.1f / LCM)",
+                 active_mdl, os, (double)oc, tmp->steps, (double)tmp->cfg);
+        }
+    } else if (ci_contains(active_mdl, "8step") && (tmp->steps > 12 || tmp->cfg > 5.0f)) {
+        uint32_t os = tmp->steps; float oc = tmp->cfg;
+        if (tmp->steps > 12) tmp->steps = 8;
+        if (tmp->cfg > 5.0f) tmp->cfg = 3.5f;
+        tmp->sampler = 1; // Euler
+        if (do_log) {
+            glog("a1111: adapted 8-step '%s' (%u stp / CFG %.1f -> %u stp / CFG %.1f / Euler)",
+                 active_mdl, os, (double)oc, tmp->steps, (double)tmp->cfg);
+        }
+    }
+}
+
 static int run_sync_generation(const char* body, uint8_t** out_png, size_t* out_sz,
                                uint32_t* out_id, DiffStatus* snap, char* out_prompt, size_t pr_max,
                                char* out_neg, size_t ng_max, int* out_sampler, int a1111_adapt) {
+    // Fast-path exact-request cache lookup BEFORE acquiring GPU lock or switching models!
+    char req_mdl[128] = {0};
+    int has_req_mdl = (json_get_str(body, "sd_model_checkpoint", req_mdl, sizeof(req_mdl)) && req_mdl[0]);
+    {
+        DiffJob probe;
+        char target_mdl[64] = {0};
+        http_srv_lock();
+        probe = *g_job;
+        if (has_req_mdl && match_installed_model(req_mdl, target_mdl, sizeof(target_mdl))) {
+            // resolved requested checkpoint
+        } else {
+            snprintf(target_mdl, sizeof(target_mdl), "%s", g_st->model);
+        }
+        http_srv_unlock();
+        apply_job_json(body, &probe);
+        apply_a1111_styles(body, &probe);
+        {
+            int ff_ov = 0;
+            if (api_req_face_fix_override(body, &ff_ov)) {
+                probe.auto_face_fix = ff_ov;
+            } else if (!model_is_sd15_name(target_mdl)) {
+                probe.auto_face_fix = probe.api_face_fix;
+            }
+        }
+        if (a1111_adapt) adapt_a1111_distilled(target_mdl, &probe, 0);
+        if (req_is_cacheable(body, &probe) &&
+            api_cache_lookup(target_mdl, &probe, out_png, out_sz, out_id, snap,
+                             out_prompt, pr_max, out_neg, ng_max, out_sampler)) {
+            return 0;
+        }
+    }
+
     // Serialize concurrent A1111 / OpenAI requests in FIFO order instead of failing with 503
     scePthreadMutexLock(&sync_gen_mu);
 
@@ -503,8 +815,7 @@ static int run_sync_generation(const char* body, uint8_t** out_png, size_t* out_
     }
 
     // Support A1111 override_settings.sd_model_checkpoint auto-switch before generating
-    char req_mdl[128] = {0};
-    if (json_get_str(body, "sd_model_checkpoint", req_mdl, sizeof(req_mdl)) && req_mdl[0]) {
+    if (has_req_mdl) {
         switch_model_sync(req_mdl);
     }
 
@@ -516,33 +827,35 @@ static int run_sync_generation(const char* body, uint8_t** out_png, size_t* out_
     snprintf(active_mdl, sizeof(active_mdl), "%s", g_st->model);
     http_srv_unlock();
 
+    int studio_eco = tmp.eco_mode;
+    int studio_aff = tmp.auto_face_fix;
+    double req_eco_v = 0;
+    int has_req_eco = json_get_double(body, "eco", &req_eco_v);
     apply_job_json(body, &tmp);
     apply_a1111_styles(body, &tmp);
-    // Protect distilled models from non-distilled A1111 bot defaults (e.g. 24 steps / CFG 5.0 / Euler a on DMD2)
-    if (a1111_adapt && active_mdl[0]) {
-        if (ci_contains(active_mdl, "dmd2") && (tmp.steps > 10 || tmp.cfg > 2.2f)) {
-            uint32_t os = tmp.steps; float oc = tmp.cfg;
-            if (ci_contains(active_mdl, "animagine")) {
-                if (tmp.steps > 10) tmp.steps = 5;
-                if (tmp.cfg > 2.2f) tmp.cfg = 1.1f;
-            } else if (ci_contains(active_mdl, "noob")) {
-                if (tmp.steps > 10) tmp.steps = 6;
-                if (tmp.cfg > 2.2f) tmp.cfg = 1.2f;
-            } else {
-                if (tmp.steps > 10) tmp.steps = 6;
-                if (tmp.cfg > 2.2f) tmp.cfg = 1.4f;
-            }
-            tmp.sampler = 2; // LCM
-            glog("a1111: adapted DMD2 '%s' (%u stp / CFG %.1f -> %u stp / CFG %.1f / LCM)",
-                 active_mdl, os, (double)oc, tmp.steps, (double)tmp.cfg);
-        } else if (ci_contains(active_mdl, "8step") && (tmp.steps > 12 || tmp.cfg > 5.0f)) {
-            uint32_t os = tmp.steps; float oc = tmp.cfg;
-            if (tmp.steps > 12) tmp.steps = 8;
-            if (tmp.cfg > 5.0f) tmp.cfg = 3.5f;
-            tmp.sampler = 1; // Euler
-            glog("a1111: adapted 8-step '%s' (%u stp / CFG %.1f -> %u stp / CFG %.1f / Euler)",
-                 active_mdl, os, (double)oc, tmp.steps, (double)tmp.cfg);
+    // Keep unattended API / Discord bot calls whisper-quiet unless caller explicitly requests an eco mode
+    if (!has_req_eco && tmp.api_eco_mode >= 0 && tmp.api_eco_mode <= 3) {
+        tmp.eco_mode = tmp.api_eco_mode;
+    }
+    // Make FaceFix optional for SDXL / Illustrious API calls unless explicitly requested (ADetailer/auto_face_fix) or enabled via Web UI toggle
+    {
+        int ff_ov = 0;
+        if (api_req_face_fix_override(body, &ff_ov)) {
+            tmp.auto_face_fix = ff_ov;
+        } else if (!model_is_sd15_name(active_mdl)) {
+            tmp.auto_face_fix = tmp.api_face_fix;
         }
+    }
+    // Protect distilled models from non-distilled A1111 bot defaults (e.g. 24 steps / CFG 5.0 / Euler a on DMD2)
+    if (a1111_adapt) adapt_a1111_distilled(active_mdl, &tmp, 1);
+
+    // Re-check cache after lock in case an identical request just finished ahead of us in the queue
+    int can_cache = req_is_cacheable(body, &tmp);
+    if (can_cache &&
+        api_cache_lookup(active_mdl, &tmp, out_png, out_sz, out_id, snap,
+                         out_prompt, pr_max, out_neg, ng_max, out_sampler)) {
+        scePthreadMutexUnlock(&sync_gen_mu);
+        return 0;
     }
 
     uint32_t prev_id = 0;
@@ -574,18 +887,30 @@ static int run_sync_generation(const char* body, uint8_t** out_png, size_t* out_
     uint8_t* copy = NULL;
     size_t sz = 0;
     uint32_t new_id = 0;
+    DiffStatus st_snap;
+    char final_pr[1024] = {0}, final_ng[512] = {0};
     http_srv_lock();
+    g_job->eco_mode = studio_eco;
+    g_st->eco_mode = studio_eco;
+    g_job->auto_face_fix = studio_aff;
+    g_st->auto_face_fix = studio_aff;
     new_id = g_st->image_gen_id;
-    if (snap) *snap = *g_st;
+    st_snap = *g_st;
+    if (snap) *snap = st_snap;
     // Return final C-expanded & quality-shielded prompt/negative so Discord bots (Red cog) see all rolled tags!
-    if (out_prompt && pr_max && g_st->cur_prompt[0]) snprintf(out_prompt, pr_max, "%s", g_st->cur_prompt);
-    if (out_neg && ng_max && g_st->cur_negative[0]) snprintf(out_neg, ng_max, "%s", g_st->cur_negative);
+    if (g_st->cur_prompt[0]) snprintf(final_pr, sizeof(final_pr), "%s", g_st->cur_prompt);
+    if (g_st->cur_negative[0]) snprintf(final_ng, sizeof(final_ng), "%s", g_st->cur_negative);
+    if (out_prompt && pr_max && final_pr[0]) snprintf(out_prompt, pr_max, "%s", final_pr);
+    if (out_neg && ng_max && final_ng[0]) snprintf(out_neg, ng_max, "%s", final_ng);
     if (new_id != prev_id && g_st->png_data && g_st->png_size) {
         sz = g_st->png_size;
         copy = (uint8_t*)malloc(sz);
         if (copy) memcpy(copy, g_st->png_data, sz);
     }
     http_srv_unlock();
+    if (copy && can_cache) {
+        api_cache_store(active_mdl, &tmp, &st_snap, final_pr, final_ng);
+    }
     scePthreadMutexUnlock(&sync_gen_mu);
     if (!copy) return -1;
     *out_png = copy;
@@ -1490,6 +1815,7 @@ static void handle_client(int fd) {
         int nsfw_ok = g_job->nsfw_allow;
         int auto_q = g_job->auto_quality;
         int auto_ff = g_job->auto_face_fix;
+        int api_ff = g_job->api_face_fix;
         int ui_m = g_job->ui_mode;
 
         // Expose active in-progress job settings when busy, or live Studio configuration when idle!
@@ -1525,8 +1851,8 @@ static void handle_client(int fd) {
         int n = snprintf(out, 16384,
                          "{\"version\":\"%s\",\"ui_mode\":%d,"
                          "\"gpu_ready\":%s,\"ready\":%s,\"busy\":%s,\"switching\":%s,\"neo\":%d,\"arch\":\"%s\",\"has_upscaler\":%s,"
-                         "\"nsfw_allow\":%s,\"auto_quality\":%s,\"auto_face_fix\":%s,"
-                         "\"temp_c\":%d,\"temp_peak_c\":%d,\"eco_mode\":%d,"
+                         "\"nsfw_allow\":%s,\"auto_quality\":%s,\"auto_face_fix\":%s,\"api_face_fix\":%s,"
+                         "\"temp_c\":%d,\"temp_peak_c\":%d,\"eco_mode\":%d,\"api_eco_mode\":%d,"
                          "\"gpu_used_mb\":%u,\"gpu_total_mb\":%u,\"progress\":%.3f,\"eta_sec\":%.1f,\"elapsed_sec\":%.1f,"
                          "\"stage\":\"%s\",\"model\":\"%s\","
                          "\"lora\":\"%s\",\"lora_scale\":%.2f,\"active_lora\":\"%s\",\"gallery_rev\":%u,\"settings_seq\":%u,"
@@ -1543,14 +1869,14 @@ static void handle_client(int fd) {
                          "\"last_sec\":%.2f,\"unet_gpu_sec\":%.2f,\"vae_sec\":%.2f,\"upscale_sec\":%.2f,\"face_fix_sec\":%.2f,\"cooldown_sec\":%.2f,"
                          "\"eff_tflops\":%.3f,\"bench_gemm_tflops\":%.3f,\"bench_attn_ms\":%.2f,"
                          "\"bench_mode_tf\":[%.3f,%.3f,%.3f,%.3f],"
-                         "\"has_image\":%s,\"image_gen_id\":%u,\"batch_cur\":%u,\"batch_total\":%u,\"shutdown_after\":%s,\"last_gallery_id\":\"%s\","
+                         "\"has_image\":%s,\"image_gen_id\":%u,\"preview_id\":%u,\"batch_cur\":%u,\"batch_total\":%u,\"shutdown_after\":%s,\"last_gallery_id\":\"%s\","
                          "\"storage\":{\"state\":\"%s\",\"queued\":%u,\"flushed\":%u,\"used_mb\":%.2f,\"max_mb\":%.1f,\"fallback\":%s,\"last_id\":\"%s\",\"error\":\"%s\"}}",
                          GD_APP_VERSION, ui_m,
                          g_st->gpu_ready ? "true" : "false", g_st->ready ? "true" : "false", g_st->busy ? "true" : "false",
                          is_switching ? "true" : "false",
                          g_st->neo, g_st->is_sd15 ? "sd15" : "sdxl", g_st->has_upscaler ? "true" : "false",
-                         nsfw_ok ? "true" : "false", auto_q ? "true" : "false", auto_ff ? "true" : "false",
-                         g_st->temp_c, g_st->temp_peak_c, g_st->eco_mode,
+                         nsfw_ok ? "true" : "false", auto_q ? "true" : "false", auto_ff ? "true" : "false", api_ff ? "true" : "false",
+                         g_st->temp_c, g_st->temp_peak_c, g_st->eco_mode, g_job->api_eco_mode,
                          g_st->gpu_used_mb, g_st->gpu_total_mb,
                          (double)g_st->progress, (double)g_st->eta_sec, (double)g_st->elapsed_sec,
                          st_esc, mdl_esc,
@@ -1570,7 +1896,7 @@ static void handle_client(int fd) {
                          g_st->eff_tflops, g_st->bench_gemm_tflops, g_st->bench_attn_ms,
                          g_st->bench_mode_tf[0], g_st->bench_mode_tf[1],
                          g_st->bench_mode_tf[2], g_st->bench_mode_tf[3],
-                         (g_st->png_data && g_st->png_size) ? "true" : "false", g_st->image_gen_id,
+                         (g_st->png_data && g_st->png_size) ? "true" : "false", g_st->image_gen_id, g_st->preview_gen_id,
                          g_st->batch_cur, g_st->batch_total, g_st->shutdown_after ? "true" : "false", g_st->last_gallery_id,
                          stg_name, stg.queued_count, stg.flushed_total,
                          (double)stg.used_bytes / 1048576.0, (double)stg.max_bytes / 1048576.0,
@@ -1578,6 +1904,22 @@ static void handle_client(int fd) {
         http_srv_unlock();
         send_resp(fd, 200, "OK", "application/json", out, (size_t)n);
         free(out); free(cpr_esc); free(cng_esc);
+    } else if (strcmp(method, "GET") == 0 && strcmp(path, "/preview.png") == 0) {
+        uint8_t* copy = NULL;
+        size_t sz = 0;
+        http_srv_lock();
+        if (g_st->preview_png && g_st->preview_png_size) {
+            sz = g_st->preview_png_size;
+            copy = (uint8_t*)malloc(sz);
+            if (copy) memcpy(copy, g_st->preview_png, sz);
+        }
+        http_srv_unlock();
+        if (copy) {
+            send_resp(fd, 200, "OK", "image/png", copy, sz);
+            free(copy);
+        } else {
+            send_resp(fd, 404, "Not Found", "text/plain", "no preview yet", 14);
+        }
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/image.png") == 0) {
         uint8_t* copy = NULL;
         size_t sz = 0;
@@ -1597,7 +1939,7 @@ static void handle_client(int fd) {
     } else if (strcmp(method, "POST") == 0 && strcmp(path, "/settings") == 0) {
         double v = 0;
         char tmp[64] = {0};
-        int save_uim = -99, nsfw_changed = 0;
+        int save_uim = -99, save_aeco = -99, save_aff = -99, nsfw_changed = 0;
         http_srv_lock();
         int prev_ns = g_job->nsfw_allow;
         if (json_get_double(body, "nsfw_allow", &v)) g_job->nsfw_allow = (v != 0) ? 1 : 0;
@@ -1611,6 +1953,24 @@ static void handle_client(int fd) {
         if (json_get_double(body, "auto_face_fix", &v)) g_job->auto_face_fix = (v != 0) ? 1 : 0;
         else if (strstr(body, "\"auto_face_fix\":true") || strstr(body, "\"auto_face_fix\": true")) g_job->auto_face_fix = 1;
         else if (strstr(body, "\"auto_face_fix\":false") || strstr(body, "\"auto_face_fix\": false")) g_job->auto_face_fix = 0;
+        if (json_get_double(body, "api_face_fix", &v)) { g_job->api_face_fix = (v != 0) ? 1 : 0; save_aff = g_job->api_face_fix; }
+        else if (strstr(body, "\"api_face_fix\":true") || strstr(body, "\"api_face_fix\": true")) { g_job->api_face_fix = 1; save_aff = 1; }
+        else if (strstr(body, "\"api_face_fix\":false") || strstr(body, "\"api_face_fix\": false")) { g_job->api_face_fix = 0; save_aff = 0; }
+        if (json_get_double(body, "eco", &v)) {
+            int ne = (int)v;
+            if (ne >= 0 && ne <= 3) {
+                g_job->eco_mode = ne;
+                if (!g_st->busy) g_st->eco_mode = ne;
+            }
+        }
+        if (json_get_double(body, "api_eco", &v) || json_get_double(body, "api_eco_mode", &v)) {
+            int nae = (int)v;
+            if (nae >= -1 && nae <= 3) {
+                g_job->api_eco_mode = nae;
+                g_st->api_eco_mode = nae;
+                save_aeco = nae;
+            }
+        }
         if (json_get_double(body, "ui_mode", &v)) {
             int nm = (int)v;
             if (nm == 0 || nm == 1) {
@@ -1626,16 +1986,20 @@ static void handle_client(int fd) {
         g_st->nsfw_allow = g_job->nsfw_allow;
         g_st->auto_quality = g_job->auto_quality;
         g_st->auto_face_fix = g_job->auto_face_fix;
+        g_st->api_face_fix = g_job->api_face_fix;
         g_st->cur_rand_mask = g_job->batch_rand_mask;
         g_st->settings_seq++;
-        int ns = g_job->nsfw_allow, aq = g_job->auto_quality, aff = g_job->auto_face_fix, uim = g_job->ui_mode;
+        int ns = g_job->nsfw_allow, aq = g_job->auto_quality, aff = g_job->auto_face_fix, apiff = g_job->api_face_fix, uim = g_job->ui_mode;
+        int ecm = g_job->eco_mode, aecm = g_job->api_eco_mode;
         uint32_t sseq = g_st->settings_seq, rmk = g_job->batch_rand_mask;
         http_srv_unlock();
         if (save_uim == 0 || save_uim == 1) save_ui_mode_file(save_uim);
-        char resp[256];
+        if (save_aeco >= -1 && save_aeco <= 3) save_api_eco_file(save_aeco);
+        if (save_aff == 0 || save_aff == 1) save_api_ff_file(save_aff);
+        char resp[360];
         int l = snprintf(resp, sizeof(resp),
-                         "{\"ok\":true,\"nsfw_allow\":%s,\"auto_quality\":%s,\"auto_face_fix\":%s,\"ui_mode\":%d,\"rand_mask\":%u,\"settings_seq\":%u}",
-                         ns ? "true" : "false", aq ? "true" : "false", aff ? "true" : "false", uim, rmk, sseq);
+                         "{\"ok\":true,\"nsfw_allow\":%s,\"auto_quality\":%s,\"auto_face_fix\":%s,\"api_face_fix\":%s,\"ui_mode\":%d,\"eco\":%d,\"api_eco\":%d,\"rand_mask\":%u,\"settings_seq\":%u}",
+                         ns ? "true" : "false", aq ? "true" : "false", aff ? "true" : "false", apiff ? "true" : "false", uim, ecm, aecm, rmk, sseq);
         send_resp(fd, 200, "OK", "application/json", resp, (size_t)l);
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/update/status") == 0) {
         AppUpdateStatus upd;
@@ -1692,6 +2056,11 @@ static void handle_client(int fd) {
         g_st->settings_seq++;
         http_srv_unlock();
         send_resp(fd, 200, "OK", "application/json", en ? "{\"shutdown_after\":true}" : "{\"shutdown_after\":false}", en ? 23 : 24);
+    } else if (strcmp(method, "POST") == 0 && strcmp(path, "/cache/clear") == 0) {
+        scePthreadMutexLock(&api_cache_mu);
+        memset(g_api_cache, 0, sizeof(g_api_cache));
+        scePthreadMutexUnlock(&api_cache_mu);
+        send_resp(fd, 200, "OK", "application/json", "{\"ok\":true}", 11);
     } else if (strcmp(method, "POST") == 0 &&
                (strcmp(path, "/cancel") == 0 || strcmp(path, "/sdapi/v1/interrupt") == 0)) {
         http_srv_lock();
@@ -1840,17 +2209,36 @@ static void handle_client(int fd) {
         }
         free(inst); free(out);
     } else if (strcmp(method, "GET") == 0 &&
-               (strcmp(path, "/sdapi/v1/sd-vae") == 0 || strcmp(path, "/sdapi/v1/embeddings") == 0)) {
+               (strcmp(path, "/sdapi/v1/sd-vae") == 0 ||
+                strcmp(path, "/sdapi/v1/sd-modules") == 0 ||
+                strcmp(path, "/sdapi/v1/embeddings") == 0 ||
+                strcmp(path, "/sdapi/v1/hypernetworks") == 0 ||
+                strcmp(path, "/sdapi/v1/face-restorers") == 0 ||
+                strcmp(path, "/sdapi/v1/realesrgan-models") == 0)) {
         send_resp(fd, 200, "OK", "application/json", "[]", 2);
     } else if (strcmp(method, "GET") == 0 && strcmp(path, "/sdapi/v1/options") == 0) {
-        char mdl_esc[128], out[320];
+        char mdl_esc[128], out[384];
+        int aeco = 3;
         http_srv_lock();
         json_escape(g_st->model[0] ? g_st->model : "waiNSFWIllustrious_v140", mdl_esc, sizeof(mdl_esc));
+        aeco = g_job->api_eco_mode;
         http_srv_unlock();
-        int n = snprintf(out, sizeof(out), "{\"sd_model_checkpoint\":\"%s\",\"sd_vae\":\"Automatic\"}", mdl_esc);
+        int n = snprintf(out, sizeof(out), "{\"sd_model_checkpoint\":\"%s\",\"sd_vae\":\"Automatic\",\"garlic_api_eco\":%d}", mdl_esc, aeco);
         send_resp(fd, 200, "OK", "application/json", out, (size_t)n);
     } else if (strcmp(method, "POST") == 0 && strcmp(path, "/sdapi/v1/options") == 0) {
         char req_m[128] = {0};
+        double v = 0;
+        if (json_get_double(body, "garlic_api_eco", &v) || json_get_double(body, "api_eco", &v)) {
+            int nae = (int)v;
+            if (nae >= -1 && nae <= 3) {
+                http_srv_lock();
+                g_job->api_eco_mode = nae;
+                g_st->api_eco_mode = nae;
+                g_st->settings_seq++;
+                http_srv_unlock();
+                save_api_eco_file(nae);
+            }
+        }
         if (json_get_str(body, "sd_model_checkpoint", req_m, sizeof(req_m)) && req_m[0]) {
             scePthreadMutexLock(&sync_gen_mu);
             switch_model_sync(req_m);
@@ -2058,6 +2446,7 @@ int http_srv_start(DiffJob* shared_job, DiffStatus* shared_status) {
     load_web_ui();
     scePthreadMutexInit(&srv_mu, NULL, "gdiff_srv");
     scePthreadMutexInit(&sync_gen_mu, NULL, "gdiff_sgen");
+    scePthreadMutexInit(&api_cache_mu, NULL, "gdiff_acache");
     if (sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET) < 0) return -1;
     if (sceNetInit() < 0) return -1;
     uint64_t act[20] = {1};

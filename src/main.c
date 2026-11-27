@@ -43,6 +43,8 @@
 #define CHARS_ROOT "/data/garlic-diffusion/characters"
 #define REPO_CFG "/data/garlic-diffusion/repo.cfg"
 #define UI_MODE_CFG "/data/garlic-diffusion/ui_mode.cfg"
+#define API_ECO_CFG "/data/garlic-diffusion/api_eco.cfg"
+#define API_FF_CFG "/data/garlic-diffusion/api_face_fix.cfg"
 #define LOG_FILE "/data/garlic_diffusion_log.txt"
 
 void glog(const char* fmt, ...) {
@@ -148,6 +150,42 @@ static void save_ui_mode_cfg(int mode) {
     }
 }
 
+static int load_api_eco_cfg(void) {
+    int fd = open(API_ECO_CFG, O_RDONLY);
+    if (fd < 0) return 3; // Default: Silent (whisper-quiet for unattended API / Discord bot calls)
+    char buf[64] = {0};
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0) return 3;
+    const char* p = strstr(buf, "api_eco=");
+    p = p ? (p + 8) : buf;
+    int v = atoi(p);
+    return (v >= -1 && v <= 3) ? v : 3;
+}
+
+static void save_api_eco_cfg(int mode) {
+    if (mode < -1 || mode > 3) return;
+    int fd = open(API_ECO_CFG, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd >= 0) {
+        char buf[32];
+        int n = snprintf(buf, sizeof(buf), "api_eco=%d\n", mode);
+        if (n > 0) (void)write(fd, buf, (size_t)n);
+        close(fd);
+    }
+}
+
+static int load_api_ff_cfg(void) {
+    int fd = open(API_FF_CFG, O_RDONLY);
+    if (fd < 0) return 0; // Default: OFF for SDXL/Illustrious API calls unless explicitly requested
+    char buf[64] = {0};
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0) return 0;
+    const char* p = strstr(buf, "api_face_fix=");
+    p = p ? (p + 13) : buf;
+    return atoi(p) ? 1 : 0;
+}
+
 static void publish_preview_rgb(uint8_t* rgb, uint32_t w, uint32_t h) {
     http_srv_lock();
     free(g_prev_rgb);
@@ -156,6 +194,61 @@ static void publish_preview_rgb(uint8_t* rgb, uint32_t w, uint32_t h) {
     g_prev_h = h;
     g_prev_seq++;
     http_srv_unlock();
+}
+
+// Publish an intermediate live preview (UNet step latent, post-VAE, or post-Upscale) to BOTH
+// the PS4 TV UI and the Web UI (/preview.png). Downscales large RGBs to <=512px for instant transfer.
+static void publish_live_preview(const uint8_t* rgb, uint32_t w, uint32_t h) {
+    if (!rgb || !w || !h) return;
+    uint32_t pw = w, ph = h;
+    uint8_t* scaled = NULL;
+    const uint8_t* src = rgb;
+    if (w > 512u || h > 512u) {
+        if (w >= h) { pw = 512u; ph = (uint32_t)(((uint64_t)h * 512u + w / 2u) / w); }
+        else { ph = 512u; pw = (uint32_t)(((uint64_t)w * 512u + h / 2u) / h); }
+        if (pw < 1u) pw = 1u;
+        if (ph < 1u) ph = 1u;
+        scaled = (uint8_t*)malloc((size_t)pw * ph * 3u);
+        if (scaled) {
+            for (uint32_t y = 0; y < ph; y++) {
+                uint32_t sy = (uint32_t)((uint64_t)y * h / ph);
+                const uint8_t* srow = rgb + (size_t)sy * w * 3u;
+                uint8_t* drow = scaled + (size_t)y * pw * 3u;
+                for (uint32_t x = 0; x < pw; x++) {
+                    uint32_t sx = (uint32_t)((uint64_t)x * w / pw);
+                    drow[x * 3u + 0u] = srow[sx * 3u + 0u];
+                    drow[x * 3u + 1u] = srow[sx * 3u + 1u];
+                    drow[x * 3u + 2u] = srow[sx * 3u + 2u];
+                }
+            }
+            src = scaled;
+        } else {
+            pw = w; ph = h;
+        }
+    }
+    uint8_t* tv_copy = (uint8_t*)malloc((size_t)pw * ph * 3u);
+    if (tv_copy) {
+        memcpy(tv_copy, src, (size_t)pw * ph * 3u);
+        publish_preview_rgb(tv_copy, pw, ph);
+    }
+    size_t psz = 0;
+    uint8_t* ppng = png_encode_rgb(src, pw, ph, &psz);
+    if (ppng && psz > 0) {
+        http_srv_lock();
+        free(g_st.preview_png);
+        g_st.preview_png = ppng;
+        g_st.preview_png_size = psz;
+        g_st.preview_gen_id++;
+        http_srv_unlock();
+    } else {
+        free(ppng);
+    }
+    free(scaled);
+}
+
+static void on_live_preview(void* user, const uint8_t* rgb, uint32_t w, uint32_t h) {
+    (void)user;
+    publish_live_preview(rgb, w, h);
 }
 
 // Dynamic User Presets, Art Styles, Character Presets + TV Gallery + TV Model Manager state
@@ -710,9 +803,13 @@ static void sm_dd_item_label(void* ctx, int row, int i, char* out, size_t cap) {
         if (i >= 0 && i < 4) snprintf(out, cap, "%s", SM_UPSCALE[i]);
         break;
     case ROW_POWER: {
-        int neo_p = 1;
-        http_srv_lock(); neo_p = g_st.neo; http_srv_unlock();
-        sm_power_label(3 - i, neo_p, out, cap);
+        int neo_p = 1, aeco_p = 3;
+        http_srv_lock(); neo_p = g_st.neo; aeco_p = g_job.api_eco_mode; http_srv_unlock();
+        if (i >= 0 && i <= 3) {
+            sm_power_label(3 - i, neo_p, out, cap);
+        } else if (i == 4) {
+            snprintf(out, cap, "API / Bot Power (Discord/A1111): %s   (press X to cycle)", sm_api_eco_short(aeco_p));
+        }
         break;
     }
     case ROW_SEED:
@@ -840,7 +937,7 @@ static void draw_ui(void) {
     http_srv_lock();
     char cur_m[64], stg[128], err[256], pr[1024];
     float prog = g_st.progress, eta_s = g_st.eta_sec, elap_s = g_st.elapsed_sec;
-    int busy = g_st.busy, eco = g_job.eco_mode, ups = g_job.upscale;
+    int busy = g_st.busy, eco = g_job.eco_mode, api_eco = g_job.api_eco_mode, ups = g_job.upscale;
     int neo_v = g_st.neo, has_up_v = g_st.has_upscaler;
     int uim_v = g_job.ui_mode, nsfw_c = g_job.nsfw_allow;
     uint32_t vram_u = g_st.gpu_used_mb, vram_t = g_st.gpu_total_mb;
@@ -1461,7 +1558,7 @@ static void draw_ui(void) {
         sv.prompt = pr;
         sv.neg = neg_buf;
         sv.w = w; sv.h = h; sv.steps = steps; sv.cfg = cfg;
-        sv.sampler = smp_v; sv.upscale = ups; sv.eco = eco;
+        sv.sampler = smp_v; sv.upscale = ups; sv.eco = eco; sv.api_eco = api_eco;
         sv.batch = batch_v; sv.rand_mask = rmask_v;
         sv.batch_folder = bfld_buf; sv.nsfw_allow = nsfw_v; sv.auto_quality = aq_v; sv.auto_face_fix = aff_v;
         sv.shutdown_after = sd_v;
@@ -2398,8 +2495,15 @@ static void* gpu_worker_main(void* arg) {
                 glog("gen start [%u/%u] %s %ux%u steps=%u cfg=%.1f %s %s seed=%llu",
                      bi + 1u, btotal, eng.is_sd15 ? "SD1.5" : "SDXL", p.width, p.height, p.steps, (double)p.cfg_scale,
                      SMP_LOG2[(p.sampler >= 0 && p.sampler <= 3) ? p.sampler : 0], sdxl_eco_name_ex(p.eco_mode, eng.neo), (unsigned long long)seed);
+                eng.preview_fn = on_live_preview;
+                eng.preview_user = NULL;
                 int rc = rgb ? sdxl_generate(&eng, &p, rgb, on_progress, on_cancel, NULL) : -1;
+                eng.preview_fn = NULL;
                 uint32_t out_w = p.width, out_h = p.height;
+                // Show crisp decoded VAE image immediately before Upscale & FaceFix start!
+                if (rc == 0 && rgb && (run_job.upscale > 0 || run_job.auto_face_fix)) {
+                    publish_live_preview(rgb, out_w, out_h);
+                }
                 if (rc == 0 && run_job.upscale > 0 && eng.has_upscaler) {
                     uint8_t* up_rgb = NULL;
                     uint32_t uw = 0, uh = 0;
@@ -2411,6 +2515,8 @@ static void* gpu_worker_main(void* arg) {
                         out_w = uw;
                         out_h = uh;
                         eng.last_gen_sec += eng.stats.upscale_ms / 1000.0;
+                        // Show crisp upscaled image immediately while FaceFix runs!
+                        if (run_job.auto_face_fix) publish_live_preview(rgb, out_w, out_h);
                     } else if (ur == 1) {
                         rc = 1;
                     }
@@ -2719,16 +2825,20 @@ int main(void) {
     g_job.batch_count = 1;
     g_job.nsfw_allow = 0;    // Default: SFW Guard ON
     g_job.auto_quality = 1;  // Default: Auto-Quality & Hand/Eye Shield ON
-    g_job.auto_face_fix = 1; // Default: Automatic ADetailer Face Fix ON
+    g_job.auto_face_fix = 1; // Default: Automatic ADetailer Face Fix ON (Studio)
+    g_job.api_face_fix = load_api_ff_cfg(); // Default: OFF for SDXL/Illustrious API calls unless requested
     g_job.ui_mode = load_ui_mode_cfg(); // -1 = show 2-choice Welcome Screen, 0 = Easy, 1 = Advanced
     g_st.nsfw_allow = 0;
     g_st.auto_quality = 1;
     g_st.auto_face_fix = 1;
+    g_st.api_face_fix = g_job.api_face_fix;
     g_st.ui_mode = g_job.ui_mode;
     g_st.neo = sceKernelIsNeoMode();
     g_st.busy = 1;
     g_job.eco_mode = g_st.neo ? 2 : 1;
     g_st.eco_mode = g_job.eco_mode;
+    g_job.api_eco_mode = load_api_eco_cfg();
+    g_st.api_eco_mode = g_job.api_eco_mode;
     snprintf(g_st.stage, sizeof(g_st.stage), "Initializing PS4 GPU & loading checkpoint in background...");
 
     http_srv_start(&g_job, &g_st);
@@ -3440,7 +3550,22 @@ int main(void) {
                 case ROW_POWER:
                     if (sel >= 0 && sel <= 3) {
                         int eco_val = 3 - sel;
-                        http_srv_lock(); g_job.eco_mode = eco_val; g_st.eco_mode = eco_val; http_srv_unlock();
+                        http_srv_lock(); g_job.eco_mode = eco_val; g_st.eco_mode = eco_val; g_st.settings_seq++; http_srv_unlock();
+                    } else if (sel == 4) {
+                        int next_ae = 3;
+                        http_srv_lock();
+                        if (g_job.api_eco_mode == 3) next_ae = 2;
+                        else if (g_job.api_eco_mode == 2) next_ae = 1;
+                        else if (g_job.api_eco_mode == 1) next_ae = 0;
+                        else if (g_job.api_eco_mode == 0) next_ae = -1;
+                        else next_ae = 3;
+                        g_job.api_eco_mode = next_ae;
+                        g_st.api_eco_mode = next_ae;
+                        g_st.settings_seq++;
+                        http_srv_unlock();
+                        save_api_eco_cfg(next_ae);
+                        snprintf(toast, sizeof(toast), "API / Bot Power: %s", sm_api_eco_short(next_ae));
+                        sm_dd_open = 1;
                     }
                     break;
                 case ROW_SEED:
@@ -3935,7 +4060,7 @@ int main(void) {
                     break;
                 case ROW_POWER:
                     sm_dd_row = ROW_POWER;
-                    sm_dd_n = 4;
+                    sm_dd_n = 5;
                     http_srv_lock(); sm_dd_cur = 3 - g_job.eco_mode; http_srv_unlock();
                     if (sm_dd_cur < 0 || sm_dd_cur > 3) sm_dd_cur = 1;
                     sm_dd_sel = sm_dd_cur;

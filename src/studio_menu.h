@@ -80,7 +80,7 @@ typedef struct {
     const char* neg;
     uint32_t w, h, steps;
     float cfg;
-    int sampler, upscale, eco;
+    int sampler, upscale, eco, api_eco;
     uint32_t batch, rand_mask;
     int shutdown_after, nsfw_allow, auto_quality, auto_face_fix;
     const char* batch_folder;
@@ -101,6 +101,16 @@ static const char* sm_power_note(int eco) {
         case 2: return "default, calm fan";
         case 1: return "faster, warmer";
         default: return "fastest, LOUD";
+    }
+}
+
+static const char* sm_api_eco_short(int api_eco) {
+    switch (api_eco) {
+        case 3: return "Silent (whisper quiet)";
+        case 2: return "Quiet";
+        case 1: return "Balanced";
+        case 0: return "Turbo";
+        default: return "Follow Studio";
     }
 }
 
@@ -202,9 +212,12 @@ static void sm_row_value(const StudioView* v, int row, char* out, size_t cap, fl
     case ROW_UPSCALE:
         snprintf(out, cap, "%s", SM_UPSCALE[(v->upscale >= 0 && v->upscale <= 3) ? v->upscale : 0]);
         break;
-    case ROW_POWER:
-        sm_power_label(v->eco, v->neo, out, cap);
+    case ROW_POWER: {
+        char pl[96];
+        sm_power_label(v->eco, v->neo, pl, sizeof(pl));
+        snprintf(out, cap, "%s  ·  API: %s", pl, sm_api_eco_short(v->api_eco));
         break;
+    }
     case ROW_SEED:
         if (v->seed) snprintf(out, cap, "Locked  ·  %llu", (unsigned long long)v->seed);
         else if (v->last_seed) snprintf(out, cap, "Random each time  ·  last %llu", (unsigned long long)v->last_seed);

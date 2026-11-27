@@ -390,6 +390,10 @@ textarea{min-height:68px;resize:vertical}
           <input id="autoff" type="checkbox" checked style="width:auto;margin:0;accent-color:#3fa9f5" onchange="pushSettings()">
           <span>✨ Auto Face Fix</span>
         </label>
+        <label style="margin:0;display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:#c4b5fd;font-size:11px" title="Run Auto Face Fix on SDXL/Illustrious API &amp; Discord bot calls even when ADetailer is not requested">
+          <input id="apiff" type="checkbox" style="width:auto;margin:0;accent-color:#a78bfa" onchange="pushSettings();toast('API FaceFix (SDXL/Illustrious): '+(this.checked?'ON':'OFF (on-demand only)'))">
+          <span>🤖 API FaceFix</span>
+        </label>
       </span>
     </label>
     <textarea id="ng" name="negative_prompt" autocomplete="off" style="min-height:92px" oninput="onPromptEdited()">lowres, bad anatomy, bad hands, extra digits, fewer digits, blurry, worst quality, low quality</textarea>
@@ -472,13 +476,24 @@ textarea{min-height:68px;resize:vertical}
       <div class="adv-stage-ctl" style="display:flex;flex-direction:column;gap:6px">
         <div class="row">
           <div><label>GPU Power / Fan</label>
-            <select id="eco" name="eco" autocomplete="off">
+            <select id="eco" name="eco" autocomplete="off" onchange="pushSettings()">
               <option value="3">Silent (~12CU · 33% · Whisper Cool)</option>
               <option value="2" selected>Quiet (~16CU · 44% · Default)</option>
               <option value="1">Balanced (~25CU · 70%)</option>
               <option value="0">Turbo (36CU · 100% · Loud)</option>
             </select>
           </div>
+          <div><label>API / Bot Power (Discord/A1111)</label>
+            <select id="apieco" name="apieco" autocomplete="off" onchange="pushSettings();toast('Saved API / Bot Power: '+this.options[this.selectedIndex].text.split(' (')[0])">
+              <option value="3" selected>Silent (Whisper Cool · Default)</option>
+              <option value="2">Quiet (Calm Fan)</option>
+              <option value="1">Balanced (Faster · Warmer)</option>
+              <option value="0">Turbo (100% CUs · Loud)</option>
+              <option value="-1">Follow Studio Power</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
           <div><label>AI Upscaler (RealESRGAN)</label>
             <select id="ups" name="ups" autocomplete="off" onchange="checkUpscaleGuard();updateProfileHighlight()">
               <option value="0">Off (Native)</option>
@@ -1024,7 +1039,7 @@ textarea{min-height:68px;resize:vertical}
 <div id="toast"></div>
 
 <script>
-let lastId=0,lastGalRev=0,galPage=0,galPageSize=24,galTotal=0,galSelectMode=false,galSelected=new Set(),galSearchTm=null,galReqSeq=0,lastModels='',curModel='',curArch='',lastPreset=null,lastSpeedPreset=null,galItems=[],presetItems=[],styleItems=[],charItems=[],loraItems=[],folderData={all:0,unsorted:0,starred:0,folders:[]},curGalFolder='',modalIdx=-1,lastStatus=null,switchingModel=false,pendingModel='',lastNeo=null,dlLastFin=0,mdlMgrData=null,loraMgrData=null,hydratedFromServer=false,lastSettingsSeq=0,nsfwAllow=false,uiMode=1,uiModeInitialized=false,starterAutoShown=false,easyFraming='full',easyQuality='best',easyCharId='',lastInsertedCharPr='',lastInsertedCharNg='',recentFilm=[];
+let lastId=0,lastPreviewId=0,lastGalRev=0,galPage=0,galPageSize=24,galTotal=0,galSelectMode=false,galSelected=new Set(),galSearchTm=null,galReqSeq=0,lastModels='',curModel='',curArch='',lastPreset=null,lastSpeedPreset=null,galItems=[],presetItems=[],styleItems=[],charItems=[],loraItems=[],folderData={all:0,unsorted:0,starred:0,folders:[]},curGalFolder='',modalIdx=-1,lastStatus=null,switchingModel=false,pendingModel='',lastNeo=null,dlLastFin=0,mdlMgrData=null,loraMgrData=null,hydratedFromServer=false,lastSettingsSeq=0,nsfwAllow=false,uiMode=1,uiModeInitialized=false,starterAutoShown=false,easyFraming='full',easyQuality='best',easyCharId='',lastInsertedCharPr='',lastInsertedCharNg='',recentFilm=[];
 
 const KNOWN_TRIGGERS={
   'better_eyes_detail-000009':'better_eyes',
@@ -1684,7 +1699,10 @@ async function pushSettings(){
     nsfw_allow:nsfwAllow?1:0,
     auto_quality:document.getElementById('autoq').checked?1:0,
     auto_face_fix:document.getElementById('autoff').checked?1:0,
+    api_face_fix:document.getElementById('apiff').checked?1:0,
     ui_mode:uiMode,
+    eco:+eco.value,
+    api_eco:+document.getElementById('apieco').value,
     rand_mask:getRandMask(),
     folder:document.getElementById('bfolder').value||''
   };
@@ -1900,6 +1918,9 @@ function syncSettingsFromStatus(d,forceAll){
     document.getElementById('autoff').checked=!!d.auto_face_fix;
     const ezFf=document.getElementById('ez-autoff');if(ezFf)ezFf.checked=!!d.auto_face_fix;
   }
+  if(d.api_face_fix!==undefined&&forceAll){
+    const af=document.getElementById('apiff');if(af)af.checked=!!d.api_face_fix;
+  }
   if(c.prompt!==undefined)setIfIdle(pr,c.prompt);
   if(c.negative!==undefined)setIfIdle(ng,c.negative);
   if(c.width&&c.height&&(forceAll||document.activeElement!==sz))ensureSizeOption(c.width+'x'+c.height);
@@ -1908,6 +1929,7 @@ function syncSettingsFromStatus(d,forceAll){
   if(c.sampler&&[...smp.options].some(o=>o.value===c.sampler))setIfIdle(smp,c.sampler);
   if(c.upscale!==undefined)setIfIdle(ups,String(c.upscale));
   if(c.eco!==undefined)setIfIdle(eco,String(c.eco));
+  if(d.api_eco_mode!==undefined){const ae=document.getElementById('apieco');if(ae&&(forceAll||document.activeElement!==ae))ae.value=String(d.api_eco_mode);}
   if(c.seed!==undefined)setIfIdle(sd,c.seed);
   if(c.batch_count!==undefined)setIfIdle(bc,c.batch_count);
   if(c.rand_mask!==undefined&&forceAll)setRandMaskUI(c.rand_mask);
@@ -2412,6 +2434,7 @@ async function gen(override){
     nsfw_allow:nsfwAllow?1:0,
     auto_quality:document.getElementById('autoq').checked?1:0,
     auto_face_fix:document.getElementById('autoff').checked?1:0,
+    api_face_fix:document.getElementById('apiff').checked?1:0,
     shutdown_after:!!sdwn.checked,eco:+eco.value,sampler_name:smp.value,upscale:+ups.value
   },override||{});
   const r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -3427,7 +3450,7 @@ async function poll(){
       loadGallery(false);
     }
     if(d.has_image&&d.image_gen_id!==lastId){
-      lastId=d.image_gen_id;const u='/image.png?t='+lastId;
+      lastId=d.image_gen_id;if(d.preview_id)lastPreviewId=d.preview_id;const u='/image.png?t='+lastId;
       img.src=u;img.style.display='block';ph.style.display='none';
       document.getElementById('qbar').style.display='flex';dl.href=u;
       if(d.last_gallery_id&&!recentFilm.includes(d.last_gallery_id)){
@@ -3436,6 +3459,9 @@ async function poll(){
       }
       loadFolders();
       loadGallery(true);
+    }else if(d.busy&&d.preview_id&&d.preview_id!==lastPreviewId){
+      lastPreviewId=d.preview_id;
+      img.src='/preview.png?p='+lastPreviewId;img.style.display='block';ph.style.display='none';
     }
     if(document.getElementById('pg-models').classList.contains('active')||document.getElementById('starter-modal').classList.contains('open')||hasNoModels||(mdlMgrData&&mdlMgrData.download&&mdlMgrData.download.active)){loadModelsMgr();loadLoras();}
   }catch(e){}

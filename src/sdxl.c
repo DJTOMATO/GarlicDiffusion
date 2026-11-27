@@ -4167,6 +4167,8 @@ int sdxl_upscale_rgb(SdxlEngine* e, const uint8_t* src_rgb, uint32_t src_w, uint
     return 0;
 }
 
+static void emit_latent_preview(SdxlEngine* e, const float* x0, uint32_t H, uint32_t W);
+
 static int sdxl_generate_internal(SdxlEngine* e, const SdxlParams* p, const uint8_t* init_rgb, float denoise,
                                   uint8_t* rgb_out, SdxlProgressFn progress, SdxlCancelFn cancel, void* user) {
     uint32_t W = p->width, H = p->height;
@@ -4387,6 +4389,7 @@ static int sdxl_generate_internal(SdxlEngine* e, const SdxlParams* p, const uint
             for (size_t i = 0; i < lat_n; i++) {
                 float eps = eu ? ((eu[i] + cfg * (ec[i] - eu[i])) * cfg_rescale) : ec[i];
                 float x0 = lat[i] - sigma * eps;
+                old_denoised[i] = x0;
                 lat[i] = (sigma_next > 0.0f) ? (x0 + c_eps * eps + c_z * noise[i]) : x0;
             }
         } else {
@@ -4403,10 +4406,12 @@ static int sdxl_generate_internal(SdxlEngine* e, const SdxlParams* p, const uint
             if (sigma_up > 0.0f) rng_randn(&rng, noise, lat_n);
             for (size_t i = 0; i < lat_n; i++) {
                 float eps = eu ? (eu[i] + cfg * (ec[i] - eu[i])) : ec[i];
+                old_denoised[i] = lat[i] - sigma * eps;
                 lat[i] += eps * dt;
                 if (sigma_up > 0.0f) lat[i] += noise[i] * sigma_up;
             }
         }
+        emit_latent_preview(e, old_denoised, H, W);
     }
 
     e->stats.unet_total_ms = (now_sec(e) - tu_start) * 1000.0;
@@ -4448,6 +4453,47 @@ static int sdxl_generate_internal(SdxlEngine* e, const SdxlParams* p, const uint
 
     if (progress) progress(user, 1.00f, "Done");
     return 0;
+}
+
+static void emit_latent_preview(SdxlEngine* e, const float* x0, uint32_t H, uint32_t W) {
+    if (!e || !e->preview_fn || !x0) return;
+    uint32_t lh = H / 8u, lw = W / 8u;
+    size_t npix = (size_t)lh * lw;
+    uint8_t* rgb = (uint8_t*)malloc(npix * 3u);
+    if (!rgb) return;
+    // Standard SDXL / SD 1.5 latent-to-RGB 4x3 linear projection (<0.5ms on CPU, 0 GPU cost)
+    static const float SDXL_M[4][3] = {
+        { 0.3448f,  0.4168f,  0.4395f},
+        {-0.1953f, -0.0290f,  0.0250f},
+        { 0.1074f,  0.0886f, -0.0163f},
+        {-0.3730f, -0.2499f, -0.2088f}
+    };
+    static const float SDXL_B[3] = {-0.0685f, 0.0072f, 0.0598f};
+    static const float SD15_M[4][3] = {
+        { 0.3512f,  0.2297f,  0.3227f},
+        { 0.3250f, -0.4974f, -0.2350f},
+        {-0.2829f,  0.1762f,  0.2721f},
+        {-0.2120f, -0.2616f, -0.7177f}
+    };
+    static const float SD15_B[3] = {-0.0397f, 0.0211f, 0.0432f};
+    const float (*M)[3] = e->is_sd15 ? SD15_M : SDXL_M;
+    const float* B = e->is_sd15 ? SD15_B : SDXL_B;
+    const float* c0 = x0;
+    const float* c1 = x0 + npix;
+    const float* c2 = x0 + npix * 2u;
+    const float* c3 = x0 + npix * 3u;
+    for (size_t i = 0; i < npix; i++) {
+        float v0 = c0[i], v1 = c1[i], v2 = c2[i], v3 = c3[i];
+        for (int ch = 0; ch < 3; ch++) {
+            float v = v0 * M[0][ch] + v1 * M[1][ch] + v2 * M[2][ch] + v3 * M[3][ch] + B[ch];
+            v = (v + 1.0f) * 127.5f;
+            if (v < 0.0f) v = 0.0f;
+            else if (v > 255.0f) v = 255.0f;
+            rgb[i * 3u + (size_t)ch] = (uint8_t)(v + 0.5f);
+        }
+    }
+    e->preview_fn(e->preview_user, rgb, lw, lh);
+    free(rgb);
 }
 
 int sdxl_generate(SdxlEngine* e, const SdxlParams* p, uint8_t* rgb_out,

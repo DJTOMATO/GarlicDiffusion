@@ -7,6 +7,7 @@
 
 typedef void (*SdxlProgressFn)(void* user, float frac, const char* msg);
 typedef int (*SdxlCancelFn)(void* user);
+typedef void (*SdxlPreviewFn)(void* user, const uint8_t* rgb, uint32_t w, uint32_t h);
 
 typedef struct {
     char name[96];
@@ -134,6 +135,8 @@ typedef struct {
     double   rt_tile_avg_sec;
 
     SdxlStats stats;
+    SdxlPreviewFn preview_fn;
+    void* preview_user;
     char model_name[64];
     char model_dir[256];
     char applied_lora_spec[384];

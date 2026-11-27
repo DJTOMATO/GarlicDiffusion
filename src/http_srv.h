@@ -19,7 +19,8 @@ typedef struct {
     uint32_t steps;
     float cfg;
     uint64_t seed;
-    int eco_mode;   // 0=Turbo(36CU), 1=Balanced(25CU), 2=Quiet(20CU), 3=Silent(14CU)
+    int eco_mode;     // 0=Turbo(36CU), 1=Balanced(25CU), 2=Quiet(20CU), 3=Silent(14CU)
+    int api_eco_mode; // Power mode for A1111/OpenAI API & Discord bot calls: -1=Follow Studio, 0..3 (default 3=Silent)
     int sampler;    // 0=Euler a, 1=Euler, 2=LCM, 3=DPM++ 2M Karras
     int upscale;    // 0=Off, 1=1080p Anime (RealESRGAN), 2=2x Anime HD, 3=4K UHD (up to 3840x2160)
     uint32_t batch_count;     // 1..100 sequential images with fresh random seeds
@@ -28,6 +29,7 @@ typedef struct {
     int nsfw_allow;           // 0 = SFW guard ON (default), 1 = NSFW allowed (unrestricted)
     int auto_quality;         // 1 = Auto-Quality & Hand/Eye Shield ON (default)
     int auto_face_fix;        // 1 = Automatic ADetailer Face Fix (img2img crop) on full-body/SD1.5 shots (default ON)
+    int api_face_fix;         // 0 = OFF by default for SDXL/Illustrious API calls unless requested (ADetailer/auto_face_fix), 1 = ON
     int ui_mode;              // -1 = Unset (show 2-choice welcome), 0 = Easy Mode, 1 = Advanced Mode
     int shutdown_after;       // 1 = cleanly power off PS4 after batch finishes
     int pending;
@@ -57,6 +59,7 @@ typedef struct {
     int temp_c;
     int temp_peak_c;
     int eco_mode;
+    int api_eco_mode;
     uint32_t gpu_used_mb;
     uint32_t gpu_total_mb;
     float progress;
@@ -92,6 +95,9 @@ typedef struct {
     uint8_t* png_data;
     size_t png_size;
     uint32_t image_gen_id;
+    uint8_t* preview_png;
+    size_t preview_png_size;
+    uint32_t preview_gen_id;
     uint32_t batch_cur;
     uint32_t batch_total;
     int shutdown_after;
@@ -110,7 +116,7 @@ typedef struct {
     float cur_cfg;
     uint64_t cur_seed;
     int cur_sampler, cur_upscale, cur_eco;
-    int nsfw_allow, auto_quality, auto_face_fix, ui_mode;
+    int nsfw_allow, auto_quality, auto_face_fix, api_face_fix, ui_mode;
     char cur_folder[64];
 } DiffStatus;
 
