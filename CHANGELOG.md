@@ -7,9 +7,7 @@ All notable changes to **GarlicDiffusion** (Native SD 1.5 & SDXL on PS4 / PS4 Pr
 ## [v1.17] — 2026-11-27
 
 ### Smart NSFW / SFW Prompt Conflict Sanitizer (Backend + Web UI)
-- **Automatic Negative Prompt NSFW Stripping:** When **NSFW Mode** is enabled, core NSFW/adult/ecchi blocking keywords (including weighted `((nsfw:1.4))` and `rating: explicit` / `rating: questionable` / `rating: sensitive` forms) are automatically removed from the negative prompt across Web UI, PS4 TV Studio, Batch Randomizer, and A1111 API — while preserving non-conflicting negatives like `censored`, `mosaic censoring`, and `bad hands`.
 - **Positive-vs-Negative Conflict Resolution:** If an NSFW or ecchi keyword (or part of a tag, e.g. `black lace lingerie`, `bikini`, `cleavage`) appears in the positive prompt, any matching tag is automatically deleted from the negative prompt.
-- **Automatic SFW Tag Stripping:** When NSFW/ecchi tags are present in the positive prompt while NSFW Mode is ON, conflicting SFW rating tags (`sfw`, `rating: safe`, `rating: general`, `rating: sfw`, `safe for work`) are stripped from the positive prompt without touching unrelated phrases (e.g. `safety pin`).
 - **Live Web UI Cleanup:** Toggling NSFW Mode ON, clicking Clean Dupes, applying presets, or loading SFW gallery images to Studio immediately cleans stale SFW guard tags from the prompt fields.
 
 ---

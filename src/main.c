@@ -2793,18 +2793,57 @@ static void* gpu_worker_main(void* arg) {
                 }
                 http_srv_unlock();
                 if (!aborted) {
+                    http_srv_lock();
+                    snprintf(g_st.stage, sizeof(g_st.stage), "Flushing HDD & powering off PS4...");
+                    g_st.progress = 1.0f;
+                    http_srv_unlock();
                     glog("auto-shutdown: flushing RAM staging buffer and HDD before powering off PS4...");
                     gallery_stage_flush_all();
                     sync();
                     sceKernelUsleep(500000);
-                    OrbisKernelEventFlag evf = NULL;
-                    if (sceKernelOpenEventFlag(&evf, "SceSysCoreReboot") == 0 && evf) {
-                        sceKernelSetEventFlag(evf, 0x4000);
-                        sceKernelCloseEventFlag(evf);
+
+                    // Method 1: Official SystemStateMgrTurnOff (exported by libSceSystemService.sprx)
+                    extern int sceSystemStateMgrTurnOff(void);
+                    int rc_turnoff = sceSystemStateMgrTurnOff();
+                    glog("auto-shutdown: sceSystemStateMgrTurnOff() -> 0x%08x", (unsigned)rc_turnoff);
+
+                    // Method 2: Dynamic lookup for sceSystemServiceRequestPowerOff (if TurnOff failed)
+                    int rc_reqoff = -1;
+                    if (rc_turnoff != 0) {
+                        int32_t ss_mod = sceKernelLoadStartModule("/system/common/lib/libSceSystemService.sprx", 0, NULL, 0, NULL, NULL);
+                        if (ss_mod >= 0) {
+                            int (*pReqOff)(void) = NULL;
+                            if (sceKernelDlsym(ss_mod, "sceSystemServiceRequestPowerOff", (void**)&pReqOff) == 0 && pReqOff) {
+                                rc_reqoff = pReqOff();
+                                glog("auto-shutdown: sceSystemServiceRequestPowerOff() -> 0x%08x", (unsigned)rc_reqoff);
+                            }
+                        }
                     }
-                    // Fallback: SIGUSR2 (31) to init (PID 1) triggers clean OrbisOS power-off
-                    syscall(37, 1, 31);
-                    for (;;) sceKernelUsleep(500000);
+
+                    // Method 3: Root/jailbroken fallback via SceSysCoreReboot event flag + SIGUSR2 to init (PID 1)
+                    int rc_evf = -1;
+                    long rc_kill = -1;
+                    if (rc_turnoff != 0 && rc_reqoff != 0) {
+                        OrbisKernelEventFlag evf = NULL;
+                        rc_evf = sceKernelOpenEventFlag(&evf, "SceSysCoreReboot");
+                        glog("auto-shutdown: sceKernelOpenEventFlag(SceSysCoreReboot) -> 0x%08x", (unsigned)rc_evf);
+                        if (rc_evf == 0 && evf) {
+                            sceKernelSetEventFlag(evf, 0x4000);
+                            sceKernelCloseEventFlag(evf);
+                        }
+                        rc_kill = syscall(37, 1, 31);
+                        glog("auto-shutdown: kill(1, SIGUSR2) -> %ld", rc_kill);
+                    }
+
+                    // Wait up to 8s for OrbisOS to tear down and power off; never hang forever if blocked
+                    for (int w = 0; w < 16; w++) sceKernelUsleep(500000);
+                    glog("auto-shutdown: console still running after 8s (turnOff=0x%08x reqOff=0x%08x evf=0x%08x kill=%ld)",
+                         (unsigned)rc_turnoff, (unsigned)rc_reqoff, (unsigned)rc_evf, rc_kill);
+                    http_srv_lock();
+                    snprintf(g_st.stage, sizeof(g_st.stage), "Auto-shutdown failed (batch saved safely)");
+                    snprintf(g_st.error, sizeof(g_st.error), "PS4 auto-shutdown rejected (0x%08x) — batch images were saved safely", (unsigned)rc_turnoff);
+                    g_st.busy = 0;
+                    http_srv_unlock();
                 }
             }
         }

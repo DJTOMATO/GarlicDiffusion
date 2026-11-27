@@ -63,7 +63,7 @@ SOURCES = [
 LIBS = [
     "-lc", "-lm", "-lkernel", "-lSceGnmDriver", "-lSceVideoOut", "-lScePad",
     "-lSceUserService", "-lSceSysmodule", "-lSceImeDialog", "-lSceCommonDialog",
-    "-lSceSystemService", "-lSceAppInstUtil", "-lSceNet", "-lSceSsl", "-lSceHttp",
+    "-lSceSystemService", "-lSceSystemStateMgr", "-lSceAppInstUtil", "-lSceNet", "-lSceSsl", "-lSceHttp",
 ]
 
 
