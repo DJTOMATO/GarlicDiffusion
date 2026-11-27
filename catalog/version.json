@@ -2,5 +2,5 @@
   "version": "1.16",
   "pkg_url": "https://github.com/DJTOMATO/GarlicDiffusion/releases/latest/download/Garlic-Diffusion.pkg",
   "size_mb": 7,
-  "changelog": "v1.16: Reworked paginated TV & Web LoRA Manager with Download Queue & Download All, 22 verified compatible LoRAs, strict cross-arch LoRA protection, tuned per-model DMD2 presets (Animagine/NoobAI/Illustrious) & LCM late-step eye stabilization, and full model + settings restore on Gallery Re-Render Variation."
+  "changelog": "v1.16: Live per-step & per-stage previews (TV & Web), Quiet/Silent API Power Mode, exact-request API cache, optional SDXL API FaceFix toggle, /sdapi/v1/sd-modules fix, reworked LoRA Manager with Download Queue (22 LoRAs), tuned DMD2 presets & full Gallery settings restore."
 }

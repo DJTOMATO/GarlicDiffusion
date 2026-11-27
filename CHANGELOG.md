@@ -27,6 +27,13 @@ All notable changes to **GarlicDiffusion** (Native SD 1.5 & SDXL on PS4 / PS4 Pr
 - **Fix Face (TV + Web UI):** Added **`Fix Face (AI Face & Eye Detailer)`** to the PS4 TV Gallery Artwork Actions modal, fixed the error-masking bug (`Gallery operation failed`), added automatic download & Recommended Add-on entries for universal `vae_enc_sdxl.psd1` / `vae_enc_sd15.psd1`, plus built-in **Real-ESRGAN Anime v3 Face-Crop Restoration** fallback when offline.
 - **Active Hardware Thermal Guard (Turbo Safety):** Added real-time `CPU`/`SoC` temperature monitoring inside `block_breather()` and the diffusion loop (`src/sdxl.c`). Automatically steps down CU masks at `>=80 °C` / `>=84 °C` and pauses to actively cool down at `>=86–88 °C` (`<=81–82 °C`) so even Turbo mode can never trigger a PS4 overheating shutdown.
 
+### Live Progressive Previews & Discord / A1111 API Upgrades
+- **Live Per-Step & Per-Stage Previews (PS4 TV + Web UI):** Renders an instant CPU latent-to-RGB preview after every UNet step (`< 0.5 ms`, zero GPU overhead), followed by crisp intermediate previews after VAE decode and Real-ESRGAN Upscale while FaceFix runs (`/preview.png`).
+- **Silent API / Bot Power Mode:** Added a persisted `API / Bot Power` setting (defaults to **Silent** for whisper-quiet unattended Discord/A1111 calls) configurable in both the Web UI and PS4 TV Power Mode menu, without overwriting Studio power mode.
+- **Exact-Request API Cache:** Added a 64-entry LRU gallery-backed cache for `/sdapi/v1/txt2img` and `/v1/images/generations` that returns identical requests immediately with zero GPU work or extra PNG RAM (`POST /cache/clear` or `"no_cache": true` to bypass).
+- **Optional SDXL / Illustrious API FaceFix:** Auto FaceFix now defaults to **OFF** on SDXL/Illustrious API calls unless explicitly requested (`ADetailer` / `auto_face_fix: true`) or enabled via the new **🤖 API FaceFix** toggle in the Web UI.
+- **Red-DiscordBot (`bz-cogs/aimage`) Compatibility:** Added `/sdapi/v1/sd-modules` (and `hypernetworks`, `face-restorers`, `realesrgan-models`) returning `200 OK` (`[]`) to eliminate autocomplete cache 404 warnings.
+
 ---
 
 ## [v1.15] — Previous Release
