@@ -1,6 +1,6 @@
 {
-  "version": "1.16",
+  "version": "1.17",
   "pkg_url": "https://github.com/DJTOMATO/GarlicDiffusion/releases/latest/download/Garlic-Diffusion.pkg",
   "size_mb": 7,
-  "changelog": "v1.16: Live per-step & per-stage previews (TV & Web), Quiet/Silent API Power Mode, exact-request API cache, optional SDXL API FaceFix toggle, /sdapi/v1/sd-modules fix, reworked LoRA Manager with Download Queue (22 LoRAs), tuned DMD2 presets & full Gallery settings restore."
+  "changelog": "v1.17: Automatic NSFW/SFW prompt conflict sanitizer (strips NSFW tags from negative when NSFW Mode is ON, deletes positive-vs-negative ecchi conflicts, and removes SFW tags from positive when NSFW is present) + all v1.16 live previews, Silent API Power, API cache, LoRA queue & thermal guard."
 }

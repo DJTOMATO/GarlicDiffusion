@@ -1777,7 +1777,7 @@ int app_update_prepare_and_exit(char* out_msg, size_t max_msg) {
 }
 #else
 int app_update_check_now(void) {
-    return apply_version_json("{\"version\":\"1.17\",\"pkg_url\":\"" DEFAULT_OTA_PKG_URL "\",\"size_mb\":7,\"changelog\":\"Test OTA update\"}");
+    return apply_version_json("{\"version\":\"1.18\",\"pkg_url\":\"" DEFAULT_OTA_PKG_URL "\",\"size_mb\":7,\"changelog\":\"Test OTA update\"}");
 }
 int app_update_download_pkg(void) { return -1; }
 int app_update_prepare_and_exit(char* out_msg, size_t max_msg) {

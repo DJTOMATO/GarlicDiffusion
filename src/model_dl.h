@@ -14,7 +14,7 @@
 #define GITHUB_VERSION_URL "https://raw.githubusercontent.com/DJTOMATO/GarlicDiffusion/main/catalog/version.json"
 #define DEFAULT_OTA_PKG_URL "https://github.com/DJTOMATO/GarlicDiffusion/releases/latest/download/Garlic-Diffusion.pkg"
 #define OTA_PKG_DEST       "/data/pkg/Garlic-Diffusion.pkg"
-#define GD_APP_VERSION     "1.16"
+#define GD_APP_VERSION     "1.17"
 
 typedef struct {
     char id[64];

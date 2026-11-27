@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Garlic Diffusion v1.16 · PS4 Pro Studio</title>
+<title>Garlic Diffusion v1.17 · PS4 Pro Studio</title>
 <style>
 :root{--bg:#060e1f;--panel:#08152c;--card:#0e1d3a;--border:#1c3358;--border-hi:#2a4672;--accent:#0070d1;--accent-hi:#3fa9f5;--accent2:#3ddc97;--danger:#ff6b76;--warn:#fbbf24;--text:#e8effa;--muted:#a3b5d2}
 *{box-sizing:border-box}
@@ -784,7 +784,7 @@ textarea{min-height:68px;resize:vertical}
 <!-- TAB 5: CREDITS, LINEAGE & LICENSES -->
 <div class="page" id="pg-credits">
   <div class="pbox" style="background:linear-gradient(135deg,#0e1d3a,#0c2238);border-color:var(--border-hi)">
-    <h2 style="font-size:18px;color:#fff;margin-bottom:5px">GarlicDiffusion v1.16 · Open-Source GNU GPLv3</h2>
+    <h2 style="font-size:18px;color:#fff;margin-bottom:5px">GarlicDiffusion v1.17 · Open-Source GNU GPLv3</h2>
     <div style="font-size:13px;color:var(--muted);line-height:1.5">
       Native PS4 &amp; PS4 Pro anime studio (SD 1.5, SDXL / Illustrious, 0-VRAM LoRAs &amp; Real-ESRGAN), built upon <b>Leonardo Alegría's <a href="https://garlicllm.dev" target="_blank" rel="noopener" style="color:var(--accent-hi)">Garlic LLM</a></b> bare-metal GCN compute foundation.
     </div>
@@ -842,7 +842,7 @@ textarea{min-height:68px;resize:vertical}
     <div class="pbox">
       <h2>PS4 App Updates (GitHub OTA → <code>/data/pkg</code>)</h2>
       <div id="cred-ota-stat" style="font-size:12.5px;color:var(--muted);margin-bottom:10px">
-        Installed version: <b>v1.16</b>. Checks <code>DJTOMATO/GarlicDiffusion</code> on GitHub automatically and downloads updates straight to <code>/data/pkg/Garlic-Diffusion.pkg</code>.
+        Installed version: <b>v1.17</b>. Checks <code>DJTOMATO/GarlicDiffusion</code> on GitHub automatically and downloads updates straight to <code>/data/pkg/Garlic-Diffusion.pkg</code>.
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn sec sm" onclick="checkOtaNow()">🔄 Check GitHub for Updates</button>
@@ -981,7 +981,7 @@ textarea{min-height:68px;resize:vertical}
   <div class="wbox">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
       <div>
-        <h2 style="margin:0;font-size:22px;color:#fff">Welcome to Garlic <span style="color:var(--accent-hi)">Diffusion</span> v1.16</h2>
+        <h2 style="margin:0;font-size:22px;color:#fff">Welcome to Garlic <span style="color:var(--accent-hi)">Diffusion</span> v1.17</h2>
         <div style="font-size:13px;color:var(--muted);margin-top:4px">Choose your workspace style — you can switch between Easy and Advanced anytime in 1 click!</div>
       </div>
       <span class="badge">PS4 / PS4 Pro Native GPU</span>
@@ -1092,7 +1092,7 @@ textarea{min-height:68px;resize:vertical}
 </div>
 
 <div class="app-foot">
-  <span><b>GarlicDiffusion v1.16</b> · GPLv3 (No Warranty) · Built upon <a href="https://github.com/leonardo-alegria/garlic-llm" target="_blank" style="color:#66b8ff;text-decoration:none">Garlic LLM</a></span>
+  <span><b>GarlicDiffusion v1.17</b> · GPLv3 (No Warranty) · Built upon <a href="https://github.com/leonardo-alegria/garlic-llm" target="_blank" style="color:#66b8ff;text-decoration:none">Garlic LLM</a></span>
   <span>Use Quiet/Silent mode for long sessions · Ensure clear PS4 ventilation · Use at your own risk · Report bugs on <a href="https://github.com/DJTOMATO/GarlicDiffusion/issues" target="_blank" rel="noopener" style="color:#66b8ff;text-decoration:none">GitHub</a> / <a href="https://discord.gg/Gbyq3kpGjc" target="_blank" rel="noopener" style="color:#99aaff;text-decoration:none">Discord</a></span>
 </div>
 <div id="toast"></div>
@@ -1648,17 +1648,17 @@ function syncOtaUI(d){
   const cstat=document.getElementById('cred-ota-stat');
   if(cstat){
     if(u.pkg_ready)cstat.innerHTML=`✅ Update package downloaded to <code>/data/pkg/Garlic-Diffusion.pkg</code>! Click <b>Open Update &amp; Installer Panel</b> to close the app &amp; install.`;
-    else if(u.available)cstat.innerHTML=`🎉 <b>New release v${u.remote}</b> is available on GitHub (installed: v${u.current||'1.16'})!`;
-    else if(u.checked)cstat.innerHTML=`✅ Up to date: <b>v${u.current||'1.16'}</b> (latest on GitHub: v${u.remote||u.current||'1.16'}).`;
+    else if(u.available)cstat.innerHTML=`🎉 <b>New release v${u.remote}</b> is available on GitHub (installed: v${u.current||'1.17'})!`;
+    else if(u.checked)cstat.innerHTML=`✅ Up to date: <b>v${u.current||'1.17'}</b> (latest on GitHub: v${u.remote||u.current||'1.17'}).`;
   }
   const sum=document.getElementById('ota-summary');
   if(sum){
     if(u.pkg_ready){
       sum.innerHTML=`✅ <b>/data/pkg/Garlic-Diffusion.pkg</b> is downloaded and ready!<br>Click <b>🚪 Close PS4 App to Install PKG</b> below, then install <code>Garlic-Diffusion.pkg</code> from <b>GoldHEN → Package Installer</b>.`;
     }else if(u.available){
-      sum.innerHTML=`🎉 A newer version <b>v${u.remote}</b> (~${u.size_mb||7} MiB) is available on GitHub! (Currently running: <b>v${u.current||'1.16'}</b>)`;
+      sum.innerHTML=`🎉 A newer version <b>v${u.remote}</b> (~${u.size_mb||7} MiB) is available on GitHub! (Currently running: <b>v${u.current||'1.17'}</b>)`;
     }else{
-      sum.innerHTML=`Current version: <b>v${u.current||'1.16'}</b>${u.remote?` · GitHub latest: <b>v${u.remote}</b>`:''}. You can download or re-stage the latest GitHub release directly into <code>/data/pkg/Garlic-Diffusion.pkg</code> anytime.`;
+      sum.innerHTML=`Current version: <b>v${u.current||'1.17'}</b>${u.remote?` · GitHub latest: <b>v${u.remote}</b>`:''}. You can download or re-stage the latest GitHub release directly into <code>/data/pkg/Garlic-Diffusion.pkg</code> anytime.`;
     }
   }
   const chg=document.getElementById('ota-chg');
@@ -1693,7 +1693,7 @@ async function checkOtaNow(){
   const d=r?await r.json().catch(()=>({})):{};
   await poll();
   if(d.available)toast('⬆️ Update v'+d.remote+' is available!');
-  else if(d.checked)toast('✅ GarlicDiffusion v'+(d.current||'1.16')+' is up to date!');
+  else if(d.checked)toast('✅ GarlicDiffusion v'+(d.current||'1.17')+' is up to date!');
   else toast('Could not reach GitHub right now');
 }
 async function startOtaDownload(){

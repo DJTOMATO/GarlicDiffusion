@@ -47,7 +47,7 @@ CFLAGS = [
 ENV = dict(os.environ, DOTNET_ROLL_FORWARD="Major", OO_PS4_TOOLCHAIN=str(OO),
            DOTNET_SYSTEM_GLOBALIZATION_INVARIANT="1")
 
-TITLE, VERSION, TITLE_ID = "GarlicDiffusion", "01.16", "PSAI00003"
+TITLE, VERSION, TITLE_ID = "GarlicDiffusion", "01.17", "PSAI00003"
 CONTENT_ID = f"IV0000-{TITLE_ID}_00-PS4LOCALAIDIFF03"
 REMOTE = "/data/pkg/Garlic-Diffusion.pkg"
 
